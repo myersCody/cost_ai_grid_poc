@@ -231,13 +231,22 @@ checking and the 60-second processing SLA.
    update inventory but generate no metering. Billable states defined in
    `metering/billable.go` for both VMs and clusters.
 
+4. **Project entity** — `inventory_project` table with tenant field.
+   Watcher handles Project CREATED/UPDATED events from the Watch stream.
+   Reconciler syncs projects from OSAC on startup. Establishes the
+   Tenant → Project → Resource hierarchy from the requirements.
+
+5. **Cluster metering** — `cluster_uptime_seconds` and
+   `cluster_worker_node_seconds` meters. Worker node seconds are
+   calculated as SUM(node_set_size × duration) across all node sets
+   parsed from the cluster's `node_sets` JSONB. Billable states:
+   CLUSTER_STATE_READY, CLUSTER_STATE_PROGRESSING.
+
 ### Remaining Gaps
 
 | Gap | Effort | Notes |
 |---|---|---|
-| **Project entity** | Small | Add `projects` table, FK on resources, sync from OSAC |
-| **CloudEvents envelope** | Small | Parse standard CE wrapper; low priority since Watch stream works |
-| **Cluster metering** | Small | Add cluster-specific meters (`cluster_uptime_seconds`, `cluster_worker_node_seconds`) to the metering sweep — same pattern as VM metering, just different meters |
+| **CloudEvents envelope** | Small | Parse standard CE wrapper; deferred — Watch stream works for PoC |
 
 ### What's Next (beyond req #1)
 
