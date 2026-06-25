@@ -139,10 +139,12 @@ payload). The requirements define CloudEvents 1.0 format with `specversion`,
 
 CloudEvents is an interoperability standard — a standardized envelope around
 the same data. For the PoC, the Watch stream works and provides the same
-information. The CloudEvents envelope becomes important when:
-- Kafka is introduced as transport (Kafka messages would be CloudEvents)
-- Other consumers need to process the same events
-- The metering collector starts producing events in CloudEvents format
+information. The CloudEvents envelope would become important if Kafka is
+introduced as transport, but we argue against Kafka for this use case — see
+[ADR-002: Arguments Against Kafka](decisions/002-arguments-against-kafka.md).
+The gRPC Watch stream + List reconciliation pattern (the proven Kubernetes
+controller pattern) provides the same delivery guarantees with no additional
+infrastructure.
 
 **What's needed:**
 
