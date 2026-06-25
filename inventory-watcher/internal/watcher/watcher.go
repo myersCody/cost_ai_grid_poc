@@ -49,7 +49,12 @@ func (w *Watcher) Run(ctx context.Context) error {
 }
 
 func (w *Watcher) handleEvent(ctx context.Context, event osac.Event) error {
-	w.logger.Info("received event", "id", event.ID, "type", event.Type, "resource", eventResourceType(event))
+	resourceType := eventResourceType(event)
+	w.logger.Info("received event", "id", event.ID, "type", event.Type, "resource", resourceType)
+
+	if err := w.storeRawEvent(ctx, event, resourceType); err != nil {
+		w.logger.Error("failed to store raw event", "error", err, "id", event.ID)
+	}
 
 	switch event.Type {
 	case osac.EventTypeCreated, osac.EventTypeUpdated:
@@ -60,6 +65,59 @@ func (w *Watcher) handleEvent(ctx context.Context, event osac.Event) error {
 		w.logger.Warn("unknown event type", "type", event.Type)
 		return nil
 	}
+}
+
+func (w *Watcher) storeRawEvent(ctx context.Context, event osac.Event, resourceType string) error {
+	resourceID, tenantID, eventTime := extractEventMeta(event)
+
+	dataJSON, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.store.InsertRawEvent(ctx, inventory.RawEvent{
+		EventID:      event.ID,
+		EventType:    event.Type,
+		EventSource:  "osac.fulfillment-service",
+		EventTime:    eventTime,
+		TenantID:     tenantID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Data:         dataJSON,
+	})
+	return err
+}
+
+func extractEventMeta(event osac.Event) (resourceID, tenantID string, eventTime time.Time) {
+	eventTime = time.Now()
+
+	switch {
+	case event.ComputeInstance != nil:
+		resourceID = event.ComputeInstance.ID
+		tenantID = event.ComputeInstance.Metadata.Tenant
+		if event.ComputeInstance.Metadata.CreationTimestamp != nil {
+			eventTime = *event.ComputeInstance.Metadata.CreationTimestamp
+		}
+	case event.Cluster != nil:
+		resourceID = event.Cluster.ID
+		tenantID = event.Cluster.Metadata.Tenant
+		if event.Cluster.Metadata.CreationTimestamp != nil {
+			eventTime = *event.Cluster.Metadata.CreationTimestamp
+		}
+	case event.InstanceType != nil:
+		resourceID = event.InstanceType.ID
+		tenantID = event.InstanceType.Metadata.Tenant
+		if event.InstanceType.Metadata.CreationTimestamp != nil {
+			eventTime = *event.InstanceType.Metadata.CreationTimestamp
+		}
+	case event.Project != nil:
+		resourceID = event.Project.ID
+		tenantID = event.Project.Metadata.Tenant
+	case event.Tenant != nil:
+		resourceID = event.Tenant.ID
+		tenantID = event.Tenant.ID
+	}
+	return
 }
 
 func (w *Watcher) handleCreateOrUpdate(ctx context.Context, event osac.Event) error {

@@ -26,6 +26,23 @@ func (s *Store) RunMigrations(ctx context.Context) error {
 }
 
 const schema = `
+CREATE TABLE IF NOT EXISTS raw_events (
+    id             BIGSERIAL PRIMARY KEY,
+    event_id       TEXT NOT NULL,
+    event_type     TEXT NOT NULL,
+    event_source   TEXT NOT NULL DEFAULT '',
+    event_time     TIMESTAMPTZ NOT NULL,
+    tenant_id      TEXT NOT NULL DEFAULT '',
+    resource_type  TEXT NOT NULL DEFAULT '',
+    resource_id    TEXT NOT NULL DEFAULT '',
+    data           JSONB NOT NULL,
+    received_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_raw_events_event_id ON raw_events (event_id);
+CREATE INDEX IF NOT EXISTS idx_raw_events_tenant_time ON raw_events (tenant_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_raw_events_type_time ON raw_events (event_type, event_time DESC);
+
 CREATE TABLE IF NOT EXISTS inventory_compute_instance (
     instance_id    TEXT PRIMARY KEY,
     name           TEXT NOT NULL DEFAULT '',
@@ -91,6 +108,30 @@ CREATE TABLE IF NOT EXISTS daily_usage_summary (
 CREATE INDEX IF NOT EXISTS idx_dus_date_tenant ON daily_usage_summary (usage_date, tenant);
 CREATE INDEX IF NOT EXISTS idx_dus_date_resource ON daily_usage_summary (usage_date, resource_id);
 `
+
+// InsertRawEvent stores an event immutably. Returns false if the event was
+// already stored (duplicate event_id), true if it was inserted.
+func (s *Store) InsertRawEvent(ctx context.Context, ev RawEvent) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO raw_events
+			(event_id, event_type, event_source, event_time, tenant_id, resource_type, resource_id, data, received_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+		ON CONFLICT (event_id) DO NOTHING
+	`, ev.EventID, ev.EventType, ev.EventSource, ev.EventTime,
+		ev.TenantID, ev.ResourceType, ev.ResourceID, ev.Data)
+
+	if err != nil {
+		return false, fmt.Errorf("insert raw event %s: %w", ev.EventID, err)
+	}
+
+	inserted := tag.RowsAffected() > 0
+	if inserted {
+		s.logger.Debug("stored raw event", "event_id", ev.EventID, "type", ev.EventType, "resource", ev.ResourceType)
+	} else {
+		s.logger.Debug("duplicate event skipped", "event_id", ev.EventID)
+	}
+	return inserted, nil
+}
 
 // UpsertComputeInstance inserts or updates a compute instance in the inventory.
 func (s *Store) UpsertComputeInstance(ctx context.Context, rec ComputeInstanceRecord) error {

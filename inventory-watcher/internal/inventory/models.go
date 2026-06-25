@@ -45,6 +45,19 @@ type InstanceTypeRecord struct {
 	LastUpdated    time.Time `json:"last_updated"`
 }
 
+type RawEvent struct {
+	ID           string          `json:"id"`
+	EventID      string          `json:"event_id"`
+	EventType    string          `json:"event_type"`
+	EventSource  string          `json:"event_source"`
+	EventTime    time.Time       `json:"event_time"`
+	TenantID     string          `json:"tenant_id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id"`
+	Data         json.RawMessage `json:"data"`
+	ReceivedAt   time.Time       `json:"received_at"`
+}
+
 type DailyUsageSummary struct {
 	UsageDate    time.Time `json:"usage_date"`
 	ClusterID    string    `json:"cluster_id"`
