@@ -1,0 +1,22 @@
+# Binaries
+inventory-watcher/inventory-watcher
+inventory-watcher/consumer
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Tokens / secrets
+/tmp/osac_token.txt
+server.key
+server.crt
