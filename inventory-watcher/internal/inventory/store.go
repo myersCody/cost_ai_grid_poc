@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS inventory_compute_instance (
     created_at     TIMESTAMPTZ NOT NULL,
     deleted_at     TIMESTAMPTZ,
     last_event_id  TEXT NOT NULL DEFAULT '',
-    last_updated   TIMESTAMPTZ DEFAULT NOW()
+    last_updated   TIMESTAMPTZ DEFAULT NOW(),
+    last_metered_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_ci_alive ON inventory_compute_instance (deleted_at) WHERE deleted_at IS NULL;
@@ -75,7 +76,8 @@ CREATE TABLE IF NOT EXISTS inventory_cluster (
     created_at     TIMESTAMPTZ NOT NULL,
     deleted_at     TIMESTAMPTZ,
     last_event_id  TEXT NOT NULL DEFAULT '',
-    last_updated   TIMESTAMPTZ DEFAULT NOW()
+    last_updated   TIMESTAMPTZ DEFAULT NOW(),
+    last_metered_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_cl_alive ON inventory_cluster (deleted_at) WHERE deleted_at IS NULL;
@@ -107,6 +109,22 @@ CREATE TABLE IF NOT EXISTS daily_usage_summary (
 
 CREATE INDEX IF NOT EXISTS idx_dus_date_tenant ON daily_usage_summary (usage_date, tenant);
 CREATE INDEX IF NOT EXISTS idx_dus_date_resource ON daily_usage_summary (usage_date, resource_id);
+
+CREATE TABLE IF NOT EXISTS metering_entries (
+    id             BIGSERIAL PRIMARY KEY,
+    raw_event_id   BIGINT,
+    resource_type  TEXT NOT NULL,
+    resource_id    TEXT NOT NULL,
+    tenant_id      TEXT NOT NULL DEFAULT '',
+    meter_name     TEXT NOT NULL,
+    value          NUMERIC(18,6) NOT NULL,
+    unit           TEXT NOT NULL,
+    period_start   TIMESTAMPTZ NOT NULL,
+    period_end     TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_me_tenant_meter ON metering_entries (tenant_id, meter_name, period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_me_resource ON metering_entries (resource_id, meter_name);
 `
 
 // InsertRawEvent stores an event immutably. Returns false if the event was
@@ -131,6 +149,71 @@ func (s *Store) InsertRawEvent(ctx context.Context, ev RawEvent) (bool, error) {
 		s.logger.Debug("duplicate event skipped", "event_id", ev.EventID)
 	}
 	return inserted, nil
+}
+
+// InsertMeteringEntry stores a single metering record.
+func (s *Store) InsertMeteringEntry(ctx context.Context, entry MeteringEntry) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO metering_entries
+			(raw_event_id, resource_type, resource_id, tenant_id, meter_name, value, unit, period_start, period_end)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, entry.RawEventID, entry.ResourceType, entry.ResourceID, entry.TenantID,
+		entry.MeterName, entry.Value, entry.Unit, entry.PeriodStart, entry.PeriodEnd)
+
+	if err != nil {
+		return fmt.Errorf("insert metering entry %s/%s: %w", entry.ResourceID, entry.MeterName, err)
+	}
+	return nil
+}
+
+// BillableComputeInstances returns alive compute instances in billable states.
+func (s *Store) BillableComputeInstances(ctx context.Context) ([]ComputeInstanceRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT instance_id, name, tenant, project, cluster_id, instance_type, cores, memory_gib, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
+		FROM inventory_compute_instance
+		WHERE deleted_at IS NULL AND state = 'COMPUTE_INSTANCE_STATE_RUNNING'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ComputeInstanceRecord
+	for rows.Next() {
+		var r ComputeInstanceRecord
+		if err := rows.Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.Project, &r.ClusterID,
+			&r.InstanceType, &r.Cores, &r.MemoryGiB, &r.State, &r.Labels,
+			&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// UpdateComputeInstanceLastMetered sets last_metered_at for a compute instance.
+func (s *Store) UpdateComputeInstanceLastMetered(ctx context.Context, instanceID string, t time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE inventory_compute_instance SET last_metered_at = $2 WHERE instance_id = $1
+	`, instanceID, t)
+	return err
+}
+
+// GetComputeInstance returns a single compute instance by ID.
+func (s *Store) GetComputeInstance(ctx context.Context, instanceID string) (*ComputeInstanceRecord, error) {
+	var r ComputeInstanceRecord
+	err := s.pool.QueryRow(ctx, `
+		SELECT instance_id, name, tenant, project, cluster_id, instance_type, cores, memory_gib, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
+		FROM inventory_compute_instance WHERE instance_id = $1
+	`, instanceID).Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.Project, &r.ClusterID,
+		&r.InstanceType, &r.Cores, &r.MemoryGiB, &r.State, &r.Labels,
+		&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // UpsertComputeInstance inserts or updates a compute instance in the inventory.
@@ -275,7 +358,8 @@ func (s *Store) GetInstanceType(ctx context.Context, id string) (*InstanceTypeRe
 // ListAliveComputeInstances returns all compute instances not yet deleted.
 func (s *Store) ListAliveComputeInstances(ctx context.Context) ([]ComputeInstanceRecord, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT instance_id, name, tenant, project, cluster_id, instance_type, cores, memory_gib, state, labels, created_at, deleted_at, last_event_id, last_updated
+		SELECT instance_id, name, tenant, project, cluster_id, instance_type, cores, memory_gib, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
 		FROM inventory_compute_instance WHERE deleted_at IS NULL
 	`)
 	if err != nil {
@@ -288,7 +372,7 @@ func (s *Store) ListAliveComputeInstances(ctx context.Context) ([]ComputeInstanc
 		var r ComputeInstanceRecord
 		if err := rows.Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.Project, &r.ClusterID,
 			&r.InstanceType, &r.Cores, &r.MemoryGiB, &r.State, &r.Labels,
-			&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated); err != nil {
+			&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt); err != nil {
 			return nil, err
 		}
 		results = append(results, r)
@@ -299,7 +383,8 @@ func (s *Store) ListAliveComputeInstances(ctx context.Context) ([]ComputeInstanc
 // ListAliveClusters returns all clusters not yet deleted.
 func (s *Store) ListAliveClusters(ctx context.Context) ([]ClusterRecord, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT cluster_id, name, tenant, template, node_sets, state, labels, created_at, deleted_at, last_event_id, last_updated
+		SELECT cluster_id, name, tenant, template, node_sets, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
 		FROM inventory_cluster WHERE deleted_at IS NULL
 	`)
 	if err != nil {
@@ -311,7 +396,7 @@ func (s *Store) ListAliveClusters(ctx context.Context) ([]ClusterRecord, error) 
 	for rows.Next() {
 		var r ClusterRecord
 		if err := rows.Scan(&r.ClusterID, &r.Name, &r.Tenant, &r.Template, &r.NodeSetsJSON,
-			&r.State, &r.Labels, &r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated); err != nil {
+			&r.State, &r.Labels, &r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt); err != nil {
 			return nil, err
 		}
 		results = append(results, r)

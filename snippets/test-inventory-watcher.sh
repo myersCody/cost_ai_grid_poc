@@ -179,9 +179,54 @@ else
   fi
 fi
 
-# ── Test 3: Deduplication ──
+# ── Test 3: Metering sweep ──
 echo ""
-echo -e "${BOLD}=== Test 3: Event deduplication ===${RESET}"
+echo -e "${BOLD}=== Test 3: Metering sweep (requires ~65s) ===${RESET}"
+
+if [ "${SKIP_METERING:-}" = "1" ]; then
+  echo "  SKIP: set SKIP_METERING=1"
+else
+  echo "  Starting inventory-watcher and waiting 65s for metering sweep..."
+  OSAC_BASE_URL="$BASE" \
+  OSAC_TOKEN="$TOKEN" \
+  INVENTORY_DB_URL=postgres://user:pass@localhost:5434/$DB_NAME \
+  RECONCILE_INTERVAL=5m \
+  SUMMARIZE_INTERVAL=5m \
+  "$WATCHER_BIN" > /tmp/watcher-test.log 2>&1 &
+  WATCHER_PID=$!
+  sleep 65
+  kill $WATCHER_PID 2>/dev/null; wait $WATCHER_PID 2>/dev/null || true
+
+  # Check metering entries were created
+  ME_COUNT=$(db_query "SELECT count(*) FROM metering_entries;")
+  assert_ge "metering entries created" 3 "$ME_COUNT"
+
+  # Check all 3 meter types are present
+  METER_TYPES=$(db_query "SELECT count(DISTINCT meter_name) FROM metering_entries;")
+  assert_eq "3 meter types present" "3" "$METER_TYPES"
+
+  # Verify meter names
+  HAS_UPTIME=$(db_query "SELECT count(*) FROM metering_entries WHERE meter_name = 'vm_uptime_seconds';")
+  assert_ge "vm_uptime_seconds entries" 1 "$HAS_UPTIME"
+
+  HAS_CPU=$(db_query "SELECT count(*) FROM metering_entries WHERE meter_name = 'vm_cpu_core_seconds';")
+  assert_ge "vm_cpu_core_seconds entries" 1 "$HAS_CPU"
+
+  HAS_MEM=$(db_query "SELECT count(*) FROM metering_entries WHERE meter_name = 'vm_memory_gib_seconds';")
+  assert_ge "vm_memory_gib_seconds entries" 1 "$HAS_MEM"
+
+  # Verify last_metered_at is set on billable instances
+  UNMETERED=$(db_query "SELECT count(*) FROM inventory_compute_instance WHERE state = 'COMPUTE_INSTANCE_STATE_RUNNING' AND last_metered_at IS NULL AND deleted_at IS NULL;")
+  assert_eq "all billable instances metered" "0" "$UNMETERED"
+
+  # Verify values are positive
+  NEG_VALUES=$(db_query "SELECT count(*) FROM metering_entries WHERE value <= 0;")
+  assert_eq "no zero/negative metering values" "0" "$NEG_VALUES"
+fi
+
+# ── Test 4: Deduplication ──
+echo ""
+echo -e "${BOLD}=== Test 4: Event deduplication ===${RESET}"
 
 # Insert a duplicate event_id directly
 EXISTING_EVENT_ID=$(db_query "SELECT event_id FROM raw_events LIMIT 1;")
@@ -193,9 +238,9 @@ else
   echo "  SKIP: no events to test deduplication against"
 fi
 
-# ── Test 4: Data integrity ──
+# ── Test 5: Data integrity ──
 echo ""
-echo -e "${BOLD}=== Test 4: Data integrity ===${RESET}"
+echo -e "${BOLD}=== Test 5: Data integrity ===${RESET}"
 
 # Verify raw event data column contains valid JSON with the event payload
 HAS_DATA=$(db_query "SELECT count(*) FROM raw_events WHERE data::text != '{}' AND data IS NOT NULL;")

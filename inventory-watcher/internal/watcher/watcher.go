@@ -7,17 +7,19 @@ import (
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 )
 
 type Watcher struct {
 	client *osac.Client
 	store  *inventory.Store
+	meter  *metering.Meter
 	logger *slog.Logger
 }
 
-func New(client *osac.Client, store *inventory.Store, logger *slog.Logger) *Watcher {
-	return &Watcher{client: client, store: store, logger: logger}
+func New(client *osac.Client, store *inventory.Store, meter *metering.Meter, logger *slog.Logger) *Watcher {
+	return &Watcher{client: client, store: store, meter: meter, logger: logger}
 }
 
 // Run connects to the OSAC event stream and processes events.
@@ -147,6 +149,7 @@ func (w *Watcher) handleDelete(ctx context.Context, event osac.Event) error {
 		if ci.Metadata.DeletionTimestamp != nil {
 			deletedAt = *ci.Metadata.DeletionTimestamp
 		}
+		w.meter.MeterComputeInstanceFinal(ctx, ci.ID, deletedAt)
 		return w.store.MarkComputeInstanceDeleted(ctx, ci.ID, deletedAt, event.ID)
 	}
 	if cl := event.Cluster; cl != nil {

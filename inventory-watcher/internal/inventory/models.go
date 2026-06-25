@@ -6,34 +6,36 @@ import (
 )
 
 type ComputeInstanceRecord struct {
-	InstanceID   string          `json:"instance_id"`
-	Name         string          `json:"name"`
-	Tenant       string          `json:"tenant"`
-	Project      string          `json:"project"`
-	ClusterID    string          `json:"cluster_id"`
-	InstanceType string          `json:"instance_type"`
-	Cores        int32           `json:"cores"`
-	MemoryGiB    int32           `json:"memory_gib"`
-	State        string          `json:"state"`
-	Labels       json.RawMessage `json:"labels"`
-	CreatedAt    time.Time       `json:"created_at"`
-	DeletedAt    *time.Time      `json:"deleted_at"`
-	LastEventID  string          `json:"last_event_id"`
-	LastUpdated  time.Time       `json:"last_updated"`
+	InstanceID    string          `json:"instance_id"`
+	Name          string          `json:"name"`
+	Tenant        string          `json:"tenant"`
+	Project       string          `json:"project"`
+	ClusterID     string          `json:"cluster_id"`
+	InstanceType  string          `json:"instance_type"`
+	Cores         int32           `json:"cores"`
+	MemoryGiB     int32           `json:"memory_gib"`
+	State         string          `json:"state"`
+	Labels        json.RawMessage `json:"labels"`
+	CreatedAt     time.Time       `json:"created_at"`
+	DeletedAt     *time.Time      `json:"deleted_at"`
+	LastEventID   string          `json:"last_event_id"`
+	LastUpdated   time.Time       `json:"last_updated"`
+	LastMeteredAt *time.Time      `json:"last_metered_at"`
 }
 
 type ClusterRecord struct {
-	ClusterID   string          `json:"cluster_id"`
-	Name        string          `json:"name"`
-	Tenant      string          `json:"tenant"`
-	Template    string          `json:"template"`
-	NodeSetsJSON json.RawMessage `json:"node_sets"`
-	State       string          `json:"state"`
-	Labels      json.RawMessage `json:"labels"`
-	CreatedAt   time.Time       `json:"created_at"`
-	DeletedAt   *time.Time      `json:"deleted_at"`
-	LastEventID string          `json:"last_event_id"`
-	LastUpdated time.Time       `json:"last_updated"`
+	ClusterID     string          `json:"cluster_id"`
+	Name          string          `json:"name"`
+	Tenant        string          `json:"tenant"`
+	Template      string          `json:"template"`
+	NodeSetsJSON  json.RawMessage `json:"node_sets"`
+	State         string          `json:"state"`
+	Labels        json.RawMessage `json:"labels"`
+	CreatedAt     time.Time       `json:"created_at"`
+	DeletedAt     *time.Time      `json:"deleted_at"`
+	LastEventID   string          `json:"last_event_id"`
+	LastUpdated   time.Time       `json:"last_updated"`
+	LastMeteredAt *time.Time      `json:"last_metered_at"`
 }
 
 type InstanceTypeRecord struct {
@@ -56,6 +58,19 @@ type RawEvent struct {
 	ResourceID   string          `json:"resource_id"`
 	Data         json.RawMessage `json:"data"`
 	ReceivedAt   time.Time       `json:"received_at"`
+}
+
+type MeteringEntry struct {
+	ID           int64     `json:"id"`
+	RawEventID   *int64    `json:"raw_event_id"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	TenantID     string    `json:"tenant_id"`
+	MeterName    string    `json:"meter_name"`
+	Value        float64   `json:"value"`
+	Unit         string    `json:"unit"`
+	PeriodStart  time.Time `json:"period_start"`
+	PeriodEnd    time.Time `json:"period_end"`
 }
 
 type DailyUsageSummary struct {

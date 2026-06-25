@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/reconciler"
 	"github.com/osac-project/cost-event-consumer/internal/summarizer"
@@ -62,7 +64,8 @@ func main() {
 	}
 
 	// Create components.
-	w := watcher.New(osacClient, store, logger)
+	m := metering.New(store, 60*time.Second, logger)
+	w := watcher.New(osacClient, store, m, logger)
 	r := reconciler.New(osacClient, store, w, cfg.ReconcileInterval, logger)
 	s := summarizer.New(store, cfg.SummarizeInterval, logger)
 
@@ -70,6 +73,7 @@ func main() {
 		"osac_url", cfg.OSACBaseURL,
 		"reconcile_interval", cfg.ReconcileInterval,
 		"summarize_interval", cfg.SummarizeInterval,
+		"metering_interval", "60s",
 	)
 
 	// Run all components concurrently.
@@ -85,6 +89,10 @@ func main() {
 
 	g.Go(func() error {
 		return s.Run(ctx)
+	})
+
+	g.Go(func() error {
+		return m.Run(ctx)
 	})
 
 	if err := g.Wait(); err != nil && ctx.Err() == nil {
