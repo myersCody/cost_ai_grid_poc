@@ -210,33 +210,56 @@ summarization step from inventory timestamps. The target system produces
 metering entries per event as they arrive, which enables real-time quota
 checking and the 60-second processing SLA.
 
-## Recommended Implementation Order
+## Implementation Progress
 
-1. **Raw event log** — lowest risk, highest value (audit trail + replay).
-   Add `raw_events` table and insert before processing.
+### Completed
 
-2. **Billable state filtering** — trivial to add, prevents metering
-   non-billable states.
+1. **Raw event log** — `raw_events` table stores every Watch stream event
+   immutably, deduplicated on `event_id`. Events are stored before inventory
+   processing so nothing is lost even if the upsert fails.
 
-3. **Metering entries** — the core gap. Transforms the system from
-   batch-summarization to per-event metering. Prerequisite for rates,
-   costs, and quotas.
+2. **Metering entries** — periodic 60-second sweep produces per-resource
+   metering entries for all billable compute instances. Three meters:
+   `vm_uptime_seconds`, `vm_cpu_core_seconds`, `vm_memory_gib_seconds`.
+   Duration is tracked via `last_metered_at` on inventory records. On DELETE
+   events, final metering entries capture usage up to the deletion timestamp.
+   See [ADR-001](decisions/001-metering-sweep-interval.md) for the 60-second
+   interval decision.
 
-4. **Project entity** — add projects table and sync. Small but needed for
-   the Tenant → Project → Resource hierarchy.
+3. **Billable state filtering** — only RUNNING compute instances produce
+   metering entries. Non-billable states (STOPPED, FAILED, PAUSED, DELETING)
+   update inventory but generate no metering. Billable states defined in
+   `metering/billable.go` for both VMs and clusters.
 
-5. **CloudEvents envelope** — add when the metering collector or Kafka
-   transport is ready. Low priority for PoC since the Watch stream works.
+### Remaining Gaps
 
-## Summary
+| Gap | Effort | Notes |
+|---|---|---|
+| **Project entity** | Small | Add `projects` table, FK on resources, sync from OSAC |
+| **CloudEvents envelope** | Small | Parse standard CE wrapper; low priority since Watch stream works |
+| **Cluster metering** | Small | Add cluster-specific meters (`cluster_uptime_seconds`, `cluster_worker_node_seconds`) to the metering sweep — same pattern as VM metering, just different meters |
 
-The inventory-watcher covers the **inventory synchronization** half of
-requirement #1 well: cluster and compute instance tracking, reconciliation,
-real-time event ingestion, and instance type catalog sync all work end-to-end.
+### What's Next (beyond req #1)
 
-The **metering** half has gaps: no raw event log, no per-event metering
-entries, no billable state filtering, and no project hierarchy. These are
-additions to the existing pipeline, not architectural changes. The most
-impactful gap is metering entries — closing it transforms the system from a
-batch inventory tracker into an event-driven metering pipeline, which is
-what the downstream requirements (rates, costs, quotas, alerts) need.
+The metering pipeline is now the foundation for downstream requirements:
+
+- **Rates + cost entries** (req #6) — look up rate by `meter_name` +
+  `resource_type`, compute `cost = metering_value × rate`, insert into
+  `cost_entries`. Tiered pricing applies here.
+- **Quota tracking** (req #4) — aggregate `metering_entries` by tenant +
+  meter_name for a period, compare against `quotas.limit_value`.
+- **Alerts** (req #5) — when accumulated metering crosses a threshold
+  percentage of quota, insert alert and notify OSAC.
+- **MaaS** (req #2) — add `osac.model.lifecycle` event handling with
+  token-based meters (`maas_tokens_in`, `maas_requests`). Same pipeline,
+  different meters.
+
+## Test Coverage
+
+19 assertions across 5 test groups (see `snippets/test-inventory-watcher.sh`):
+
+1. **Reconciliation** — tables created, all OSAC resources imported, specs correct
+2. **Watch stream + raw events** — real-time event capture, raw event stored with metadata
+3. **Metering sweep** — entries created for 3 meter types, all billable instances metered, positive values
+4. **Deduplication** — duplicate event_id rejected
+5. **Data integrity** — all events have payload, no empty tenants
