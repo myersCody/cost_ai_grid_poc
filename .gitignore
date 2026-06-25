@@ -1,5 +1,6 @@
 # Binaries
 inventory-watcher/inventory-watcher
+inventory-watcher/maas-simulator
 inventory-watcher/consumer
 *.exe
 

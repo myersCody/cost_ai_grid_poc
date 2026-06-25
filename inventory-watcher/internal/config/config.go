@@ -14,6 +14,7 @@ type Config struct {
 	ReconcileInterval  time.Duration
 	SummarizeInterval  time.Duration
 	LogLevel           string
+	IngestListenAddr   string
 }
 
 func Load() *Config {
@@ -25,6 +26,7 @@ func Load() *Config {
 		ReconcileInterval: durationOrDefault("RECONCILE_INTERVAL", 1*time.Hour),
 		SummarizeInterval: durationOrDefault("SUMMARIZE_INTERVAL", 1*time.Hour),
 		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
+		IngestListenAddr:  os.Getenv("INGEST_LISTEN_ADDR"),
 	}
 }
 
