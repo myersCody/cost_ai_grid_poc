@@ -2,7 +2,7 @@
 
 Summary of the essential context, requirements, and action items for planning the Cost Management PoC spike.
 
-> **Hard Deadline: July 31, 2026** — PoC only, not production-grade GA software. OSAC-side features are still in progress; expect high ambiguity.
+> **Hard Deadline: July 31, 2026** — PoC only, not production-grade GA software.
 
 ---
 
@@ -87,8 +87,6 @@ OSAC enforces rate limits via OPA policies. Cost Management must notify OSAC whe
 ### 5. Notifications / Alerts — Must Have
 
 Fire alerts when a tenant approaches a threshold percentage of their quota/budget for a period (e.g. 70% of monthly quota). OSAC consumes these alerts to trigger OPA-enforced rate limiting.
-
-> **Note:** Plans to drop Kafka for self-managed Cost Management should be paused — Kafka is a strong candidate for this alert transport.
 
 **Cost Team Actions:**
 - [ ] Create user-configurable threshold rules for notifications/alerts

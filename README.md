@@ -15,14 +15,7 @@ A proof-of-concept integrating [Red Hat Cost Management](https://github.com/proj
 
 ## Architecture
 
-```
-OSAC (REST/gRPC/Kafka) → Event Consumer (Python) → PostgreSQL → FastAPI → UI
-```
-
-Event ingestion supports three transports (swappable):
-- **REST polling** — default for POC development
-- **gRPC watch** — direct OSAC gRPC stream
-- **Kafka** — production target (CloudEvents over `osac.events.*`)
+See [`Docs/architecture.md`](Docs/architecture.md).
 
 ## Stack
 
