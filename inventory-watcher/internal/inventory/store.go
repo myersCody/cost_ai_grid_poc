@@ -684,8 +684,8 @@ func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName 
 		WHERE resource_type = $1 AND meter_name = $2
 		  AND effective_from <= $3
 		  AND (effective_to IS NULL OR effective_to > $3)
-		  AND (tenant_id = $4 OR tenant_id IS NULL)
-		ORDER BY tenant_id NULLS LAST
+		  AND (tenant_id = $4 OR tenant_id IS NULL OR tenant_id = '')
+		ORDER BY CASE WHEN tenant_id = $4 THEN 0 ELSE 1 END
 		LIMIT 1
 	`, resourceType, meterName, at, tenantID).Scan(
 		&rec.ID, &rec.TenantID, &rec.ResourceType, &rec.MeterName,
