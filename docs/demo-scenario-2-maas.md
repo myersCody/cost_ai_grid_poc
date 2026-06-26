@@ -106,7 +106,58 @@ docker exec cost-db psql -U user -d costdb -c \
 Shows which models are consuming the most tokens — useful for cost
 allocation per model type (llama-3-8b vs llama-3-70b pricing).
 
-### Act 7: Show the raw event log
+### Act 7: Cost breakdown (the punchline)
+
+**Goal:** Show that metering entries have been automatically rated and
+converted to dollar amounts.
+
+Wait ~35 seconds after firing events for the rating sweep to run (30s interval).
+
+**Terminal 2 — total cost by tenant:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT tenant_id, round(sum(cost_amount)::numeric, 4) as total_cost, currency
+   FROM cost_entries GROUP BY tenant_id, currency ORDER BY total_cost DESC;"
+```
+
+**Terminal 2 — cost by meter type:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT meter_name, count(*) as entries,
+          round(sum(cost_amount)::numeric, 6) as total_cost, currency
+   FROM cost_entries WHERE resource_type = 'model'
+   GROUP BY meter_name, currency ORDER BY total_cost DESC;"
+```
+
+**Terminal 2 — cost per model per tenant:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT m.model_name, ce.tenant_id,
+          round(sum(ce.cost_amount)::numeric, 4) as cost, ce.currency
+   FROM cost_entries ce
+   JOIN inventory_model m ON ce.resource_id = m.model_id
+   GROUP BY m.model_name, ce.tenant_id, ce.currency
+   ORDER BY m.model_name, ce.tenant_id;"
+```
+
+**What to explain:**
+- "tenant-acme consumed 1.8M input tokens × $0.50/M = $0.90 in token_in cost"
+- Output tokens cost 3× more than input tokens ($1.50 vs $0.50 per million)
+- Rates are configurable per tenant — a premium tenant could pay different rates
+
+**Terminal 2 — show the rate definitions:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT resource_type, meter_name, price_per_unit, currency FROM rates
+   WHERE resource_type = 'model' ORDER BY meter_name;"
+```
+
+Or run the full cost report:
+```bash
+bash snippets/query-costs.sh
+```
+
+### Act 8: Show the raw event log
 
 ```bash
 docker exec cost-db psql -U user -d costdb -c \
@@ -146,24 +197,31 @@ Examples:
 
 ## Talking Points
 
-1. **Consumption-based vs capacity-based** — MaaS meters token counts and
+1. **Full pipeline: events → metering → cost** — a MaaS event arrives,
+   metering entries are produced immediately, and the rating sweep converts
+   them to dollar amounts within 30 seconds. End-to-end.
+
+2. **Consumption-based vs capacity-based** — MaaS meters token counts and
    requests, not provisioned resources × time. You pay for what you use.
 
-2. **Event-driven metering** — each MaaS event produces metering entries
-   immediately on arrival. No periodic sweep needed (unlike VM metering).
+3. **Configurable rates** — default rates seeded on startup ($0.50/M input
+   tokens, $1.50/M output tokens, etc.). Rates can be overridden per tenant
+   for custom pricing. Tiered pricing supported (first N units free, etc.).
 
-3. **Multi-tenant isolation** — each tenant's consumption is tracked
-   independently. Rate structure can vary per tenant (req #6).
+4. **Multi-tenant cost isolation** — each tenant's consumption and cost are
+   tracked independently. The cost-by-tenant query is the billing view.
 
-4. **Multi-model tracking** — different models can have different per-token
-   rates (llama-3-8b cheaper than llama-3-70b).
+5. **Multi-model tracking** — different models can have different per-token
+   rates. llama-3-70b should cost more than llama-3-8b — just add a rate
+   override for the specific model's meter.
 
-5. **Same pipeline** — MaaS events flow through the same raw_events →
-   inventory → metering_entries pipeline as VM events. No separate system.
+6. **Same pipeline for VMs and models** — MaaS events flow through the same
+   raw_events → inventory → metering → cost pipeline as VM events. One
+   system for capacity and consumption billing.
 
-6. **Throughput** — pipeline handles ~100 events/second on a laptop. In
-   production with connection pooling and batching, significantly more.
+7. **Throughput** — pipeline handles ~1,700 events/second sustained on a
+   laptop. Realistic sovereign cloud load is ~17 events/s (100x headroom).
 
-7. **OSAC readiness** — OSAC doesn't emit model events yet. When it does,
+8. **OSAC readiness** — OSAC doesn't emit model events yet. When it does,
    we add a Model case to the Watch stream dispatcher. The ingest endpoint
    is for testing; in production, events come from the Watch stream.
