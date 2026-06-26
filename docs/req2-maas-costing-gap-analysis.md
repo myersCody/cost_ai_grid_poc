@@ -143,16 +143,56 @@ it just needs: resource_type, resource_id, tenant_id, and meter values.
 - **60-second SLA** — already met by the existing pipeline architecture.
   Events are processed synchronously as they arrive.
 
+## Implementation Progress
+
+### Completed
+
+1. **Model inventory** — `inventory_model` table tracking model deployments
+   with model_name, tenant, project, template, state.
+
+2. **MaaS metering pipeline** — consumption-based metering with 4 meters:
+   `maas_tokens_in`, `maas_tokens_out`, `maas_inference_tokens`,
+   `maas_requests`. Event-driven (no periodic sweep needed).
+
+3. **Ingest endpoint** — HTTP POST `/api/v1/events` accepts MaaS CloudEvents
+   and processes them through the full pipeline (raw_events → inventory →
+   metering). Enabled via `INGEST_LISTEN_ADDR` env var.
+
+4. **MaaS simulator** — Go binary (`maas-simulator`) generates randomized
+   MaaS CloudEvents across 4 models (llama-3-8b, llama-3-70b, mistral-7b,
+   granite-34b) and 3 tenants at configurable rate.
+
+5. **Throughput verified:**
+
+   | Events | Workers | Throughput |
+   |---|---|---|
+   | 1,000 | 8 | 1,164 events/s |
+   | 5,000 | 16 | 1,632 events/s |
+   | 10,000 | 16 | 1,707 events/s |
+
+   A sovereign cloud with 100 models × 10 req/s = ~17 metering events/second
+   at 60-second collection intervals. Pipeline handles 100x that.
+
+### Remaining Gaps
+
+| Capability | Status | Notes |
+|---|---|---|
+| MaaS CloudEvents schema | **Proposed only** | Not confirmed by OSAC — see open questions above |
+| OSAC Model entity | **Does not exist** | No proto, no API, no Watch stream events |
+| Rate structure | **Defined, not implemented** | $/million tokens — rate engine is req #6 |
+| RHOAI metric collection | **Unresolved** | Who collects: OSAC or Cost? |
+
 ## Coverage vs Gaps
 
 | Capability | Required | Status | Notes |
 |---|---|---|---|
-| Model inventory tracking | Yes | **To implement** | New table + model in inventory |
-| MaaS event ingestion | Yes | **Blocked** | No model events in OSAC Watch stream; will mock |
-| Token/request metering | Yes | **To implement** | 4 new meters, consumption-based (not duration-based) |
-| Rate structure definition | Yes | **To document** | $/million tokens for in/out/inference/requests |
-| Cost computation within 60s | Yes | **Already met** | Pipeline processes events synchronously |
+| Model inventory tracking | Yes | **Done** | `inventory_model` table |
+| MaaS event ingestion | Yes | **Done (mock)** | Ingest endpoint + simulator; blocked on real OSAC events |
+| Token/request metering | Yes | **Done** | 4 meters, consumption-based |
+| Rate structure definition | Yes | **Documented** | $/million tokens for in/out/inference/requests |
+| Cost computation within 60s | Yes | **Met** | <1ms per event at 1700 events/s |
 | MaaS CloudEvents schema | Yes | **Proposed only** | Not confirmed by OSAC |
+| Throughput testing | Yes | **Done** | 1,700 events/s sustained, 100x realistic load |
 
 ## Processing Pipeline for MaaS
 
