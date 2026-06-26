@@ -9,7 +9,7 @@ A proof-of-concept integrating [Red Hat Cost Management](https://github.com/proj
 - Ingests CloudEvents from OSAC for resource lifecycle (clusters, VMs, models, bare metal)
 - Meters capacity-based resources (CaaS, VMaaS) and consumption-based resources (MaaS — tokens/requests)
 - Tracks budgets and quotas, emitting threshold alerts back to OSAC
-- Exposes a FastAPI REST API for cost, metering, inventory, and quota data
+- Exposes an API for cost, metering, inventory, and quota data
 
 ## Architecture
 

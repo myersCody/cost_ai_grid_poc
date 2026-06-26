@@ -72,7 +72,7 @@ When running the full stack locally, services are assigned ports to avoid confli
 | OSAC PostgreSQL | 5433 | |
 | **inventory-watcher** | — | **Implemented** — Go binary (`inventory-watcher/cmd/consumer`); no listen port. Four concurrent workers — see [inventory-watcher Workers](#inventory-watcher-workers). Persists to POC PostgreSQL `:5434`. Auth: `OSAC_TOKEN` Bearer JWT against `:8011`. Go module logs as `cost-event-consumer`; built artifact is typically named `inventory-watcher`. |
 | **POC PostgreSQL** | **5434** | Cost inventory DB (`costdb`); schema auto-migrated by inventory-watcher on startup |
-| **POC FastAPI** | **8020** | Planned REST API |
+| **POC** | **8020** | Planned REST API |
 | POC Kafka | 9092 | Optional — only needed for Option C |
 
 ### inventory-watcher configuration
@@ -196,7 +196,7 @@ Adopt **Option C** only if multiple independent consumers emerge or OSAC standar
 
 ## PoC Database Schema
 
-Schema is auto-migrated on inventory-watcher startup (inline SQL in `inventory-watcher/internal/inventory/store.go`; no separate migration tool or `data-model.md` yet).
+Schema is auto-migrated on inventory-watcher startup (inline SQL in `inventory-watcher/internal/inventory/store.go`;
 
 | Table | Role |
 |---|---|

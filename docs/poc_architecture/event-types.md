@@ -63,8 +63,7 @@ The table below tracks the open items Cost Management needs from OSAC before the
 | R-3 | **BMaaS CloudEvent schema** — confirm field names, types, and any GPU/disk/network additions beyond the placeholder in §4 | REQ-8, BMaaS metering | Placeholder only (see §4) | OSAC |
 | R-4 | **BMaaS billable states** — define the `BARE_METAL_STATE_*` state machine and which states are billable | REQ-8, BMaaS metering | Not defined | OSAC |
 | R-5 | **Heartbeat collector delivery** — connect the OSAC metering collector to Cost Management over HTTP or Kafka; agree on emission interval (requirements: 10–30s; existing collector: 60s). **Not a PoC blocker** — the local sweep covers this for the demo. Required for production (Phase 4). See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md). | REQ-1b, POC-ARCH Phase 4 | **Not a PoC blocker.** Collector exists; production delivery TBD | OSAC |
-| R-6 | **Kafka topic names and format** — confirm or revise proposed topics in §5 (`osac.events.caas`, `osac.events.vmaas`, etc.) and agree on partitioning key | REQ-1b transport | Proposed (see §5); TBD | OSAC + Cost |
-| R-7 | **MaaS event source** — confirm whether OSAC or OpenShift AI 5 emits MaaS CloudEvents, and whether Cost consumes them directly or via OSAC | REQ-2a | Open question | OSAC + Cost |
+| R-6 | **MaaS event source** — confirm whether OSAC or OpenShift AI 5 emits MaaS CloudEvents, and whether Cost consumes them directly or via OSAC | REQ-2a | Open question | OSAC + Cost |
 
 ---
 

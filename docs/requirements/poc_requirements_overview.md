@@ -24,6 +24,7 @@ This document is the consolidated requirements reference for the Cost Management
 
 ### POC-ENV — On-Premise Deployment
 **Priority:** CRITICAL
+**Component Scope:** OUT OF SCOPE — This requirement covers deploying RHCM on-premise; it is owned by the RHCM/Cost Management team, not the consumer component.
 
 On-prem RHCM deployment to demo capacity-based charging with OSAC heartbeat events. Not all components may be needed.
 
@@ -127,7 +128,7 @@ Monitor OSAC "cluster orders" for state changes (created, running, stopped, dest
 
 Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
 
-> **What "heartbeat events" means:** CloudEvents emitted periodically by Moti's OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep; the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
+> **What "heartbeat events" means:** CloudEvents emitted periodically by OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep; the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
 
 **Acceptance Criteria:**
 - RHCM can receive heartbeat events (periodic lifecycle CloudEvents) via HTTP or Kafka
@@ -154,6 +155,8 @@ Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 m
 **Priority:** CRITICAL
 
 Process OSAC heartbeat events and calculate costs within 60 seconds of receipt. End-to-end SLA is 90 seconds. This is a new HTTP data path, not a rework of the CSV pipeline.
+
+> **What "heartbeat events" means:** CloudEvents emitted periodically by OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep; the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
 
 **Acceptance Criteria:**
 - RHCM processes OSAC heartbeat events within 60 seconds of receipt
