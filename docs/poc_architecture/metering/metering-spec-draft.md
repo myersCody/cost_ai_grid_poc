@@ -1,8 +1,8 @@
 # Capacity-Based Metering Specification
 
-> **Status:** PoC draft  
-> **Requirements:** POC-ARCH, REQ-1b, REQ-2, REQ-1a  
-> **Related:** [architecture.md](../architecture.md) · [event-types.md](../event-types.md) · [data-model.md](../data-model.md) · [cost_model_metric_feasibility.md](cost_model_metric_feasibility.md) · [cost-reports-feasibility.md](cost-reports-feasibility.md)
+> **Status:** PoC draft
+> **Requirements:** POC-ARCH, REQ-1b, REQ-2, REQ-1a
+> **Related:** [architecture.md](../architecture.md) · [event-types.md](../event-types.md) · [data-model.md](../data-model.md) · [cost-calculation-spec-draft.md](../pricing/cost-calculation-spec-draft.md) · [cost_model_metric_feasibility.md](cost_model_metric_feasibility.md) · [cost-reports-feasibility.md](cost-reports-feasibility.md)
 
 ---
 
@@ -31,7 +31,6 @@ The PoC charges on **provisioned capacity × duration**, not on actual CPU/memor
 | Item | Reason |
 |---|---|
 | Usage-based metering (`*_usage_*` metrics) | Requires Prometheus inside VMs — see [cost_model_metric_feasibility.md](cost_model_metric_feasibility.md) |
-| Token / MaaS consumption metering | Separate post-PoC workstream (REQ-4) |
 | Storage / PVC / GPU metering | OSAC does not expose these today |
 | Network data transfer | Requires flow monitoring |
 | Rework of hourly CSV pipeline | New HTTP/event data path only |
@@ -65,33 +64,41 @@ Every metering increment is stored as a row in `metering_entries`, linked to the
 
 ### 4.1 PoC Implementation (current)
 
+The PoC consumes only the **OSAC Fulfillment Service Watch stream** for inventory sync. OSAC metering collector (`osac-metering-discover-poc`) exists and produces the correct CloudEvents, but it is not yet connected to Cost Management — it currently emits to OpenMeter. A local 60-second sweep fills that gap.
+
 ```mermaid
 flowchart TB
-    subgraph osac [OSAC Region Management Cluster]
-        watch["Watch stream\n(NDJSON)"]
-        list["List APIs\n(reconciler)"]
+    subgraph osac [OSAC]
+        watch["Fulfillment Service Watch stream\n/api/private/v1/events/watch\nNDJSON — not CloudEvents"]
+        list["Fulfillment Service\nREST API"]
+        collector["osac-metering-discover-poc\n metering collector"]
     end
 
-    subgraph watcher [inventory-watcher]
+    openmeter(["OpenMeter\n(receives POC CloudEvents today)"])
+
+    subgraph watcher [inventory-watcher — Cost Management PoC]
         ingest["Event ingestion\n+ inventory upsert"]
-        sweep["60s metering sweep"]
-        final["Final metering\non DELETE"]
+        reconciler["Reconciler\n(List diff, every 5m)"]
+        sweep["60s metering sweep\nlocal substitute for heartbeat events"]
+        final["Final metering on DELETE\nMeterComputeInstanceFinal()"]
     end
 
-    subgraph db [POC PostgreSQL]
-        raw["raw_events"]
-        inv["inventory tables"]
-        meters["metering_entries"]
+    subgraph db [PoC PostgreSQL]
+        raw[("raw_events")]
+        inv[("inventory tables\nclusters · compute_instances")]
+        meters[("metering_entries")]
     end
 
-    watch --> ingest
-    list --> ingest
+    watch -->|"state transitions\nCREATED / UPDATED / DELETED"| ingest
+    list -->|"full resource list"| reconciler
+    collector -. "CloudEvents 1.0\nosac.cluster.lifecycle\nosac.compute_instance.lifecycle\n(not connected to Cost Management)" .-> openmeter
     ingest --> raw
     ingest --> inv
-    sweep -->|"billable resources"| meters
-    final --> meters
-    inv --> sweep
-    inv --> final
+    reconciler --> inv
+    inv -->|"all billable resources"| sweep
+    inv -->|"last_metered_at"| final
+    sweep -->|"duration_seconds\n+ meter quantities"| meters
+    final -->|"covers gap to\nexact deletion timestamp"| meters
 ```
 
 | Component | Interval | Role |
@@ -99,27 +106,87 @@ flowchart TB
 | Watch stream | Real-time | State transitions → inventory upsert, raw event log |
 | Reconciler | Configurable (default 5m) | Catch missed Watch events via List API diff |
 | Metering sweep | **60s** ([ADR-001](../../decisions/001-metering-sweep-interval.md)) | Produce time-based metering for all billable resources |
-| Final metering | On DELETE | Capture usage from `last_metered_at` to deletion timestamp |
+| Final metering | On DELETE | Capture usage from `last_metered_at` to exact deletion timestamp |
 
 Implementation: `inventory-watcher/internal/metering/`.
 
-### 4.2 Target Implementation (OSAC heartbeat collector)
+> **Why a local sweep?** The Watch stream only fires on state changes. A VM in `RUNNING` with no subsequent events produces zero metering without a periodic signal. Because POC collector is not yet connected, the sweep replicates what heartbeat CloudEvents will eventually provide. See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md) for the full decision record.
 
-When OSAC's metering collector is available, it will emit CloudEvents every ~60s with pre-calculated `duration_seconds` and derived quantities. Cost Management will:
+### 4.2 Target Implementation (Phase 4 — OSAC heartbeat collector connected)
 
-1. Consume heartbeat CloudEvents via the same Watch stream (or HTTP/Kafka — transport TBD)
-2. Insert raw event → extract meters → insert `metering_entries` directly from event payload
-3. **Retire the local sweep** — the collector becomes the duration source
+In Phase 4, POC metering collector is reconfigured to emit its CloudEvents to Cost Management instead of OpenMeter. The Watch stream continues to drive inventory sync; heartbeat CloudEvents become the sole source of metering entries.
 
-The `metering_entries` schema and meter names stay the same; only the producer changes. See [event-types.md](../event-types.md) for CloudEvent schemas.
+> **Important:** The Watch stream and the heartbeat collector are **two completely separate transports**. The Watch stream (`/api/private/v1/events/watch`) is the fulfillment service's proprietary NDJSON format — it is not CloudEvents and carries no metering quantities. Heartbeat CloudEvents arrive via a separate transport (HTTP, gRPC, or Kafka — TBD). Do not conflate them.
+
+```mermaid
+flowchart TB
+    subgraph osac [OSAC]
+        watch["Fulfillment Service Watch stream\n/api/private/v1/events/watch\nNDJSON — not CloudEvents"]
+        list["Fulfillment Service\nREST API"]
+        collector["osac-metering-discover-poc\nOSAC POC metering collector\n(connected to Cost Management)"]
+    end
+
+    subgraph costmgmt [Cost Management — Phase 4]
+        ingest["Event ingestion\n+ inventory upsert"]
+        reconciler["Reconciler\n(List diff, every 5m)"]
+        hb_consumer["Heartbeat CloudEvent consumer\nHTTP · gRPC · Kafka — TBD"]
+        dedup["Deduplicate on ce_id"]
+        sweep["60s sweep\n(DISABLED in Phase 4)"]
+    end
+
+    subgraph db [PostgreSQL]
+        raw[("raw_events")]
+        inv[("inventory tables\nclusters · compute_instances")]
+        meters[("metering_entries")]
+    end
+
+    watch -->|"state transitions\nCREATED / UPDATED / DELETED"| ingest
+    list -->|"full resource list"| reconciler
+    collector -->|"CloudEvents 1.0\nosac.cluster.lifecycle\nosac.compute_instance.lifecycle\nHTTP push or Kafka — TBD"| hb_consumer
+    ingest --> raw
+    ingest --> inv
+    reconciler --> inv
+    hb_consumer --> dedup
+    dedup -->|"duration_seconds\n+ meter quantities\ndirect from payload"| meters
+    dedup -->|"update last_metered_at"| inv
+    sweep -. "retired" .-> meters
+```
+
+On receipt of a heartbeat CloudEvent, Cost Management will:
+
+1. Receive via HTTP endpoint, gRPC server-streaming, or Kafka consumer (transport TBD — see Open Question 2)
+2. Deduplicate on `ce_id` (stored in `raw_events`)
+3. Extract `duration_seconds` and meter quantities directly from the event payload
+4. Write `metering_entries` rows — same schema and meter names as today
+5. Update `last_metered_at` on the inventory record
+6. **The local sweep is disabled** — the collector is now the sole duration source
+
+The `metering_entries` table, meter names, cost calculation pipeline, and reports are all unchanged. Only the producer changes. See [event-types.md](../event-types.md) for CloudEvent schemas and [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md) for the full tradeoff analysis.
+
+#### 4.2.1 DELETE gap risk
+
+The PoC sweep includes `MeterComputeInstanceFinal()` — a final metering entry written at the exact deletion timestamp when a DELETE event arrives, covering the gap from `last_metered_at` to that moment. OSAC POC collector has no equivalent: if a resource is deleted between two poll cycles, the collector never sees it again and the gap goes unmetered.
+
+**For Phase 4, one of the following must be agreed with OSAC:**
+
+| Option | Description | Preferred? |
+|---|---|---|
+| **Final heartbeat on DELETE** | The collector emits one last CloudEvent when a resource is deleted, timestamped to the moment of deletion. Cost Management writes the final metering entry from that payload. | Yes — preferred |
+| **Reconciliation sweep (DELETE only)** | Cost Management keeps a lightweight sweep running alongside the collector that detects deletions via the Watch stream and fills the final metering gap. The full sweep is still disabled. | Fallback |
+
+This must be resolved as part of the Phase 4 OSAC handoff.
 
 ### 4.3 Transport Options
 
 | Option | Status | Notes |
 |---|---|---|
 | A — Watch stream + sweep | **PoC default** | [ADR-002](../../decisions/002-arguments-against-kafka.md) |
-| B — REST polling | Fallback | 60s snapshot granularity; misses inter-poll events |
-| C — Kafka | Deferred | Only if multi-consumer fan-out is required |
+| B — HTTP push | Phase 4 candidate | Cost Management exposes an HTTP endpoint; collector POSTs CloudEvents to it. REQ-1b names this explicitly. Simplest path given OSAC POC collector already uses `curl`. |
+| C — gRPC server-streaming | Phase 4 candidate | OSAC's native protocol (`osac.public.v1`) is gRPC with a REST gateway on top. A productionised collector could stream CloudEvents via a gRPC push interface — architecturally coherent and consistent with how Cost Management already integrates with OSAC (port 8010). Requires Cost Management to expose a gRPC receiver service and OSAC POC collector to be rewritten beyond shell scripts. |
+| D — Kafka | Deferred | Only if multi-consumer fan-out is required. See [ADR-002](../../decisions/002-arguments-against-kafka.md). |
+| E — REST polling | Fallback only | 60s snapshot granularity; misses inter-poll deletions. |
+
+> **On gRPC:** REQ-1b names HTTP or Kafka, but OSAC's primary API surface is gRPC — the Watch stream itself is `osac.public.v1.Events` gRPC streaming; the Cost Management `inventory-watcher` reaches it via the REST gateway as a convenience, not because gRPC is unavailable. gRPC is architecturally the most native fit for a production collector. The practical constraint for Phase 4 is that OSAC POC collector (`osac-metering-discover-poc`) is currently shell scripts, not a gRPC client.
 
 Requirements reference "heartbeat events via HTTP or Kafka" (REQ-1b). The PoC satisfies this functionally via the sweep until OSAC delivers native heartbeat CloudEvents.
 
@@ -137,7 +204,7 @@ Six discrete meters drive all feasible Koku cost model metrics for CaaS/VMaaS.
 | `vm_cpu_core_seconds` | core-seconds | `cores × duration_seconds` | 1 row per VM |
 | `vm_memory_gib_seconds` | GiB-seconds | `memory_gib × duration_seconds` | 1 row per VM |
 
-**Billable states:** `COMPUTE_INSTANCE_STATE_RUNNING`  
+**Billable states:** `COMPUTE_INSTANCE_STATE_RUNNING`
 **Non-billable:** `STOPPED`, `DELETED`, and all other states
 
 ### 5.2 CaaS Meters
@@ -148,7 +215,7 @@ Six discrete meters drive all feasible Koku cost model metrics for CaaS/VMaaS.
 | `cluster_worker_node_seconds` | node-seconds | `SUM(node_count × duration_seconds)` per node set | 1 row per cluster (aggregated) |
 | `cluster_worker_node_count` | count | `MAX(node_count)` per node set | Snapshot from inventory |
 
-**Billable states:** `CLUSTER_STATE_READY`, `CLUSTER_STATE_PROGRESSING`  
+**Billable states:** `CLUSTER_STATE_READY`, `CLUSTER_STATE_PROGRESSING`
 **Non-billable:** `FAILED`, `UNSPECIFIED`, and all other states
 
 Control plane uptime and worker node time are metered separately. Worker node seconds are accumulated across all node sets in the cluster's `node_sets` spec.
@@ -209,62 +276,6 @@ Each row in `metering_entries` represents one meter increment for one resource o
 ### 6.4 Volume Estimates
 
 At 60s intervals, one billable VM produces 3 metering rows per minute (~4,320/day). A cluster produces 2–3 rows per minute. For 100 VMs: ~432,000 rows/day — manageable with indexing and periodic aggregation into summary tables.
-
----
-
-## 7. Cost Calculation
-
-Metering produces quantities; cost calculation applies rates.
-
-### 7.1 Rate Lookup
-
-Rates are stored in the `rates` table, keyed by `resource_type`, `meter_name`, and optionally `tenant_id`. For PoC, rates may be seeded manually from the OSAC service catalog (REQ-3b).
-
-| Rate type | Example | Applies to meter |
-|---|---|---|
-| Flat hourly | `$0.10 / VM-hour` | `vm_uptime_seconds` |
-| Per-core hourly | `$0.05 / core-hour` | `vm_cpu_core_seconds` |
-| Per-GiB hourly | `$0.01 / GiB-hour` | `vm_memory_gib_seconds` |
-| Flat monthly | `$500 / node-month` | `cluster_worker_node_seconds` (amortized) |
-
-### 7.2 Cost Formula
-
-```
-cost_amount = metered_value × price_per_unit
-```
-
-For monthly rates applied to sub-monthly metering windows:
-
-```
-daily_cost = (monthly_rate / days_in_month) × (metered_seconds / 86400)
-```
-
-### 7.3 Koku Metric Mapping
-
-Full mapping of meters → Koku cost model metrics is documented in [cost_model_metric_feasibility.md](cost_model_metric_feasibility.md). Summary:
-
-| Feasible (allocation-based) | Not feasible (usage-based) |
-|---|---|
-| `vm_cost_per_hour`, `vm_cost_per_month` | `cpu_core_usage_per_hour` |
-| `vm_core_cost_per_hour`, `vm_core_cost_per_month` | `cpu_core_effective_usage_per_hour` |
-| `cpu_core_request_per_hour`, `memory_gb_request_per_hour` | `memory_gb_usage_per_hour` |
-| `cluster_cost_per_hour`, `cluster_cost_per_month` | `storage_gb_usage_per_month` |
-| `node_cost_per_hour`, `node_core_cost_per_hour` | `gpu_cost_per_month` |
-| `project_per_month` | |
-
-Existing Koku SQL cost model queries can be adapted for the feasible metrics. The PoC may implement a simplified subset focused on demo value.
-
-### 7.4 Report Outputs
-
-Reports derived from metering + rates are documented in [cost-reports-feasibility.md](cost-reports-feasibility.md). PoC priority:
-
-| Phase | Report | Key metrics |
-|---|---|---|
-| **1** | Compute cost by tenant/project | `cpu_core_hours`, `memory_gb_hours`, `cost_total` |
-| **2** | Cluster cost, instance type breakdown | `node_count`, `total_cores`, `cost_total` |
-| **3** | Network resource billing, cost distribution | `network_cost_total`, `distributed_cost` |
-
-Response format follows Koku's hierarchical JSON structure (`meta` / `data` / `total`).
 
 ---
 
@@ -342,12 +353,10 @@ All metering entries carry `tenant_id`. Project attribution comes from the inven
 | # | Question | Owner | Impact |
 |---|---|---|---|
 | 1 | When will OSAC metering collector emit heartbeat CloudEvents? | OSAC | Determines when to retire local sweep |
-| 2 | Heartbeat transport: HTTP push vs Watch stream vs Kafka? | OSAC + Cost | REQ-1b — PoC uses sweep as interim |
-| 3 | Where do rates live — OSAC catalog sync vs manual seed? | Cost | REQ-3b — manual acceptable for PoC |
-| 4 | HostType catalog join for `cores_per_node` on clusters? | OSAC + Cost | Needed for `node_core_cost_per_*` metrics |
-| 5 | BMaaS CloudEvent schema and billable states? | OSAC | REQ-8 |
-| 6 | Network resource metering (VNets, subnets, IPs)? | OSAC + Cost | Phase 3 — not in initial PoC |
-| 7 | Pre-aggregated summary tables for report queries? | Cost | Performance for dashboard SLA |
+| 2 | Heartbeat transport: HTTP push vs gRPC streaming vs Kafka? | OSAC + Cost | REQ-1b names HTTP/Kafka; gRPC is architecturally valid given OSAC's native gRPC API — see §4.3. PoC uses local sweep as interim. |
+| 3 | HostType catalog join for `cores_per_node` on clusters? | OSAC + Cost | Needed for `node_core_cost_per_*` metrics |
+| 4 | BMaaS CloudEvent schema and billable states? | OSAC | REQ-8 |
+| 5 | Network resource metering (VNets, subnets, IPs)? | OSAC + Cost | Phase 3 — not in initial PoC |
 
 ---
 
@@ -356,6 +365,7 @@ All metering entries carry `tenant_id`. Project attribution comes from the inven
 - [POC-ARCH requirements](../../requirements/csv_poc_requirements_summary.md#poc-arch--capacity-based-charging-model)
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
 - [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
+- [Cost calculation and billing spec](../pricing/cost-calculation-spec-draft.md)
 - [Cost model metric feasibility](cost_model_metric_feasibility.md)
 - [Cost reports feasibility](cost-reports-feasibility.md)
 - [Demo scenario](../../demo-scenario-1.md) — end-to-end walkthrough

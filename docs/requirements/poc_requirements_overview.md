@@ -127,20 +127,25 @@ Monitor OSAC "cluster orders" for state changes (created, running, stopped, dest
 
 Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
 
+> **What "heartbeat events" means:** CloudEvents emitted periodically by Moti's OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep; the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
+
 **Acceptance Criteria:**
-- RHCM can receive heartbeat events via HTTP
-- Events parsed for: tenant ID, project ID, resource ID, hardware config
+- RHCM can receive heartbeat events (periodic lifecycle CloudEvents) via HTTP or Kafka
+- Events parsed for: tenant ID, project ID, resource ID, hardware config, duration
 - First event auto-creates tenant/project if not already registered
 - Events processed and cost calculated within target SLA
 
 **Current State:**
-- Event contract between OSAC and RHCM not yet defined
+- PoC satisfies this requirement functionally via the local 60s sweep
+- OSAC metering collector exists ([osac-metering-discover-poc](https://github.com/masayag/osac-metering-discover-poc)) but not yet connected to Cost Management
+- Transport and delivery of heartbeat CloudEvents to Cost Management not yet agreed (R-5, R-6 in event-types.md)
 
 **Open Questions:**
 - Transport mechanism: Kafka, HTTP, NATS?
+- Interval: every 10s, every 30s proposed on the Jun 23rd meeting
 
 **Scope:**
-- IN: Receive and process heartbeat events for capacity-based charging
+- IN: Receive and process periodic lifecycle CloudEvents for capacity-based charging
 - OUT: Usage-based metrics ingestion (not needed for capacity model)
 
 ---

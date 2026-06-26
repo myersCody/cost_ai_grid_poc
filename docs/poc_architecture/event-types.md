@@ -7,16 +7,21 @@
 
 ## Overview
 
-OSAC emits CloudEvents for each resource lifecycle transition. Cost Management consumes these events to maintain inventory state and compute metering entries.
+The OSAC fulfillment service emits CloudEvents for resource lifecycle changes, currently covering **state transitions** (resource created/updated/deleted → inventory sync).
+
+The OSAC team built a separate [periodic metering collector](https://github.com/masayag/osac-metering-discover-poc) that emits the same CloudEvent types on a timer, pre-populated with `duration_seconds` and metering quantities. These are referred to in the requirements as "heartbeat events".
+
+The Cost Management PoC currently runs a 60-second sweep to stand in for that collector. See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
+
 
 ### Event Types
 
-| CloudEvent `type` | Resource | Billing Model |
-|---|---|---|
-| `osac.cluster.lifecycle` | Cluster (CaaS) | Capacity-based |
-| `osac.compute_instance.lifecycle` | VM / ComputeInstance (VMaaS) | Capacity-based |
-| `osac.model.lifecycle` | Model / Inference (MaaS) | Consumption-based |
-| `osac.bare_metal.lifecycle` | Bare Metal (BMaaS) | TBD |
+| CloudEvent `type` | Resource | Billing Model | Schema Status |
+|---|---|---|---|
+| `osac.cluster.lifecycle` | Cluster (CaaS) | Capacity-based | Defined — implemented in PoC |
+| `osac.compute_instance.lifecycle` | VM / ComputeInstance (VMaaS) | Capacity-based | Defined — implemented in PoC |
+| `osac.model.lifecycle` | Model / Inference (MaaS) | Consumption-based | Proposed — awaiting OSAC confirmation (R-1, R-2) |
+| `osac.bare_metal.lifecycle` | Bare Metal (BMaaS) | TBD | Placeholder — blocked on OSAC schema (R-3, R-4) |
 
 ### CloudEvent Envelope (all types)
 
@@ -44,6 +49,22 @@ All OSAC CloudEvents share this outer envelope (CloudEvents 1.0 structured forma
 | `time` | Event timestamp (ISO 8601 UTC) |
 | `subject` | `tenant_id` — used for per-tenant grouping |
 | `data` | Resource-specific payload (see below) |
+
+---
+
+## Required from OSAC
+
+The table below tracks the open items Cost Management needs from OSAC before the full event integration can be completed. CaaS and VMaaS are unblocked; MaaS, BMaaS, and transport are pending.
+
+| # | Item | Needed for | Status | Owner |
+|---|---|---|---|---|
+| R-1 | **MaaS CloudEvent schema** — confirm or revise the proposed fields in §3 (`tokens_in`, `tokens_out`, `inference_tokens`, `requests`, `duration_seconds`) | REQ-2a, MaaS metering | Proposed (see §3); awaiting OSAC confirmation | OSAC |
+| R-2 | **MaaS billable states** — define the `MODEL_STATE_*` state machine and which states are billable (analogous to `CLUSTER_STATE_READY` / `COMPUTE_INSTANCE_STATE_RUNNING`) | REQ-2a, MaaS metering | Not defined | OSAC |
+| R-3 | **BMaaS CloudEvent schema** — confirm field names, types, and any GPU/disk/network additions beyond the placeholder in §4 | REQ-8, BMaaS metering | Placeholder only (see §4) | OSAC |
+| R-4 | **BMaaS billable states** — define the `BARE_METAL_STATE_*` state machine and which states are billable | REQ-8, BMaaS metering | Not defined | OSAC |
+| R-5 | **Heartbeat collector delivery** — connect the OSAC metering collector to Cost Management over HTTP or Kafka; agree on emission interval (requirements: 10–30s; existing collector: 60s). **Not a PoC blocker** — the local sweep covers this for the demo. Required for production (Phase 4). See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md). | REQ-1b, POC-ARCH Phase 4 | **Not a PoC blocker.** Collector exists; production delivery TBD | OSAC |
+| R-6 | **Kafka topic names and format** — confirm or revise proposed topics in §5 (`osac.events.caas`, `osac.events.vmaas`, etc.) and agree on partitioning key | REQ-1b transport | Proposed (see §5); TBD | OSAC + Cost |
+| R-7 | **MaaS event source** — confirm whether OSAC or OpenShift AI 5 emits MaaS CloudEvents, and whether Cost consumes them directly or via OSAC | REQ-2a | Open question | OSAC + Cost |
 
 ---
 
@@ -368,4 +389,5 @@ The existing collector scripts (`collect-caas.sh`, `collect.sh`) can be used as 
 - [CloudEvents Specification v1.0](https://cloudevents.io/)
 - [OSAC CaaS Metering README](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README-caas.md)
 - [OSAC VMaaS Metering README](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README.md)
+- [ADR-003: Heartbeat Events vs. Local Sweep](../../decisions/003-heartbeat-emitter-vs-sweep.md) — what heartbeat events are, how the PoC works around them, and what OSAC must deliver for production
 - [docs/poc_architecture/architecture.md](architecture.md)
