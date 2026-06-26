@@ -52,10 +52,19 @@ When modifying source code, keep the corresponding docs in sync:
   MaaS metering section if MaaS meters change
 
 ### When modifying `internal/inventory/store.go` (schema changes):
+- Update [docs/data-model.md](docs/data-model.md) — table list, ERD
+  diagrams, meter definitions
+- Rebuild ERDs if tables added/removed:
+  `dot -Tsvg docs/diagrams/erd-inventory.dot -o docs/diagrams/erd-inventory.svg`
+  `dot -Tsvg docs/diagrams/erd-metering-cost.dot -o docs/diagrams/erd-metering-cost.svg`
 - Update [docs/api-reference.md](docs/api-reference.md) if new endpoints
   depend on new tables
 - Update [docs/grpc-messages-catalog.md](docs/grpc-messages-catalog.md) if
   new inventory tables map to new resource types
+
+### When modifying `internal/inventory/models.go`:
+- Update [docs/data-model.md](docs/data-model.md) — Go model links in
+  the tables section
 
 ### When modifying `internal/osac/client.go`:
 - Update [docs/grpc-messages-catalog.md](docs/grpc-messages-catalog.md) —
