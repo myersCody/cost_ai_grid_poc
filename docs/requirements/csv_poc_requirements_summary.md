@@ -6,6 +6,8 @@
 
 This document summarizes the requirements, new work, and scope boundaries for the Cost Management AI Grid Proof of Concept. The PoC integrates Red Hat Cost Management (RHCM) with OSAC (Open Sovereign AI Console) to demonstrate capacity-based charging for provisioned resources on a sovereign cloud platform.
 
+MaaS-related requirements (token metering, OpenShift AI cloud events) have been moved to a separate post-PoC backlog. See [Future Work (Post-PoC)](#future-work-post-poc).
+
 ---
 
 ## Requirements
@@ -13,12 +15,16 @@ This document summarizes the requirements, new work, and scope boundaries for th
 ### POC-ENV — On-Premise Deployment
 **Priority:** CRITICAL
 
-Deploy RHCM on-premise (single cluster) in a minimal configuration focused on demonstrating data ingestion and cost reporting. Not all components are required (e.g., the ingress component may be skipped).
+On-prem RHCM deployment to demo capacity-based charging with OSAC heartbeat events. Not all components may be needed.
 
 **Acceptance Criteria:**
 - Cost Management deployed on-premise in a single cluster
 - Tuned for performance, not feature completeness
-- Can demonstrate end-to-end flow: consumption event → ingestion → cost report
+- Can demonstrate end-to-end flow: consumption → event → ingestion → cost report
+
+**Current State:**
+- On-premise deployment is possible but not the standard deployment model
+- Need to determine which cluster/environment to use
 
 **Scope:**
 - IN: Minimal on-prem deployment focused on data ingestion demo
@@ -29,17 +35,21 @@ Deploy RHCM on-premise (single cluster) in a minimal configuration focused on de
 ### POC-ARCH — Capacity-Based Charging Model
 **Priority:** CRITICAL
 
-Charge based on what was provisioned (VM size, cluster config) and for how long. This is a standalone PoC component — a new data path driven by heartbeat events from OSAC, built outside of Koku for speed.
+Charge based on what was provisioned (VM size, cluster config) and for how long. No metric scraping, no CSV pipeline changes; existing cost models may partially work. This is a standalone PoC component — a new data path driven by heartbeat events from OSAC.
 
 **Acceptance Criteria:**
 - Costs calculated from provisioned capacity (instance type, duration)
 - Heartbeat events from OSAC drive cost calculation
 - No dependency on workload cluster metrics for PoC
+- Existing SQL queries adapted to support capacity-based model
 - Demo-ready: show cost for a provisioned cluster/VM within SLA
 
 **Current State:**
-- Decision made: standalone PoC component built outside Koku
-- Per-cluster and per-VM cost models in RHCM exist as reference only
+- Per-cluster and per-VM cost models already exist in RHCM
+- SQL queries may already partially support this
+- Different pipeline than existing CSV ingestion;
+- cloud events = fundamentally different architecture from batch processing
+- Cost Team must decide build standalone PoC component
 
 **Scope:**
 - IN: Capacity-based charging for clusters and VMs
@@ -60,9 +70,11 @@ Connect RHCM to the OSAC Region Management Cluster (gRPC/REST APIs) to read inve
 - Integration does not degrade orchestrator UX
 
 **Current State:**
-- OSAC integration has not been attempted before
-- Region Management Cluster confirmed as the integration point
+- OSAC integration has never been attempted
+- Previous integration exists as reference
+- Region Management Cluster confirmed as integration point (Jun 23)
 - OSAC uses gRPC and REST (not the Kubernetes API)
+- Ecosystem/Flight Path team may contribute code
 
 **Scope:**
 - IN: Connection to Region Management Cluster; reading inventory and state
@@ -78,13 +90,14 @@ Monitor OSAC "cluster orders" for state changes (created, running, stopped, dest
 **Acceptance Criteria:**
 - RHCM monitors cluster orders via the OSAC management layer
 - State changes (create, stop, start, destroy) are captured
-- Cluster rate configured in RHCM per cluster order
+- Cluster rate set in Cost Management per cluster order
 - Cluster cost calculated based on provisioned capacity and duration
 - No dependency on internal workload cluster data
 
 **Current State:**
 - OSAC APIs confirmed (gRPC/REST) at Region Management Cluster
 - "Cluster orders" is the OSAC equivalent of a provisioned cluster
+- Confirmed architecture in Jun 23 meeting
 
 **Scope:**
 - IN: Cluster order monitoring and capacity-based cost calculation
@@ -95,7 +108,7 @@ Monitor OSAC "cluster orders" for state changes (created, running, stopped, dest
 ### REQ-1b — OSAC Heartbeat Event Ingestion
 **Priority:** CRITICAL
 
-Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
+Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
 
 **Acceptance Criteria:**
 - RHCM can receive heartbeat events via HTTP
@@ -104,7 +117,6 @@ Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD) at configur
 - Events processed and cost calculated within target SLA
 
 **Current State:**
-- A working Open Meter PoC script exists (HTTP/cURL based cloud events)
 - Event contract between OSAC and RHCM not yet defined
 
 **Scope:**
@@ -121,10 +133,11 @@ Process OSAC heartbeat events and calculate costs within 60 seconds of receipt. 
 **Acceptance Criteria:**
 - RHCM processes OSAC heartbeat events within 60 seconds of receipt
 - End-to-end latency under 90 seconds (OSAC send + RHCM process)
-- Cost report available after processing
+- Cost report available in dashboard after processing
 - Demonstrated with at least one workload type in PoC
 
 **Current State:**
+- This is a NEW data path (HTTP events), not a rework of the CSV pipeline
 - OpenShift-only data enables cheaper/faster SQL queries compared to cloud data
 - Ingress component may not be needed for this flow
 
@@ -147,10 +160,11 @@ Single system of record for cost data with drill-down by tenant, project, model,
 
 **Current State:**
 - Core RHCM cost tracking and reporting capability exists in-product
+- Dashboard and export functionality are in-product
 
 **Scope:**
 - IN: Granular cost breakdowns at listed dimensions
-- OUT: Account hierarchy management (owned by external billing system)
+- OUT: Account hierarchy management
 
 > **TODO (Product Management):** The acceptance criterion "Dashboard shows near-real-time token consumption, compute hours, estimated costs" references token consumption, which is out of scope for the capacity-based PoC (token metering belongs to the MaaS workstream). Please confirm whether this bullet should be removed or reworded to reflect capacity-based cost tracking only (e.g., compute hours and estimated costs).
 
@@ -169,7 +183,8 @@ Map OSAC's Tenant → Project hierarchy to RHCM's organizational model. All cost
 
 **Current State:**
 - RHCM currently attributes data per organization/cluster
-- OSAC tenant/project hierarchy is documented; mapping to RHCM organizations needs design
+- OSAC tenant/project hierarchy is documented
+- Mapping OSAC tenants to RHCM organizations needs design
 
 **Scope:**
 - IN: Tenant and project-level cost attribution
@@ -191,6 +206,7 @@ Read OSAC service catalog for pricing. Manual setup acceptable for PoC; API sync
 - RHCM does not have a service catalog feature today
 - Existing per-cluster/per-VM cost models may partially work
 - Catalog lives in OSAC; RHCM is a downstream consumer
+- OSAC core team owns catalog
 
 **Scope:**
 - IN: Read OSAC catalog and apply capacity-based rates
@@ -222,7 +238,7 @@ Export chargeback reports mapping GPU hours to token consumption per business un
 ### REQ-8 — Bare Metal Costing (OSAC Bare Metal Service)
 **Priority:** HIGH
 
-Support bare metal nodes provisioned through OSAC, including potential standalone nodes outside OpenShift clusters. Consume bare metal service cloud events for capacity-based costing.
+Support bare metal nodes provisioned through OSAC, including potential standalone nodes outside OpenShift clusters (standalone rail/bare metal). Consume bare metal service cloud events for capacity-based costing.
 
 **Acceptance Criteria:**
 - RHCM receives and processes bare metal service cloud events from OSAC
@@ -230,9 +246,10 @@ Support bare metal nodes provisioned through OSAC, including potential standalon
 - Standalone bare metal nodes (not attached to OpenShift) supported if required by AI Grid
 
 **Current State:**
-- OSAC bare metal service is actively being built
+- OSAC bare metal service is actively being built (confirmed Jun 24)
 - RHCM already supports OpenShift bare metal costing
-- Open question: whether standalone nodes outside OpenShift clusters must be supported
+- Open question: do we need to support nodes outside OpenShift clusters?
+- Pau to investigate standalone bare metal requirements
 
 **Scope:**
 - IN: Bare metal capacity-based costing via OSAC cloud events
@@ -241,9 +258,9 @@ Support bare metal nodes provisioned through OSAC, including potential standalon
 ---
 
 ### REQ-9 — Quota/Budget Status API
-**Priority:** HIGH
+**Priority:** CRITICAL
 
-Expose a fast API for OSAC to check quota and budget status before allowing resource creation. Enforcement remains with OSAC; RHCM provides the data.
+Expose a fast API for OSAC to check quota and budget status before allowing resource creation (e.g., "Is this tenant within quota?"). Enforcement remains with OSAC; RHCM provides the data.
 
 **Acceptance Criteria:**
 - API responds with sub-second latency
@@ -254,6 +271,7 @@ Expose a fast API for OSAC to check quota and budget status before allowing reso
 **Current State:**
 - No quota/budget API exists in RHCM today
 - Open question: is RHCM or OSAC the source of truth for quota/budget data?
+- Enforcement is OSAC responsibility; RHCM provides the data
 
 **Scope:**
 - IN: Read-only quota/budget status API for OSAC consumption
@@ -273,8 +291,10 @@ Send threshold notifications from RHCM to OSAC when cost/quota consumption hits 
 - Notifications delivered reliably (no silent drops)
 
 **Current State:**
-- Transport options under discussion: webhook, Kafka, cloud events
-- Grace periods for budget overages may be required (pending AI Grid requirements review)
+- No back channel from RHCM to OSAC exists today
+- Jun 24 meeting: transport options discussed (webhook, Kafka, cloud events)
+- OSAC archtiect to consult with OSAC working group architect about OSAC alerting capabilities
+- Grace periods for budget overages may be required
 
 **Scope:**
 - IN: Threshold notification mechanism from RHCM to OSAC
@@ -301,7 +321,7 @@ The following items require new epics or stories and have no existing implementa
 
 - No Prometheus metric scraping from workload clusters
 - No rework of the hourly CSV ingestion pipeline
-- No GPU-second granularity or token-level metering (separate MaaS workstream)
+- No GPU-second granularity or token-level metering (separate MaaS workstream — see Future Work)
 - No installing collectors on individual workload clusters; ingress component may not be needed
 - API-only is acceptable for PoC (UI is nice-to-have)
 
@@ -312,6 +332,7 @@ The following items require new epics or stories and have no existing implementa
 | Item | Reason |
 |------|--------|
 | Usage-based metering | Capacity-based charging adopted for PoC. Heartbeat events from OSAC replace the hourly CSV pipeline. |
+| Token metering & OpenShift AI cloud events | Moved to post-PoC MaaS workstream (REQ-2a, REQ-4). Not required for the capacity-based PoC. |
 | Quota enforcement / budget cutoff | RHCM provides quota status data only (REQ-9); enforcement is OSAC's responsibility. |
 | Token/budget limit definitions | Limits are defined and owned by OSAC at the tenant/project level; RHCM notifies when thresholds are met. |
 | Service catalog ownership | The catalog (instance types, storage tiers) lives in OSAC. RHCM reads it for pricing; no bilateral sync needed for PoC. |
@@ -321,16 +342,16 @@ The following items require new epics or stories and have no existing implementa
 
 ---
 
-## Uncertain if requirements for POC
+## Future Work (Post-PoC)
 
-The following items were originally listed as requirements but are explicitly called out as not needed for the PoC. Their inclusion alongside PoC requirements is misleading. **Product Management should confirm whether these belong in a Post-PoC / MaaS Workstream backlog or should be removed from this document entirely.**
+The following items were moved out of PoC scope by Product Management.
 
 ---
 
-### REQ-2a — Cloud Events from OpenShift AI *(MaaS workstream, separate from PoC)*
-**Priority:** HIGH *(needs revisiting if deferred)*
+### REQ-2a — Cloud Events from OpenShift AI (MaaS workstream)
+**Priority:** HIGH
 
-Consume Cloud Events from OpenShift AI 5 for token metering. This is a separate workstream from the capacity-based PoC.
+Consume Cloud Events from OpenShift AI 5 for token metering. Separate from the capacity-based PoC (MaaS workstream).
 
 **Acceptance Criteria:**
 - RHCM can receive and process Cloud Events from OpenShift AI
@@ -338,29 +359,40 @@ Consume Cloud Events from OpenShift AI 5 for token metering. This is a separate 
 - JSON/CloudEvents format parsed and stored
 - Validated with at least one MaaS workload type
 
-**Scope:**
-- IN: Receive and process OpenShift AI Cloud Events for MaaS metering
-- OUT: Production-grade event pipeline; **not required for the capacity-based PoC**
+**Current State:**
+- OpenShift AI Cloud Events capability is upcoming (v5)
+- This is a separate workstream from the capacity-based PoC
+- Spike in progress investigating metrics for MaaS chargeback
 
-> **TODO (Product Management):** Please confirm whether REQ-2a should be tracked as a Post-PoC / MaaS Workstream item or removed from this document. The HIGH priority label should also be revisited.
+**Scope:**
+- Moved from PoC Requirements
+- NOT needed for the capacity-based PoC
+- Future MaaS workstream
 
 ---
 
-### REQ-4 — Token Metering *(MaaS workstream, separate from PoC)*
-**Priority:** HIGH *(needs revisiting if deferred)*
+### REQ-4 — Token Metering (MaaS workstream)
+**Priority:** HIGH
 
-Track token dimensions (input, output, cached, reasoning) and GPU compute metrics. Separate from the capacity-based PoC.
+Track token dimensions (input, output, cached, reasoning) and GPU compute metrics. Separate from the capacity-based PoC (MaaS workstream).
 
 **Acceptance Criteria:**
 - Ingest prompt_tokens, completion_tokens, cached_tokens from vLLM
 - Track hardware compute: GPU SKU, VRAM (GB-seconds), queue wait
-- Token data available for cost calculation and dashboard
+- Token data available for cost calculation and in dashboard
+
+**Current State:**
+- Hardware compute metrics covered
+- Token details partially available via vLLM usage API
+- Custom IPP plugins may be needed
+- This is Yaron's workstream, separate from capacity PoC
 
 **Scope:**
-- IN: Text token metering for future MaaS support
-- OUT: Multi-modal (image, audio); **not required for capacity-based PoC**
+- Moved from PoC Requirements
+- NOT required for the capacity-based PoC
+- Future MaaS workstream
 
-> **TODO (Product Management):** Please confirm whether REQ-4 should be tracked as a Post-PoC / MaaS Workstream item or removed from this document. The HIGH priority label should also be revisited.
+---
 
 ### REQ-6 — Platform Security & Access Control
 **Priority:** STANDARD
@@ -373,13 +405,12 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 - All API endpoints use modern crypto transport and short-lived tokens
 
 **Current State:**
-- In-product; no gap identified. On-prem RBAC and security review work is in progress.
+- In-product; no gap identified
+- On-prem RBAC and security review work tracked under POC-ENV (COST-7570, COST-7670, COST-7544, COST-7547)
 
 **Scope:**
 - IN: All listed security controls
 - OUT: N/A
-
-> **TODO (Product Management):** Please confirm whether REQ-6 should be tracked as a Post-PoC item or removed from this document. The STANDARD priority label should also be revisited.
 
 ---
 
@@ -394,12 +425,11 @@ Zero-leakage reconciliation, immutable audit logs, and dispute resolution suppor
 - Human-readable error logging for billing dispute resolution
 
 **Current State:**
-- In-product; no gap identified. On-prem audit work is in progress.
+- In-product; no gap identified
+- On-prem audit work tracked under POC-ENV (COST-7541, COST-7328)
 
 **Scope:**
 - IN: All listed audit/reconciliation controls
 - OUT: N/A
-
-> **TODO (Product Management):** Please confirm whether REQ-7 should be tracked as a Post-PoC item or removed from this document. The STANDARD priority label should also be revisited.
 
 ---
