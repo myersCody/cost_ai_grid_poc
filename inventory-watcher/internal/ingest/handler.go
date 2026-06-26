@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
@@ -46,10 +48,11 @@ func NewHandler(store *inventory.Store, meter *metering.Meter, logger *slog.Logg
 	return &Handler{store: store, meter: meter, logger: logger}
 }
 
-// ServeMux returns an HTTP mux with the ingest endpoints.
+// ServeMux returns an HTTP mux with the ingest and query endpoints.
 func (h *Handler) ServeMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/events", h.handleEvent)
+	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintln(w, `{"status":"ok"}`)
@@ -114,4 +117,75 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusAccepted)
 	fmt.Fprintln(w, `{"status":"accepted"}`)
+}
+
+type quotaStatusResponse struct {
+	TenantID string                 `json:"tenant_id"`
+	Period   string                 `json:"period"`
+	Quotas   []inventory.QuotaStatus `json:"quotas"`
+}
+
+var thresholdLevels = []float64{50, 70, 90, 100}
+
+func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.PathValue("tenant_id")
+	if tenantID == "" {
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/"), "/")
+		if len(parts) > 0 {
+			tenantID = parts[0]
+		}
+	}
+	if tenantID == "" {
+		http.Error(w, `{"error":"tenant_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	now := time.Now().UTC()
+	periodStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+	periodLabel := now.Format("2006-01")
+
+	quotas, err := h.store.QuotasForTenant(ctx, tenantID, now)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	var statuses []inventory.QuotaStatus
+	for _, q := range quotas {
+		consumed, err := h.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+		if err != nil {
+			h.logger.Error("failed to sum metering", "tenant", tenantID, "meter", q.MeterName, "error", err)
+			continue
+		}
+
+		pct := 0.0
+		if q.LimitValue > 0 {
+			pct = (consumed / q.LimitValue) * 100
+		}
+
+		thresholds := make(map[string]bool, len(thresholdLevels))
+		for _, t := range thresholdLevels {
+			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
+		}
+
+		statuses = append(statuses, inventory.QuotaStatus{
+			MeterName:  q.MeterName,
+			Unit:       q.Unit,
+			Limit:      q.LimitValue,
+			Consumed:   consumed,
+			Percentage: math.Round(pct*100) / 100,
+			Thresholds: thresholds,
+		})
+	}
+
+	resp := quotaStatusResponse{
+		TenantID: tenantID,
+		Period:   periodLabel,
+		Quotas:   statuses,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

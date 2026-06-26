@@ -130,6 +130,28 @@ type CostEntry struct {
 	PeriodEnd       time.Time `json:"period_end"`
 }
 
+type QuotaRecord struct {
+	ID            int64      `json:"id"`
+	TenantID      string     `json:"tenant_id"`
+	ProjectID     string     `json:"project_id"`
+	ResourceType  string     `json:"resource_type"`
+	MeterName     string     `json:"meter_name"`
+	LimitValue    float64    `json:"limit_value"`
+	Unit          string     `json:"unit"`
+	Period        string     `json:"period"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
+}
+
+type QuotaStatus struct {
+	MeterName  string             `json:"meter_name"`
+	Unit       string             `json:"unit"`
+	Limit      float64            `json:"limit"`
+	Consumed   float64            `json:"consumed"`
+	Percentage float64            `json:"percentage"`
+	Thresholds map[string]bool    `json:"thresholds"`
+}
+
 type DailyUsageSummary struct {
 	UsageDate    time.Time `json:"usage_date"`
 	ClusterID    string    `json:"cluster_id"`

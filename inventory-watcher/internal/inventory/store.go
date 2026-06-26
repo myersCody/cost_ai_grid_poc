@@ -187,6 +187,21 @@ CREATE TABLE IF NOT EXISTS cost_entries (
 
 CREATE INDEX IF NOT EXISTS idx_ce_tenant_period ON cost_entries (tenant_id, period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_ce_metering ON cost_entries (metering_entry_id);
+
+CREATE TABLE IF NOT EXISTS quotas (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    project_id     TEXT NOT NULL DEFAULT '',
+    resource_type  TEXT NOT NULL DEFAULT '',
+    meter_name     TEXT NOT NULL,
+    limit_value    NUMERIC(18,6) NOT NULL,
+    unit           TEXT NOT NULL,
+    period         TEXT NOT NULL DEFAULT 'monthly',
+    effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    effective_to   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotas_tenant ON quotas (tenant_id, meter_name);
 `
 
 // InsertRawEvent stores an event immutably. Returns false if the event was
@@ -751,6 +766,81 @@ func (s *Store) InsertCostEntry(ctx context.Context, entry CostEntry) error {
 func (s *Store) RateCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM rates`).Scan(&count)
+	return count, err
+}
+
+// UpsertQuota inserts a quota definition.
+func (s *Store) UpsertQuota(ctx context.Context, q QuotaRecord) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO quotas
+			(tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id
+	`, q.TenantID, q.ProjectID, q.ResourceType, q.MeterName, q.LimitValue,
+		q.Unit, q.Period, q.EffectiveFrom, q.EffectiveTo).Scan(&id)
+
+	if err != nil {
+		return 0, fmt.Errorf("upsert quota: %w", err)
+	}
+	return id, nil
+}
+
+// QuotasForTenant returns all active quotas for a tenant.
+func (s *Store) QuotasForTenant(ctx context.Context, tenantID string, at time.Time) ([]QuotaRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to
+		FROM quotas
+		WHERE tenant_id = $1
+		  AND effective_from <= $2
+		  AND (effective_to IS NULL OR effective_to > $2)
+		ORDER BY meter_name
+	`, tenantID, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []QuotaRecord
+	for rows.Next() {
+		var r QuotaRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
+			&r.LimitValue, &r.Unit, &r.Period, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// MeteringSum returns the total metered value for a tenant + meter in a time range.
+func (s *Store) MeteringSum(ctx context.Context, tenantID, meterName string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(value), 0)
+		FROM metering_entries
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND period_start >= $3 AND period_end <= $4
+	`, tenantID, meterName, from, to).Scan(&sum)
+	return sum, err
+}
+
+// CostSum returns the total cost for a tenant + meter in a time range.
+func (s *Store) CostSum(ctx context.Context, tenantID, meterName string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_amount), 0)
+		FROM cost_entries
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND period_start >= $3 AND period_end <= $4
+	`, tenantID, meterName, from, to).Scan(&sum)
+	return sum, err
+}
+
+// QuotaCount returns the number of quotas in the table.
+func (s *Store) QuotaCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM quotas`).Scan(&count)
 	return count, err
 }
 

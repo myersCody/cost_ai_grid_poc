@@ -62,6 +62,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := rating.SeedDefaultQuotas(ctx, store, logger); err != nil {
+		logger.Error("failed to seed default quotas", "error", err)
+		os.Exit(1)
+	}
+
 	osacClient, err := osac.NewClient(cfg.OSACBaseURL, cfg.OSACToken, cfg.OSACCACert, logger)
 	if err != nil {
 		logger.Error("failed to create OSAC client", "error", err)

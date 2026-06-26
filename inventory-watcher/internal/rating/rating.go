@@ -150,3 +150,53 @@ func SeedDefaultRates(ctx context.Context, store *inventory.Store, logger *slog.
 	logger.Info("seeded default rates", "count", len(defaults))
 	return nil
 }
+
+// SeedDefaultQuotas populates the quotas table with demo defaults if empty.
+func SeedDefaultQuotas(ctx context.Context, store *inventory.Store, logger *slog.Logger) error {
+	count, err := store.QuotaCount(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		logger.Info("quotas already seeded", "count", count)
+		return nil
+	}
+
+	now := time.Now().UTC()
+	tenants := []string{"tenant-acme", "tenant-globex", "tenant-initech", "shared"}
+
+	type quotaDef struct {
+		meterName string
+		limit     float64
+		unit      string
+	}
+	defs := []quotaDef{
+		{"vm_cpu_core_seconds", 360000, "core_seconds"},
+		{"vm_memory_gib_seconds", 1440000, "gib_seconds"},
+		{"vm_uptime_seconds", 86400, "seconds"},
+		{"maas_tokens_in", 10_000_000, "tokens"},
+		{"maas_tokens_out", 5_000_000, "tokens"},
+		{"maas_inference_tokens", 15_000_000, "tokens"},
+		{"maas_requests", 100_000, "requests"},
+	}
+
+	seeded := 0
+	for _, tenant := range tenants {
+		for _, d := range defs {
+			if _, err := store.UpsertQuota(ctx, inventory.QuotaRecord{
+				TenantID:      tenant,
+				MeterName:     d.meterName,
+				LimitValue:    d.limit,
+				Unit:          d.unit,
+				Period:        "monthly",
+				EffectiveFrom: now,
+			}); err != nil {
+				return err
+			}
+			seeded++
+		}
+	}
+
+	logger.Info("seeded default quotas", "count", seeded)
+	return nil
+}
