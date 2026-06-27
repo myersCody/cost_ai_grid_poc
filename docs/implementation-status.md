@@ -1,18 +1,18 @@
 # Implementation Status
 
 > Cross-referenced with the
-> [updated requirements spec](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md)
-> and the
-> [original requirements brief](https://github.com/martinpovolny/cost_ai_grid_poc/blob/main/docs/requirements/ai_grid_poc_requirements_brief.md).
+> [consolidated requirements spec v1.1](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
+> (replaces both the csv_poc_requirements_summary and the original brief).
 
 ## Summary
 
 | Priority | Total | Done | Partial | Not Started |
 |---|---|---|---|---|
-| CRITICAL | 5 | 3 | 1 | 1 |
-| HIGH | 6 | 2 | 2 | 2 |
+| CRITICAL | 5 | 4 | 0 | 1 |
+| HIGH | 8 | 4 | 2 | 2 |
 | MEDIUM | 2 | 0 | 2 | 0 |
-| **Total** | **13** | **5** | **5** | **3** |
+| Must Have | 1 | 1 | 0 | 0 |
+| **Total** | **16** | **9** | **4** | **3** |
 
 ## CRITICAL Requirements
 
@@ -56,19 +56,21 @@ Helm chart / OLM work for RHCM on-prem.
 ---
 
 ### REQ-1b — OSAC Heartbeat Event Ingestion
-**Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-1b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-1b--osac-heartbeat-event-ingestion)
+**Status:** Done
+**Spec:** [poc_requirements_overview.md#req-1b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1b--osac-heartbeat-event-ingestion)
+
+> **Clarification:** "Heartbeat events" are CloudEvents emitted periodically
+> by the OSAC metering collector — same schema as lifecycle events, just fired
+> on a timer with pre-calculated `duration_seconds`. Our local 60s metering
+> sweep produces functionally identical data. The spec confirms this satisfies
+> the requirement. See [ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md).
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
-| Receive events via HTTP | Done | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) — `POST /api/v1/events` |
-| Parse tenant/project/resource/hardware | Done | MaaS CloudEvents parsed; VM data via Watch stream |
-| First event auto-creates tenant/project | Done | `UpsertModel` creates on first event |
-| Events processed within SLA | Done | <1ms per event |
-
-**Gap:** Ingest endpoint accepts MaaS CloudEvents format. The spec describes
-a "heartbeat" format — needs clarification on whether these differ.
-Deferred pending OSAC team input.
+| Receive periodic lifecycle CloudEvents via HTTP | Done | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) — `POST /api/v1/events` |
+| Parse tenant/project/resource/hardware/duration | Done | MaaS CloudEvents parsed; VM data via Watch stream |
+| First event auto-creates tenant/project | Done | `UpsertModel` / `UpsertComputeInstance` create on first event |
+| Events processed within SLA | Done | <1ms per event; local sweep every 60s |
 
 ---
 
@@ -155,10 +157,66 @@ VM metering — add handler + meters.
 
 ### REQ-10 — Threshold Notifications to OSAC
 **Status:** Not started
-**Spec:** [csv_poc_requirements_summary.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-10--threshold-notification-back-channel-to-osac)
+**Spec:** [poc_requirements_overview.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-10--threshold-notification-back-channel-to-osac)
 
 Depends on REQ-9 (done). Next step: when a threshold is crossed, emit a
 webhook/event to OSAC. Needs transport agreement (webhook vs CloudEvent).
+
+---
+
+### REQ-2a — Cloud Events from OpenShift AI (MaaS)
+**Status:** Done (mock)
+**Spec:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a--cloud-events-from-openshift-ai-maas)
+
+> **Note:** Previously deferred from PoC; now in-scope per v1.1 spec.
+
+| Acceptance Criterion | Status | Implementation |
+|---|---|---|
+| Receive and process MaaS CloudEvents | Done (mock) | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) |
+| Events ingested within 30 seconds | Done | <1ms per event |
+| CloudEvents format parsed and stored | Done | `raw_events` table |
+| MaaS cost computed within 60s | Done | Rating sweep every 30s |
+
+Blocked on real OSAC Model entity and MaaS CloudEvents schema.
+See [req2 gap analysis](req2-maas-costing-gap-analysis.md).
+
+---
+
+### REQ-4 — Token Metering (MaaS)
+**Status:** Done (mock)
+**Spec:** [poc_requirements_overview.md#req-4](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-4--token-metering-maas)
+
+> **Note:** Previously deferred from PoC; now in-scope per v1.1 spec.
+
+| Acceptance Criterion | Status | Implementation |
+|---|---|---|
+| Ingest token dimensions | Done (mock) | `maas_tokens_in`, `maas_tokens_out`, `maas_inference_tokens` |
+| Token data available for cost calculation | Done | Metering entries → cost entries via rating sweep |
+| MaaS rate structure defined | Done | Default rates seeded: $0.50/M in, $1.50/M out, $1.00/M inference, $5.00/M requests |
+
+---
+
+### REQ-13 — Custom Rate Dimensions
+**Status:** Not started
+**Spec:** [poc_requirements_overview.md#req-13](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-13--custom-rate-dimensions-custom-metrics)
+
+Ability to create custom rates from arbitrary CloudEvent dimensions.
+See [rating engine research](research/rating-engine-options.md) — GoRules/Zen
+recommended for post-PoC programmable rating.
+
+---
+
+## MUST HAVE Requirements
+
+### REQ-11 — Cost Tiers
+**Status:** Done
+**Spec:** [poc_requirements_overview.md#req-11](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-11--cost-tiers)
+
+| Acceptance Criterion | Status | Implementation |
+|---|---|---|
+| Multiple pricing tiers per resource type | Done | `rates.tiers` JSONB column; [`internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go) → `applyTieredRate` |
+| Tiers apply to capacity and MaaS rates | Done | Same rate engine for both |
+| Tier config without code changes | Done | JSON in `rates` table; no recompile needed |
 
 ---
 
@@ -187,12 +245,13 @@ See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
 
 ---
 
-## Deferred (MaaS Workstream — Not PoC)
+## Future Work (Post-PoC)
 
-| Req | Title | Our Status | Notes |
+| Req | Title | Status | Notes |
 |---|---|---|---|
-| [REQ-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-2a--cloud-events-from-openshift-ai-maas-workstream-separate-from-poc) | Cloud Events from OpenShift AI | Done (mock) | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
-| [REQ-4](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-4--token-metering-maas-workstream-separate-from-poc) | Token Metering | Done (mock) | 4 meters, simulator, 1700 events/s |
+| [REQ-6](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-6--platform-security--access-control) | Security & Access Control | N/A | In-product, no gap |
+| [REQ-7](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-7--reconciliation-auditing--dispute-tracing) | Reconciliation & Auditing | Partial | `raw_events` provides immutable audit trail |
+| [REQ-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12--daily-openshift-virtualization-costs) | Daily OCP Virt Costs | TBD | Pending PM confirmation |
 
 ---
 
@@ -202,6 +261,7 @@ See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
 |---|---|---|
 | ADR-001 | Metering sweep interval (60s) | [001-metering-sweep-interval.md](decisions/001-metering-sweep-interval.md) |
 | ADR-002 | Arguments against Kafka | [002-arguments-against-kafka.md](decisions/002-arguments-against-kafka.md) |
+| ADR-003 | Heartbeat events vs local sweep | [003-heartbeat-emitter-vs-sweep.md](decisions/003-heartbeat-emitter-vs-sweep.md) |
 
 ## Related Documentation
 
