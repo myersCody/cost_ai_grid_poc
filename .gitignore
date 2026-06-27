@@ -22,3 +22,4 @@ __pycache__/
 server.key
 server.crt
 docs/.markdown-viewer-temp.html
+docs/research/.markdown-viewer-temp.html
