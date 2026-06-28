@@ -43,6 +43,7 @@ func (r *Rater) sweep(ctx context.Context) {
 	}
 
 	if len(entries) == 0 {
+		r.evaluateThresholds(ctx)
 		return
 	}
 
@@ -77,6 +78,66 @@ func (r *Rater) sweep(ctx context.Context) {
 	}
 
 	r.logger.Info("rating sweep complete", "rated", rated, "skipped", skipped)
+
+	r.evaluateThresholds(ctx)
+}
+
+var thresholdLevels = []float64{50, 70, 90, 100}
+
+func (r *Rater) evaluateThresholds(ctx context.Context) {
+	now := time.Now().UTC()
+	period := now.Format("2006-01")
+	periodStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := periodStart.AddDate(0, 1, 0)
+
+	tenants, err := r.store.AllTenantsWithQuotas(ctx, now)
+	if err != nil {
+		r.logger.Error("failed to list tenants for threshold check", "error", err)
+		return
+	}
+
+	fired := 0
+	for _, tenantID := range tenants {
+		quotas, err := r.store.QuotasForTenant(ctx, tenantID, now)
+		if err != nil {
+			continue
+		}
+
+		for _, q := range quotas {
+			consumed, err := r.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+			if err != nil || consumed == 0 {
+				continue
+			}
+
+			pct := (consumed / q.LimitValue) * 100
+
+			for _, threshold := range thresholdLevels {
+				if pct >= threshold {
+					inserted, err := r.store.InsertAlert(ctx, inventory.AlertRecord{
+						TenantID:     tenantID,
+						MeterName:    q.MeterName,
+						ThresholdPct: threshold,
+						Consumed:     consumed,
+						LimitValue:   q.LimitValue,
+						Period:       period,
+					})
+					if err != nil {
+						r.logger.Error("failed to insert alert", "tenant", tenantID, "meter", q.MeterName, "error", err)
+					}
+					if inserted {
+						r.logger.Info("threshold alert fired",
+							"tenant", tenantID, "meter", q.MeterName,
+							"threshold", threshold, "consumed", consumed, "limit", q.LimitValue)
+						fired++
+					}
+				}
+			}
+		}
+	}
+
+	if fired > 0 {
+		r.logger.Info("threshold evaluation complete", "new_alerts", fired)
+	}
 }
 
 // ApplyRate computes cost for a metered value using flat or tiered pricing.

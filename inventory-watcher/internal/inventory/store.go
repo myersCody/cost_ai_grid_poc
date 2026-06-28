@@ -202,6 +202,21 @@ CREATE TABLE IF NOT EXISTS quotas (
 );
 
 CREATE INDEX IF NOT EXISTS idx_quotas_tenant ON quotas (tenant_id, meter_name);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    meter_name     TEXT NOT NULL,
+    threshold_pct  NUMERIC NOT NULL,
+    consumed       NUMERIC(18,6) NOT NULL,
+    limit_value    NUMERIC(18,6) NOT NULL,
+    period         TEXT NOT NULL,
+    state          TEXT NOT NULL DEFAULT 'firing',
+    fired_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, meter_name, threshold_pct, period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts (tenant_id, period);
 `
 
 // InsertRawEvent stores an event immutably. Returns false if the event was
@@ -842,6 +857,95 @@ func (s *Store) QuotaCount(ctx context.Context) (int, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM quotas`).Scan(&count)
 	return count, err
+}
+
+// InsertAlert records a threshold breach. Returns false if already fired
+// (UNIQUE constraint on tenant+meter+threshold+period).
+func (s *Store) InsertAlert(ctx context.Context, alert AlertRecord) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO alerts
+			(tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		ON CONFLICT (tenant_id, meter_name, threshold_pct, period) DO NOTHING
+	`, alert.TenantID, alert.MeterName, alert.ThresholdPct, alert.Consumed,
+		alert.LimitValue, alert.Period, "firing")
+
+	if err != nil {
+		return false, fmt.Errorf("insert alert: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// AlertsForTenant returns all alerts for a tenant in a period.
+func (s *Store) AlertsForTenant(ctx context.Context, tenantID, period string) ([]AlertRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at
+		FROM alerts
+		WHERE tenant_id = $1 AND period = $2
+		ORDER BY meter_name, threshold_pct
+	`, tenantID, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AlertRecord
+	for rows.Next() {
+		var r AlertRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.MeterName, &r.ThresholdPct,
+			&r.Consumed, &r.LimitValue, &r.Period, &r.State, &r.FiredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// AlertsForTenantMeter returns alerts for a specific tenant + meter + period.
+func (s *Store) AlertsForTenantMeter(ctx context.Context, tenantID, meterName, period string) ([]AlertRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at
+		FROM alerts
+		WHERE tenant_id = $1 AND meter_name = $2 AND period = $3
+		ORDER BY threshold_pct
+	`, tenantID, meterName, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AlertRecord
+	for rows.Next() {
+		var r AlertRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.MeterName, &r.ThresholdPct,
+			&r.Consumed, &r.LimitValue, &r.Period, &r.State, &r.FiredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// AllTenantsWithQuotas returns distinct tenant IDs that have active quotas.
+func (s *Store) AllTenantsWithQuotas(ctx context.Context, at time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT tenant_id FROM quotas
+		WHERE effective_from <= $1 AND (effective_to IS NULL OR effective_to > $1)
+	`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		results = append(results, t)
+	}
+	return results, rows.Err()
 }
 
 func marshalLabels(labels json.RawMessage) ([]byte, error) {

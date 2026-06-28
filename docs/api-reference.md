@@ -134,15 +134,37 @@ Returns quota consumption status for a tenant in the current monthly period.
     {
       "meter_name": "maas_tokens_in",
       "unit": "tokens",
-      "limit": 10000000,
-      "consumed": 1789188,
-      "percentage": 17.89,
+      "limit": 5000000,
+      "consumed": 4447988,
+      "percentage": 88.96,
       "thresholds": {
-        "50": false,
-        "70": false,
+        "50": true,
+        "70": true,
         "90": false,
         "100": false
-      }
+      },
+      "alerts": [
+        {
+          "tenant_id": "tenant-acme",
+          "meter_name": "maas_tokens_in",
+          "threshold_pct": 50,
+          "consumed": 4447988,
+          "limit_value": 5000000,
+          "period": "2026-06",
+          "state": "firing",
+          "fired_at": "2026-06-28T11:26:49Z"
+        },
+        {
+          "tenant_id": "tenant-acme",
+          "meter_name": "maas_tokens_in",
+          "threshold_pct": 70,
+          "consumed": 4447988,
+          "limit_value": 5000000,
+          "period": "2026-06",
+          "state": "firing",
+          "fired_at": "2026-06-28T11:26:49Z"
+        }
+      ]
     },
     {
       "meter_name": "vm_cpu_core_seconds",
@@ -178,6 +200,13 @@ Returns quota consumption status for a tenant in the current monthly period.
 | `quotas[].thresholds["70"]` | boolean | True if consumption ≥ 70% of limit |
 | `quotas[].thresholds["90"]` | boolean | True if consumption ≥ 90% of limit |
 | `quotas[].thresholds["100"]` | boolean | True if consumption ≥ 100% of limit |
+| `quotas[].alerts` | array | Threshold alerts fired for this meter in this period (omitted if none) |
+| `quotas[].alerts[].threshold_pct` | number | Threshold level that was crossed (50, 70, 90, or 100) |
+| `quotas[].alerts[].consumed` | number | Consumption at the time the alert fired |
+| `quotas[].alerts[].limit_value` | number | Quota limit at the time the alert fired |
+| `quotas[].alerts[].period` | string | Billing period (`YYYY-MM`) |
+| `quotas[].alerts[].state` | string | Alert state (`"firing"`) |
+| `quotas[].alerts[].fired_at` | ISO 8601 | When the threshold was first crossed |
 
 ### Notes
 

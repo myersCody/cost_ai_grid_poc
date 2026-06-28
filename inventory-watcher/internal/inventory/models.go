@@ -150,6 +150,19 @@ type QuotaStatus struct {
 	Consumed   float64            `json:"consumed"`
 	Percentage float64            `json:"percentage"`
 	Thresholds map[string]bool    `json:"thresholds"`
+	Alerts     []AlertRecord      `json:"alerts,omitempty"`
+}
+
+type AlertRecord struct {
+	ID           int64     `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	MeterName    string    `json:"meter_name"`
+	ThresholdPct float64   `json:"threshold_pct"`
+	Consumed     float64   `json:"consumed"`
+	LimitValue   float64   `json:"limit_value"`
+	Period       string    `json:"period"`
+	State        string    `json:"state"`
+	FiredAt      time.Time `json:"fired_at"`
 }
 
 type DailyUsageSummary struct {

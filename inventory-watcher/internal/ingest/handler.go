@@ -369,6 +369,8 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
 		}
 
+		meterAlerts, _ := h.store.AlertsForTenantMeter(ctx, tenantID, q.MeterName, periodLabel)
+
 		statuses = append(statuses, inventory.QuotaStatus{
 			MeterName:  q.MeterName,
 			Unit:       q.Unit,
@@ -376,6 +378,7 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			Consumed:   consumed,
 			Percentage: math.Round(pct*100) / 100,
 			Thresholds: thresholds,
+			Alerts:     meterAlerts,
 		})
 	}
 

@@ -32,7 +32,7 @@
 | REQ-5 | MEDIUM | Chargeback reporting | Partial | — | SQL queries, no formatted export |
 | REQ-8 | HIGH | Bare metal costing | Not started | OSAC: not in Watch `oneof` | [req8 gap analysis](req8-bare-metal-gap-analysis.md) |
 | REQ-9 | HIGH | Quota/budget status API | **Done** | — | `GET /api/v1/quotas/{tenant_id}` |
-| REQ-10 | HIGH | Threshold notifications | Not started | Transport agreement | [req10 analysis](req10-threshold-notifications-analysis.md) |
+| REQ-10 | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred | [req10 analysis](req10-threshold-notifications-analysis.md) |
 | REQ-11 | MUST HAVE | Cost tiers | **Done** | — | Tiered pricing in rate engine |
 | REQ-12 | TBD | Daily OCP Virt costs | TBD | PM definition | Not scoped |
 | REQ-13 | HIGH | Custom rate dimensions | Not started | — | [Research done](research/rating-engine-options.md) |
