@@ -20,19 +20,19 @@
 |---|---|---|---|---|---|
 | POC-ENV | CRITICAL | On-prem deployment | Not started | RHCM team scope | N/A — deployment, not consumer |
 | POC-ARCH | CRITICAL | Capacity-based charging | **Done** | — | Standalone Go component, heartbeat-driven |
-| REQ-1 | CRITICAL | OSAC integration | **Done** | — | Watch stream + reconciler + inventory |
+| REQ-1 | CRITICAL | OSAC integration | **Done** | — | [req1 gap analysis](req1-osac-integration-gap-analysis.md) |
 | REQ-1a | HIGH | Cluster lifecycle | **Done** | Verify "cluster orders" = Cluster | Tracking clusters with node sets |
 | REQ-1b | CRITICAL | Heartbeat ingestion | **Done** | — | Local 60s sweep = heartbeat equivalent ([ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md)) |
 | REQ-2 | CRITICAL | Real-time cost calc | **Done** | — | <1ms/event, cost within 30s |
-| REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | Simulator + ingest endpoint |
+| REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
 | REQ-3 | HIGH | Granular cost tracking | Partial | — | Data exists, no export API |
 | REQ-3a | HIGH | Tenant/project attribution | **Done** | — | Tenant → Project hierarchy |
 | REQ-3b | MEDIUM | Service catalog sync | Partial | — | Instance types synced, rates manual |
-| REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | `tokens_in`, `tokens_out`, `requests` |
+| REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
 | REQ-5 | MEDIUM | Chargeback reporting | Partial | — | SQL queries, no formatted export |
 | REQ-8 | HIGH | Bare metal costing | Not started | OSAC: not in Watch `oneof` | [req8 gap analysis](req8-bare-metal-gap-analysis.md) |
 | REQ-9 | HIGH | Quota/budget status API | **Done** | — | `GET /api/v1/quotas/{tenant_id}` |
-| REQ-10 | HIGH | Threshold notifications | Not started | Transport agreement | Quota data exists, need push |
+| REQ-10 | HIGH | Threshold notifications | Not started | Transport agreement | [Cody's design](https://github.com/myersCody/cost_ai_grid_poc/tree/main/docs/poc_architecture/boundary_monitoring) |
 | REQ-11 | MUST HAVE | Cost tiers | **Done** | — | Tiered pricing in rate engine |
 | REQ-12 | TBD | Daily OCP Virt costs | TBD | PM definition | Not scoped |
 | REQ-13 | HIGH | Custom rate dimensions | Not started | — | [Research done](research/rating-engine-options.md) |
