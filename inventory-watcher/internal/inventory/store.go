@@ -19,6 +19,10 @@ func NewStore(pool *pgxpool.Pool, logger *slog.Logger) *Store {
 	return &Store{pool: pool, logger: logger}
 }
 
+func (s *Store) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
 // RunMigrations creates the inventory tables if they don't exist.
 func (s *Store) RunMigrations(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, schema)

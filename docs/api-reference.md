@@ -214,6 +214,12 @@ Returns quota consumption status for a tenant in the current monthly period.
 - **Period:** Always the current calendar month (1st to end of month, UTC)
 - **Empty quotas:** If no quotas are defined for the tenant, returns `{"quotas": null}`
 - **Source of truth:** Consumption is computed from `metering_entries` in real-time
+- **Alerts scaling:** At most 4 alerts per meter per period (one per threshold
+  level). With 6 meters, max 24 alerts per tenant per month — trivially small.
+- **Performance note:** The threshold evaluation runs every 30s in the rating
+  sweep and queries `SUM(value)` per tenant × per meter. With the current
+  implementation this is O(tenants × meters) SQL queries per sweep. For >100
+  tenants, this should be optimized to batch the SUM queries.
 
 ---
 
