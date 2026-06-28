@@ -61,6 +61,7 @@ check whether tenants are within their resource limits.
 | [Req #1 gap analysis](req1-osac-integration-gap-analysis.md) | OSAC integration — inventory, metering, billable states |
 | [Req #2 gap analysis](req2-maas-costing-gap-analysis.md) | MaaS token metering — consumption-based billing |
 | [Req #8 gap analysis](req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and plan |
+| [Req #10 analysis](req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models and open questions |
 
 **Spec references:**
 - [Consolidated requirements v1.1](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)

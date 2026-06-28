@@ -32,7 +32,7 @@
 | REQ-5 | MEDIUM | Chargeback reporting | Partial | — | SQL queries, no formatted export |
 | REQ-8 | HIGH | Bare metal costing | Not started | OSAC: not in Watch `oneof` | [req8 gap analysis](req8-bare-metal-gap-analysis.md) |
 | REQ-9 | HIGH | Quota/budget status API | **Done** | — | `GET /api/v1/quotas/{tenant_id}` |
-| REQ-10 | HIGH | Threshold notifications | Not started | Transport agreement | [Cody's design](https://github.com/myersCody/cost_ai_grid_poc/tree/main/docs/poc_architecture/boundary_monitoring) |
+| REQ-10 | HIGH | Threshold notifications | Not started | Transport agreement | [req10 analysis](req10-threshold-notifications-analysis.md) |
 | REQ-11 | MUST HAVE | Cost tiers | **Done** | — | Tiered pricing in rate engine |
 | REQ-12 | TBD | Daily OCP Virt costs | TBD | PM definition | Not scoped |
 | REQ-13 | HIGH | Custom rate dimensions | Not started | — | [Research done](research/rating-engine-options.md) |
@@ -309,6 +309,7 @@ See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
 | [req1 Gap Analysis](req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
 | [req2 Gap Analysis](req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |
 | [req8 Gap Analysis](req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
+| [req10 Analysis](req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
 | [Requirements Comparison](requirements-comparison.md) | Updated spec vs original brief |
 | [Demo Scenario 1](demo-scenario-1.md) | Infrastructure metering demo |
 | [Demo Scenario 2](demo-scenario-2-maas.md) | MaaS metering + cost demo |
