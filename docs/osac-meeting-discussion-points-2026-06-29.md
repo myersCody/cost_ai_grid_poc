@@ -1,24 +1,10 @@
 # OSAC Meeting — Discussion Points
-**Date:** June 29, 2026  
-**Audience:** OSAC team  
+**Date:** June 29, 2026
+**Audience:** OSAC team
 **Goal:** Align on open questions, confirm Phase 4 handoff scope, and unblock blocked work
 
----
 
-## 1. Phase 4 Transition — Metering Collector URL Redirect
-
-**Context:** The Cost Management HTTP ingest endpoint (`POST /api/v1/events`) is fully built and verified. It accepts `osac.cluster.lifecycle`, `osac.compute_instance.lifecycle`, and `osac.model.lifecycle` CloudEvents in the exact format the OSAC metering collector (`osac-metering-discover-poc`) already emits. Pre-calculated metering quantities (`duration_seconds`, `cpu_core_seconds`, `memory_gib_seconds`, `worker_node_seconds`) are written directly to the metering pipeline without any format translation.
-
-**The single action required on OSAC's side:** redirect the collector's target URL from the OpenMeter endpoint to the Cost Management ingest endpoint. No schema changes, no new format, no code changes on either side.
-
-**Discussion points:**
-- Is there a timeline for the OSAC team to make this URL redirect?
-- Who owns the collector configuration change on the OSAC side?
-- Can we do a joint validation pass once it's redirected (confirm no double-counting with the local sweep)?
-
----
-
-## 2. Heartbeat Collector — Transport and Emission Interval
+## 1. Heartbeat Collector — Transport and Emission Interval
 
 **Context:** The Cost Management ingest endpoint accepts CloudEvents over HTTP. The requirements (REQ-1b) name HTTP or Kafka as options. OSAC's native API is gRPC, and the current metering collector (`osac-metering-discover-poc`) uses shell scripts that `curl` to OpenMeter. HTTP push is the path of least resistance.
 
@@ -29,7 +15,7 @@
 
 ---
 
-## 3. DELETE Gap — Final Heartbeat on Resource Deletion
+## 2. DELETE Gap — Final Heartbeat on Resource Deletion
 
 **Context:** The current local sweep handles deletion cleanly: when a DELETE event arrives, Cost Management writes a final metering entry covering the gap from `last_metered_at` to the exact deletion timestamp. The OSAC metering collector has no equivalent — if a resource is deleted between two poll cycles, the collector never sees it again and that interval goes unmetered.
 
@@ -46,7 +32,7 @@
 
 ---
 
-## 4. MaaS (OpenShift AI) — CloudEvent Schema
+## 3. MaaS (OpenShift AI) — CloudEvent Schema
 
 **Context:** The Cost Management HTTP ingest endpoint already handles `osac.model.lifecycle` events and emits `maas_tokens_in`, `maas_tokens_out`, and `maas_requests` meters. However, the OSAC CloudEvent schema for MaaS events is not yet finalized — the payload field names and token dimension definitions are TBD on the OSAC side.
 
@@ -59,7 +45,7 @@
 
 ---
 
-## 5. Bare Metal (BMaaS) — CloudEvent Schema
+## 4. Bare Metal (BMaaS) — CloudEvent Schema
 
 **Context:** Bare metal metering is in-scope (REQ-8) but is completely blocked — the OSAC CloudEvent schema for BMaaS instances does not yet exist. Cost Management is ready to implement metering once the schema is defined; the pipeline would treat BMaaS identically to VMs.
 
@@ -71,7 +57,7 @@
 
 ---
 
-## 6. Quota and Budget Integration
+## 5. Quota and Budget Integration
 
 **Context:** Cost Management owns consumption measurement and threshold evaluation. OSAC owns limit definitions and enforcement (via OPA). The proposed model is **push + pull**: Cost pushes threshold events to OSAC for async notifications; OSAC pulls quota status from Cost synchronously at resource creation time to gate provisioning. For the PoC demo, mock limits seeded in Cost unblock the demo today.
 
@@ -95,7 +81,7 @@
 
 ---
 
-## 7. Rate / Pricing Tier Ownership
+## 6. Rate / Pricing Tier Ownership
 
 **Context:** Cost Management stores rate cards (`rates` table) mapping resource type + meter → price per unit. Tiered pricing is schema-defined and the evaluation logic is implemented. For the PoC, rates are manually seeded. In production, rates need to come from somewhere authoritative.
 
@@ -106,7 +92,7 @@
 
 ---
 
-## 8. HostType Catalog Enrichment for Cluster Node Costing
+## 7. HostType Catalog Enrichment for Cluster Node Costing
 
 **Context:** Cluster cost metrics (`node_core_cost_per_hour`, etc.) require knowing `cores_per_node` for each node set's host type. The OSAC `instance_types` List API is synced by the reconciler, but the join between a cluster's `node_sets` and the host type spec is not yet working end-to-end for per-node-type cost breakdowns.
 
@@ -116,7 +102,7 @@
 
 ---
 
-## 9. Reporting API — Auth and Tenant Scoping
+## 8. Reporting API — Auth and Tenant Scoping
 
 **Context:** The Cost Management reporting API is designed as a new independent API (not reusing legacy Koku endpoints). All report endpoints are scoped to a `tenant_id`. The quota status endpoint (`GET /quotas/status`) has a hard < 500ms SLA since OSAC calls it synchronously at resource creation time.
 
@@ -125,29 +111,5 @@
 - Are there report formats or groupings OSAC's console will need that aren't covered by: `/costs/summary`, `/costs/breakdown`, `/costs/timeseries`, `/metering/usage`, `/reports/chargeback`, `/quotas/status`?
 - Will OSAC's console embed Cost Management reports directly, or consume the API and render independently?
 
----
-
-## 10. Reconciler and Pagination Gap (Minor)
-
-**Context:** The current reconciler (`inventory-watcher`) only decodes the first page of List API responses. Resources beyond page 1 will be missed until the next reconcile cycle.
-
-**Discussion points:**
-- What is the default page size on OSAC's List endpoints? Is there a maximum page size or a server-side cap?
-- This is a known PoC gap — flagging in case OSAC test data has tenants with large resource counts.
 
 ---
-
-## Summary — What We Need from OSAC
-
-| # | Item | Urgency | Owner |
-|---|---|---|---|
-| 1 | Redirect metering collector target URL to Cost Management `POST /api/v1/events` | Phase 4 | OSAC |
-| 2 | Confirm heartbeat transport (HTTP push preferred) and emission interval | Phase 4 | OSAC + Cost |
-| 3 | Agree on DELETE gap handling (final heartbeat vs. Cost-side sweep) | Phase 4 | OSAC + Cost |
-| 4 | Define `osac.model.lifecycle` CloudEvent schema (field names, token dimensions) | Blocks MaaS billing | OSAC |
-| 5 | Clarify who collects RHOAI metrics (OSAC or Cost) | Blocks MaaS billing | OSAC + Cost |
-| 6 | Define BMaaS CloudEvent schema and billable states | Blocks BMaaS billing | OSAC |
-| 7 | Confirm quota/budget integration approach (push+pull vs pull-only) | v1 design | OSAC + Cost |
-| 8 | Expose Quota/Budget List API (resource shape and paths) | v1 design | OSAC |
-| 9 | Confirm rate ownership model (OSAC catalog sync vs. Cost-managed) | v1 design | OSAC + Cost |
-| 10 | Confirm HostType catalog carries `cpu_cores`/`memory_gib` via List API | Node cost metrics | OSAC |
