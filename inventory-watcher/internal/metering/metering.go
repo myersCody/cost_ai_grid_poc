@@ -205,6 +205,87 @@ func clusterMeters(cl inventory.ClusterRecord, durationSeconds float64, periodSt
 	return entries
 }
 
+// MaaS metering data passed from event ingestion.
+type MaaSUsage struct {
+	ModelID         string
+	ModelName       string
+	TenantID        string
+	State           string
+	TokensIn        int64
+	TokensOut       int64
+	Requests        int64
+	EventTime       time.Time
+	DurationSeconds float64
+}
+
+// MeterMaaSEvent produces metering entries from a MaaS usage event.
+// Unlike VM metering (sweep-based), MaaS metering is event-driven:
+// each event carries the consumption values directly.
+func (m *Meter) MeterMaaSEvent(ctx context.Context, usage MaaSUsage) {
+	if !IsModelBillable(usage.State) {
+		return
+	}
+
+	periodStart := usage.EventTime.Add(-time.Duration(usage.DurationSeconds) * time.Second)
+	periodEnd := usage.EventTime
+
+	entries := maasMeters(usage, periodStart, periodEnd)
+	for _, entry := range entries {
+		if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
+			m.logger.Error("failed to insert MaaS metering entry",
+				"model", usage.ModelID, "meter", entry.MeterName, "error", err)
+		}
+	}
+
+	m.logger.Debug("metered MaaS event", "model", usage.ModelID,
+		"tokens_in", usage.TokensIn, "tokens_out", usage.TokensOut, "requests", usage.Requests)
+}
+
+func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
+	var entries []inventory.MeteringEntry
+
+	if usage.TokensIn > 0 {
+		entries = append(entries, inventory.MeteringEntry{
+			ResourceType: "model",
+			ResourceID:   usage.ModelID,
+			TenantID:     usage.TenantID,
+			MeterName:    "maas_tokens_in",
+			Value:        float64(usage.TokensIn),
+			Unit:         "tokens",
+			PeriodStart:  periodStart,
+			PeriodEnd:    periodEnd,
+		})
+	}
+
+	if usage.TokensOut > 0 {
+		entries = append(entries, inventory.MeteringEntry{
+			ResourceType: "model",
+			ResourceID:   usage.ModelID,
+			TenantID:     usage.TenantID,
+			MeterName:    "maas_tokens_out",
+			Value:        float64(usage.TokensOut),
+			Unit:         "tokens",
+			PeriodStart:  periodStart,
+			PeriodEnd:    periodEnd,
+		})
+	}
+
+	if usage.Requests > 0 {
+		entries = append(entries, inventory.MeteringEntry{
+			ResourceType: "model",
+			ResourceID:   usage.ModelID,
+			TenantID:     usage.TenantID,
+			MeterName:    "maas_requests",
+			Value:        float64(usage.Requests),
+			Unit:         "requests",
+			PeriodStart:  periodStart,
+			PeriodEnd:    periodEnd,
+		})
+	}
+
+	return entries
+}
+
 func computeInstanceMeters(inst inventory.ComputeInstanceRecord, durationSeconds float64, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
 	cores := inst.Cores
 	memGiB := inst.MemoryGiB
