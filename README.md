@@ -1,10 +1,11 @@
-# Cost AI Grid PoC
+# Cost Management — AI Grid PoC
 
 Proof-of-concept cost management system integrated with
 [OSAC](https://github.com/osac-project/fulfillment-service) for the
 AI Grid sovereign cloud. Tracks infrastructure and AI model costs via
 real-time event ingestion, capacity-based and consumption-based metering,
 and tiered pricing.
+
 
 **Deadline:** July 31, 2026
 
@@ -36,6 +37,7 @@ bash snippets/setup-demo-data.sh
 bash snippets/test-inventory-watcher.sh
 ```
 
+
 ## Documentation
 
 | Document | Description |
@@ -56,3 +58,9 @@ MaaS ingest endpoint → raw_events → inventory_model → metering → cost
                                                                   ↓
                                                          quota status API
 ```
+
+See [docs/local-dev-setup.md](docs/dev/local-dev-setup.md) for full setup instructions.
+
+
+## License
+Discovery artifacts and scripts in this repository are part of the [Koku](https://github.com/project-koku/koku) project. OSAC is a separate open-source project with its own license — see the OSAC repository for details.

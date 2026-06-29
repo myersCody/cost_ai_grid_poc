@@ -1,5 +1,7 @@
 # Cost Reports Feasibility with OSAC
 
+> **See also:** [metering-spec-draft.md](metering-spec-draft.md) — how metering is implemented for the PoC.
+
 ## Context
 
 OSAC fulfillment-service manages bare-metal and virtual infrastructure — compute
@@ -149,11 +151,20 @@ Koku already supports for AWS/Azure/GCP, but applied to OSAC-managed infra.
 
 - **Report API response format** — meta/data/total structure, hierarchical
   grouping, pagination
+
+1. [Cody's Comment] Do we need a hierarchical system in an event driven capacity system? From my perspective it feels like we will have discrete evens -- a VM was created, it ran for N hours, it was deleted. The "hierarchy" is just attribution metadata on each event (tenant_id, project_id). I feel like we will just be filtering and grouping a flat ledger.
+
 - **Query parameter system** — filter, group_by, order_by, time_scope,
   start_date/end_date, resolution
+
+1. [Cody's Comment] I feel like we use time scope to navigate monthly billing cycles. Event-driven systems have continuous time; you just use start_date/end_date directly. resoultion: would we want the resolution to be based on how we bucket the event ledger? Probably want to stick with hour or day?
+
 - **Cost model concept** — rates table mapping instance_type -> $/hour
-- **Cost distribution SQL** — platform cost distribution by usage ratio
+- **Cost distribution SQL** — platform cost [Cody's comment] distribution by usage ratio
+* Cost distribution is not a requirement for this POC
 - **Markup calculation** — percentage-based markup on base costs
+[Cody's comment] Markup is not a requirement for this poc.
+
 - **Summary table pattern** — pre-aggregated daily tables for fast queries
 
 ### Adapt (simpler versions)
