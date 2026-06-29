@@ -5,6 +5,28 @@
 Cost Management AI Grid PoC — integrates with OSAC fulfillment-service for
 capacity-based and consumption-based cost tracking.
 
+## Naming Conventions
+
+When naming fields, tables, metrics, or API concepts, **check Koku first**.
+This project is intended to eventually merge with or align closely with
+[Koku](https://github.com/project-koku/koku). Use Koku's terminology where
+applicable:
+
+- **cost_type**: `Infrastructure` or `Supplementary` (Koku's cost layer split)
+- **metric names**: match Koku's naming (e.g., `cpu_core_request_per_hour`)
+  and store in `koku_metric` for mapping
+- **rate structure**: `tiered_rates` with `usage_start`/`usage_end` in Koku;
+  our simplified format uses `tiers` with `up_to`/`price_per_unit`
+- **report response format**: Koku uses `meta`/`data`/`total` with nested
+  `cost`/`infrastructure`/`supplementary` blocks
+
+Key references:
+- [Koku rate schema alignment](docs/research/koku-rate-schema-alignment.md)
+- [Koku report API schema](docs/research/koku-report-api-schema.md)
+- [Cost model metric feasibility](docs/inputs/2026-06-cody-cost-model-metric-feasibility.md)
+- Koku cost models source: `koku/cost_models/models.py`
+- Koku OCP provider map: `koku/api/report/ocp/provider_map.py`
+
 ## Build
 
 ```bash

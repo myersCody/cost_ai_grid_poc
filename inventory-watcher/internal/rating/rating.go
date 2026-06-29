@@ -191,14 +191,14 @@ func SeedDefaultRates(ctx context.Context, store *inventory.Store, logger *slog.
 
 	now := time.Now().UTC()
 	defaults := []inventory.RateRecord{
-		{ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "compute_instance", MeterName: "vm_cpu_core_seconds", PricePerUnit: 0.005 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "compute_instance", MeterName: "vm_memory_gib_seconds", PricePerUnit: 0.002 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "cluster", MeterName: "cluster_uptime_seconds", PricePerUnit: 0.50 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "cluster", MeterName: "cluster_worker_node_seconds", PricePerUnit: 0.10 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_in", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_out", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_requests", PricePerUnit: 5.00 / 1_000_000, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", KokuMetric: "vm_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.01 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "compute_instance", MeterName: "vm_cpu_core_seconds", KokuMetric: "cpu_core_request_per_hour", CostType: "Supplementary", PricePerUnit: 0.005 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "compute_instance", MeterName: "vm_memory_gib_seconds", KokuMetric: "memory_gb_request_per_hour", CostType: "Supplementary", PricePerUnit: 0.002 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "cluster", MeterName: "cluster_uptime_seconds", KokuMetric: "cluster_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.50 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "cluster", MeterName: "cluster_worker_node_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.10 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "model", MeterName: "maas_tokens_in", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "model", MeterName: "maas_tokens_out", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "model", MeterName: "maas_requests", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 5.00 / 1_000_000, Currency: "USD", EffectiveFrom: now},
 	}
 
 	for _, rate := range defaults {

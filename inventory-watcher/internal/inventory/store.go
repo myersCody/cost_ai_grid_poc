@@ -165,9 +165,12 @@ CREATE TABLE IF NOT EXISTS rates (
     tenant_id      TEXT,
     resource_type  TEXT NOT NULL,
     meter_name     TEXT NOT NULL,
+    koku_metric    TEXT NOT NULL DEFAULT '',
+    cost_type      TEXT NOT NULL DEFAULT 'Infrastructure',
     price_per_unit NUMERIC(18,10) NOT NULL,
     currency       TEXT NOT NULL DEFAULT 'USD',
     tiers          JSONB,
+    description    TEXT NOT NULL DEFAULT '',
     effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     effective_to   TIMESTAMPTZ
 );
@@ -691,12 +694,13 @@ func (s *Store) UpsertRate(ctx context.Context, rec RateRecord) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO rates
-			(tenant_id, resource_type, meter_name, price_per_unit, currency, tiers, effective_from, effective_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(tenant_id, resource_type, meter_name, koku_metric, cost_type, price_per_unit, currency, tiers, description, effective_from, effective_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT DO NOTHING
 		RETURNING id
-	`, rec.TenantID, rec.ResourceType, rec.MeterName, rec.PricePerUnit,
-		rec.Currency, tiersJSON, rec.EffectiveFrom, rec.EffectiveTo).Scan(&id)
+	`, rec.TenantID, rec.ResourceType, rec.MeterName, rec.KokuMetric, rec.CostType,
+		rec.PricePerUnit, rec.Currency, tiersJSON, rec.Description,
+		rec.EffectiveFrom, rec.EffectiveTo).Scan(&id)
 
 	if err != nil {
 		// ON CONFLICT DO NOTHING means no row returned if it already exists.
@@ -713,7 +717,8 @@ func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName 
 	var tiersJSON []byte
 
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, resource_type, meter_name, price_per_unit, currency, tiers, effective_from, effective_to
+		SELECT id, tenant_id, resource_type, meter_name, koku_metric, cost_type,
+		       price_per_unit, currency, tiers, description, effective_from, effective_to
 		FROM rates
 		WHERE resource_type = $1 AND meter_name = $2
 		  AND effective_from <= $3
@@ -723,7 +728,8 @@ func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName 
 		LIMIT 1
 	`, resourceType, meterName, at, tenantID).Scan(
 		&rec.ID, &rec.TenantID, &rec.ResourceType, &rec.MeterName,
-		&rec.PricePerUnit, &rec.Currency, &tiersJSON,
+		&rec.KokuMetric, &rec.CostType,
+		&rec.PricePerUnit, &rec.Currency, &tiersJSON, &rec.Description,
 		&rec.EffectiveFrom, &rec.EffectiveTo)
 
 	if err != nil {

@@ -104,15 +104,18 @@ type Tier struct {
 }
 
 type RateRecord struct {
-	ID           int64      `json:"id"`
-	TenantID     *string    `json:"tenant_id"`
-	ResourceType string     `json:"resource_type"`
-	MeterName    string     `json:"meter_name"`
-	PricePerUnit float64    `json:"price_per_unit"`
-	Currency     string     `json:"currency"`
-	Tiers        []Tier     `json:"tiers"`
-	EffectiveFrom time.Time `json:"effective_from"`
-	EffectiveTo  *time.Time `json:"effective_to"`
+	ID            int64      `json:"id"`
+	TenantID      *string    `json:"tenant_id"`
+	ResourceType  string     `json:"resource_type"`
+	MeterName     string     `json:"meter_name"`
+	KokuMetric    string     `json:"koku_metric"`
+	CostType      string     `json:"cost_type"`
+	PricePerUnit  float64    `json:"price_per_unit"`
+	Currency      string     `json:"currency"`
+	Tiers         []Tier     `json:"tiers"`
+	Description   string     `json:"description"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
 }
 
 type CostEntry struct {
