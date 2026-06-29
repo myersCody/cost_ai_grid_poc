@@ -141,7 +141,7 @@ Three things are required before the sweep can be retired and replaced by heartb
 
 **This is now ready on the Cost Management side.** The `POST /api/v1/events` endpoint accepts `osac.cluster.lifecycle`, `osac.compute_instance.lifecycle`, and `osac.model.lifecycle` in the exact format the collector already emits. Pre-calculated values are ingested directly; `last_metered_at` is updated to prevent double-counting with the local sweep.
 
-**Required OSAC action:** change the collector's target URL from the OpenMeter endpoint to the Cost Management ingest endpoint. No schema changes, no format translation.
+**Future Work:** change the collector's target URL from the OpenMeter endpoint to the Cost Management ingest endpoint. No schema changes, no format translation.
 
 ### 2. Agree on transport and interval
 
