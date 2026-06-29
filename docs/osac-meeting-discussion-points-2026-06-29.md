@@ -3,19 +3,9 @@
 **Audience:** OSAC team
 **Goal:** Align on open questions, confirm Phase 4 handoff scope, and unblock blocked work
 
-
-## 1. Heartbeat Collector — Transport and Emission Interval
-
-**Context:** The Cost Management ingest endpoint accepts CloudEvents over HTTP. The requirements (REQ-1b) name HTTP or Kafka as options. OSAC's native API is gRPC, and the current metering collector (`osac-metering-discover-poc`) uses shell scripts that `curl` to OpenMeter. HTTP push is the path of least resistance.
-
-**Discussion points:**
-- **Transport:** Does OSAC prefer HTTP push to `POST /api/v1/events` (endpoint ready now), or is there a preference for Kafka or gRPC? HTTP is the lowest-effort path given the collector's current implementation.
-- **Emission interval:** The existing collector emits on a ~60s cadence. The requirements reference 10–30s. What interval is realistic for production, and does it need to change for the PoC demo?
-- **Kafka:** Any scenario where OSAC would need multiple independent consumers of these events (which would justify Kafka overhead)? If not, HTTP push is the recommendation.
-
 ---
 
-## 2. DELETE Gap — Final Heartbeat on Resource Deletion
+## 1. DELETE Gap — Final Heartbeat on Resource Deletion
 
 **Context:** The current local sweep handles deletion cleanly: when a DELETE event arrives, Cost Management writes a final metering entry covering the gap from `last_metered_at` to the exact deletion timestamp. The OSAC metering collector has no equivalent — if a resource is deleted between two poll cycles, the collector never sees it again and that interval goes unmetered.
 
@@ -32,7 +22,7 @@
 
 ---
 
-## 3. MaaS (OpenShift AI) — CloudEvent Schema
+## 2. MaaS (OpenShift AI) — CloudEvent Schema
 
 **Context:** The Cost Management HTTP ingest endpoint already handles `osac.model.lifecycle` events and emits `maas_tokens_in`, `maas_tokens_out`, and `maas_requests` meters. However, the OSAC CloudEvent schema for MaaS events is not yet finalized — the payload field names and token dimension definitions are TBD on the OSAC side.
 
@@ -45,7 +35,7 @@
 
 ---
 
-## 4. Bare Metal (BMaaS) — CloudEvent Schema
+## 3. Bare Metal (BMaaS) — CloudEvent Schema
 
 **Context:** Bare metal metering is in-scope (REQ-8) but is completely blocked — the OSAC CloudEvent schema for BMaaS instances does not yet exist. Cost Management is ready to implement metering once the schema is defined; the pipeline would treat BMaaS identically to VMs.
 
@@ -57,7 +47,7 @@
 
 ---
 
-## 5. Quota and Budget Integration
+## 4. Quota and Budget Integration
 
 **Context:** Cost Management owns consumption measurement and threshold evaluation. OSAC owns limit definitions and enforcement (via OPA). The proposed model is **push + pull**: Cost pushes threshold events to OSAC for async notifications; OSAC pulls quota status from Cost synchronously at resource creation time to gate provisioning. For the PoC demo, mock limits seeded in Cost unblock the demo today.
 
@@ -81,7 +71,7 @@
 
 ---
 
-## 6. Rate / Pricing Tier Ownership
+## 5. Rate / Pricing Tier Ownership
 
 **Context:** Cost Management stores rate cards (`rates` table) mapping resource type + meter → price per unit. Tiered pricing is schema-defined and the evaluation logic is implemented. For the PoC, rates are manually seeded. In production, rates need to come from somewhere authoritative.
 
@@ -92,7 +82,7 @@
 
 ---
 
-## 7. HostType Catalog Enrichment for Cluster Node Costing
+## 6. HostType Catalog Enrichment for Cluster Node Costing
 
 **Context:** Cluster cost metrics (`node_core_cost_per_hour`, etc.) require knowing `cores_per_node` for each node set's host type. The OSAC `instance_types` List API is synced by the reconciler, but the join between a cluster's `node_sets` and the host type spec is not yet working end-to-end for per-node-type cost breakdowns.
 
@@ -102,7 +92,7 @@
 
 ---
 
-## 8. Reporting API — Auth and Tenant Scoping
+## 7. Reporting API — Auth and Tenant Scoping
 
 **Context:** The Cost Management reporting API is designed as a new independent API (not reusing legacy Koku endpoints). All report endpoints are scoped to a `tenant_id`. The quota status endpoint (`GET /quotas/status`) has a hard < 500ms SLA since OSAC calls it synchronously at resource creation time.
 
