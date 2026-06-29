@@ -1,106 +1,128 @@
-# Demo Scenario 1: Inventory Watcher End-to-End
+# Demo Scenario 1: Full Pipeline — Inventory, Metering, Cost, Quotas
+
+> **Demo recording:** [Google Drive video](https://drive.google.com/file/d/1gagbe1-VhpyYVi4K8x1IA1mjLSEZZli0/view?usp=drive_link)
 
 ## Purpose
 
-Demonstrate the inventory-watcher consuming events from OSAC in real-time,
-building inventory, and producing metering entries. Suitable for a live demo
-or a recorded walkthrough.
+Demonstrate the complete cost management pipeline: OSAC event ingestion,
+inventory tracking, metering, rating (dollar costs), and quota status.
 
 ## Prerequisites
 
-Install tools for the demo:
-
 ```bash
-brew install watch        # live-refresh terminal commands
-brew install asciinema    # terminal recording (optional)
+brew install watch asciinema   # optional: asciinema for recording
+
+# Build
+cd inventory-watcher
+go build -o inventory-watcher ./cmd/consumer/
+go build -o maas-simulator ./cmd/maas-simulator/
+
+# Set up environment (run in each terminal/pane)
+source snippets/env.sh
 ```
 
-Everything else should already be set up per `docs/dev/local-dev-setup.md`.
+OSAC and databases must be running per `docs/local-dev-setup.md`.
+Token must be fresh in `/tmp/osac_token.txt`.
+
+## Environment Variables
+
+All demo commands assume `snippets/env.sh` has been sourced:
+
+```bash
+export OSAC_BASE_URL=http://localhost:8011
+export OSAC_TOKEN=$(cat /tmp/osac_token.txt)
+export INVENTORY_DB_URL=postgres://user:pass@localhost:5434/costdb
+export INGEST_LISTEN_ADDR=localhost:8020
+export BASE="$OSAC_BASE_URL"
+export TOKEN="$OSAC_TOKEN"
+```
+
+## tmux Layout
+
+```
+┌──────────────────────┬──────────────────────┐
+│  Watcher logs        │  Live DB view        │
+│  (top-left)          │  (right)             │
+├──────────────────────┤                      │
+│  Commands            │                      │
+│  (bottom-left)       │                      │
+└──────────────────────┴──────────────────────┘
+```
+
+Setup:
+```bash
+tmux new-session -s demo
+# Ctrl-b % (vertical split)
+# Click left pane, Ctrl-b " (horizontal split)
+# Source env.sh in each pane: source snippets/env.sh
+```
+
+**Right pane — live DB view:**
+```bash
+watch -n 2 'docker exec cost-db psql -U user -d costdb -c \
+  "SELECT name, cores, memory_gib, state FROM inventory_compute_instance \
+   WHERE deleted_at IS NULL ORDER BY name;" 2>/dev/null || echo "No tables yet"'
+```
+
+---
 
 ## Demo Flow
 
 ### Act 1: Show the infrastructure
 
-**Goal:** Establish that OSAC and the cost database are running.
+**Narrate:** "We have OSAC running with compute instances, and an empty cost
+database."
 
+**Bottom-left:**
 ```bash
-# Show running containers
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" \
   --filter name=osac-db --filter name=cost-db
-```
 
-Expected output:
-```
-NAMES     STATUS         PORTS
-osac-db   Up X hours     127.0.0.1:5433->5432/tcp
-cost-db   Up X hours     127.0.0.1:5434->5432/tcp
-```
+curl -s $BASE/api/fulfillment/v1/compute_instances \
+  -H "Authorization: Bearer $TOKEN" | \
+  jq '[.items[] | {name: .metadata.name, cores: .spec.cores, mem: .spec.memory_gib}]'
 
-```bash
-# Show OSAC is serving — list existing compute instances
-curl -s http://localhost:8011/api/fulfillment/v1/compute_instances \
-  -H "Authorization: Bearer $(cat /tmp/osac_token.txt)" | jq '.size'
-```
-
-```bash
-# Show the cost database is empty (clean slate)
 docker exec cost-db psql -U user -d costdb -c "\dt"
 ```
 
+---
+
 ### Act 2: Start the inventory-watcher
 
-**Goal:** Show reconciliation happening on startup.
+**Narrate:** "Starting the consumer. It seeds rates and quotas, reconciles
+all OSAC resources, and opens the Watch stream for real-time events."
 
-**Terminal 1 — watcher logs:**
+**Top-left:**
 ```bash
-cd inventory-watcher
-OSAC_BASE_URL=http://localhost:8011 \
-OSAC_TOKEN=$(cat /tmp/osac_token.txt) \
-INVENTORY_DB_URL=postgres://user:pass@localhost:5434/costdb \
-RECONCILE_INTERVAL=5m \
-SUMMARIZE_INTERVAL=5m \
-./inventory-watcher
+source snippets/env.sh && cd inventory-watcher && ./inventory-watcher
 ```
 
-Point out the log lines:
-```
-msg="database schema ready"
-msg="upserted compute instance" id=... name=worker-1 state=...RUNNING
-msg="upserted compute instance" id=... name=worker-2 state=...RUNNING
-msg="reconciled compute instances" osac_count=N inventory_count=0 created=N deleted=0
-msg="reconciled instance types" count=3
-msg="reconciliation complete"
-msg="watch stream connected"
-```
+**Point out in the logs:**
+- `seeded default rates count=8`
+- `seeded default quotas count=24`
+- `reconciled compute instances osac_count=N created=N`
+- `watch stream connected`
 
-**Terminal 2 — live database view:**
-```bash
-watch -n 2 'docker exec cost-db psql -U user -d costdb -c \
-  "SELECT instance_id, name, cores, memory_gib, state FROM inventory_compute_instance ORDER BY name;"'
-```
+**Right pane** shows all VMs appearing instantly.
 
-The table populates immediately on startup — all OSAC instances appear.
+---
 
 ### Act 3: Real-time event ingestion
 
-**Goal:** Create a new compute instance in OSAC and watch it appear in the
-cost database in real-time.
+**Narrate:** "I'll create a new VM in OSAC — watch the right pane."
 
-**Terminal 2** — keep the `watch` command running on the inventory table.
-
-**Terminal 3** — create a new compute instance:
+**Bottom-left:**
 ```bash
-TOKEN=$(cat /tmp/osac_token.txt)
-SUBNET_ID=$(curl -s http://localhost:8011/api/fulfillment/v1/subnets \
+SUBNET_ID=$(curl -s $BASE/api/fulfillment/v1/subnets \
   -H "Authorization: Bearer $TOKEN" | jq -r '.items[0].id')
-TPL_ID=$(curl -s http://localhost:8011/api/private/v1/compute_instance_templates \
+TPL_ID=$(curl -s $BASE/api/private/v1/compute_instance_templates \
   -H "Authorization: Bearer $TOKEN" | jq -r '.items[0].id')
 
-curl -s -X POST http://localhost:8011/api/private/v1/compute_instances \
+curl -s -X POST $BASE/api/private/v1/compute_instances \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d "{
-    \"metadata\": {\"name\": \"demo-vm\", \"labels\": {\"demo\": \"live\"}},
+    \"metadata\": {\"name\": \"demo-vm\"},
     \"spec\": {
       \"template\": \"$TPL_ID\",
       \"cores\": 4, \"memory_gib\": 16,
@@ -113,179 +135,190 @@ curl -s -X POST http://localhost:8011/api/private/v1/compute_instances \
   }" | jq '{id: .id, name: .metadata.name}'
 ```
 
-**What to show:**
-- Terminal 1 (logs): `received event ... type=EVENT_TYPE_OBJECT_CREATED resource=ComputeInstance`
-  followed by `stored raw event` and `upserted compute instance`
-- Terminal 2 (watch): `demo-vm` appears in the table within 1-2 seconds
+**Point out:**
+- Top-left: `received event ... CREATED ... ComputeInstance`, `stored raw event`
+- Right pane: `demo-vm` appears within 1-2 seconds
+
+---
 
 ### Act 4: Raw event log
 
-**Goal:** Show that every event is stored immutably for audit.
+**Narrate:** "Every event is stored immutably — an audit trail."
 
-**Terminal 3:**
+**Bottom-left:**
 ```bash
 docker exec cost-db psql -U user -d costdb -c \
-  "SELECT event_id, event_type, resource_type, resource_id, received_at
+  "SELECT event_id, event_type, resource_type, resource_id
    FROM raw_events ORDER BY received_at DESC LIMIT 5;"
 ```
 
-Point out: the event that created `demo-vm` is stored with its full payload.
+---
 
-### Act 5: Metering in action
+### Act 5: Metering sweep
 
-**Goal:** Show the 60-second metering sweep producing usage records.
+**Narrate:** "Now we wait 60 seconds for the metering sweep. It calculates
+provisioned resources times time for every running VM."
 
-**Terminal 2** — switch to watching metering entries:
+**Switch right pane** (`Ctrl-C`, then):
 ```bash
 watch -n 5 'docker exec cost-db psql -U user -d costdb -c \
   "SELECT meter_name, resource_id, round(value::numeric, 1) as value, unit
    FROM metering_entries ORDER BY resource_id, meter_name LIMIT 20;"'
 ```
 
-**Wait ~60 seconds.** The metering sweep fires and the table populates.
+**Wait ~60 seconds.** When entries appear:
 
-**What to show:**
-- Terminal 1 (logs): `metering sweep complete compute_instances=N`
-- Terminal 2 (watch): metering entries appear — `vm_uptime_seconds`,
-  `vm_cpu_core_seconds`, `vm_memory_gib_seconds` for each running VM
+**Narrate:** "Each running VM now has three meters. A 4-core VM running for
+60 seconds produces 240 cpu_core_seconds."
 
-**Explain the math** for one instance (e.g., worker-1 with 4 cores):
-```
-vm_uptime_seconds    = ~60        (one sweep interval)
-vm_cpu_core_seconds  = ~240       (4 cores × 60 seconds)
-vm_memory_gib_seconds = ~960      (16 GiB × 60 seconds)
-```
+---
 
-### Act 6: DELETE and final metering
+### Act 6: Cost in dollars
 
-**Goal:** Show that deleting a VM produces final metering entries covering
-the time since the last sweep.
+**Narrate:** "The rating sweep runs every 30 seconds, converting metering
+entries to dollar costs."
 
-**Terminal 2** — watch metering entries for the demo-vm specifically:
+**Switch right pane** (`Ctrl-C`, then):
 ```bash
-DEMO_ID=$(docker exec cost-db psql -U user -d costdb -t -A -c \
-  "SELECT instance_id FROM inventory_compute_instance WHERE name = 'demo-vm';")
-watch -n 2 "docker exec cost-db psql -U user -d costdb -c \
-  \"SELECT meter_name, round(value::numeric, 1) as value, unit, period_start, period_end
-   FROM metering_entries WHERE resource_id = '$DEMO_ID' ORDER BY meter_name;\""
+watch -n 5 'docker exec cost-db psql -U user -d costdb -c \
+  "SELECT ci.name, ce.meter_name, round(ce.cost_amount::numeric, 6) as cost, ce.currency
+   FROM cost_entries ce
+   JOIN inventory_compute_instance ci ON ce.resource_id = ci.instance_id
+   ORDER BY ci.name, ce.meter_name LIMIT 20;"'
 ```
 
-**Terminal 3** — delete the VM:
-```bash
-DEMO_ID=$(docker exec cost-db psql -U user -d costdb -t -A -c \
-  "SELECT instance_id FROM inventory_compute_instance WHERE name = 'demo-vm';")
-curl -s -X DELETE "http://localhost:8011/api/fulfillment/v1/compute_instances/$DEMO_ID" \
-  -H "Authorization: Bearer $(cat /tmp/osac_token.txt)"
-```
+**Wait ~30 seconds.** Then show the rates:
 
-**What to show:**
-- Terminal 1 (logs): `received event ... type=EVENT_TYPE_OBJECT_DELETED`,
-  `final metering for deleted instance`
-- Terminal 2 (watch): final metering entries appear immediately (no need to
-  wait for the next sweep)
-
-**Verify deletion:**
+**Bottom-left:**
 ```bash
 docker exec cost-db psql -U user -d costdb -c \
-  "SELECT name, state, deleted_at FROM inventory_compute_instance WHERE name = 'demo-vm';"
+  "SELECT meter_name, price_per_unit, currency
+   FROM rates WHERE resource_type = 'compute_instance';"
 ```
 
-### Act 7: Run the test suite
+---
 
-**Goal:** Show automated test coverage.
+### Act 7: Quota status API
 
+**Narrate:** "OSAC can check in real-time: is this tenant within quota?"
+
+**Bottom-left:**
 ```bash
+curl -s http://localhost:8020/api/v1/quotas/shared | \
+  jq '.quotas[] | select(.consumed > 0)'
+```
+
+---
+
+### Act 8: OpenMeter-compatible ingest
+
+**Narrate:** "Our endpoint accepts the same CloudEvents format the OSAC
+metering collector sends to OpenMeter. Switching to us is a URL change."
+
+**Bottom-left:**
+```bash
+curl -s -X POST http://localhost:8020/api/v1/events \
+  -H "Content-Type: application/cloudevents+json" \
+  -d "{
+    \"specversion\": \"1.0\",
+    \"type\": \"osac.compute_instance.lifecycle\",
+    \"source\": \"osac.metering.collector\",
+    \"id\": \"demo-heartbeat-$(date +%s)\",
+    \"time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+    \"subject\": \"tenant-acme\",
+    \"data\": {
+      \"duration_seconds\": 60,
+      \"cpu_core_seconds\": 480,
+      \"memory_gib_seconds\": 1920,
+      \"tenant_id\": \"tenant-acme\",
+      \"instance_id\": \"demo-external-vm\",
+      \"template\": \"osac.templates.ocp_virt_vm\",
+      \"state\": \"COMPUTE_INSTANCE_STATE_RUNNING\",
+      \"cores\": 8,
+      \"memory_gib\": 32
+    }
+  }" | jq .
+```
+
+**Point out:**
+- Response: `{"status":"accepted"}`
+- Top-left: `ingested VM heartbeat instance=demo-external-vm`
+
+**Show metering entries created directly from the event:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT meter_name, round(value::numeric, 0) as value, unit
+   FROM metering_entries WHERE resource_id = 'demo-external-vm';"
+```
+
+---
+
+### Act 9: DELETE and final metering
+
+**Narrate:** "Deleting a VM produces final metering entries covering the gap
+since the last sweep — no usage lost."
+
+**Bottom-left:**
+```bash
+DEMO_ID=$(docker exec cost-db psql -U user -d costdb -t -A -c \
+  "SELECT instance_id FROM inventory_compute_instance WHERE name = 'demo-vm';")
+curl -s -X DELETE "$BASE/api/fulfillment/v1/compute_instances/$DEMO_ID" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Point out:**
+- Top-left: `final metering for deleted instance`
+
+**Verify:**
+```bash
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT name, deleted_at IS NOT NULL as deleted
+   FROM inventory_compute_instance WHERE name = 'demo-vm';"
+```
+
+---
+
+### Act 10: Test suite
+
+**Narrate:** "We have automated tests covering the full pipeline."
+
+**Bottom-left:**
+```bash
+cd /Users/mpovolny/Projects/cost_ai_grid_poc
 SKIP_METERING=1 bash snippets/test-inventory-watcher.sh
 ```
 
-Shows colored output with checkmarks, all passing. For a full run
-(including metering and non-billable filtering), drop the `SKIP_METERING=1`.
+---
 
-## Recording the Demo
+### Act 11: MaaS traffic (optional)
 
-### Option A: asciinema (terminal recording, shareable)
+**Narrate:** "The same pipeline handles consumption-based billing —
+tokens and requests instead of cores and seconds."
 
+**Bottom-left:**
 ```bash
-brew install asciinema
-
-# Record the whole demo
-asciinema rec demo-scenario-1.cast
-
-# ... run the demo steps ...
-# Press Ctrl-D or type 'exit' to stop
-
-# Play back
-asciinema play demo-scenario-1.cast
-
-# Upload (optional — creates a shareable link)
-asciinema upload demo-scenario-1.cast
+cd /Users/mpovolny/Projects/cost_ai_grid_poc/inventory-watcher
+./maas-simulator -target http://localhost:8020 -count 50 -rate 20
 ```
 
-### Option B: script (built-in, simple)
-
+**Show MaaS costs:**
 ```bash
-# Record terminal session with timestamps
-script -r demo-scenario-1.log
-
-# ... run the demo steps ...
-# Type 'exit' to stop
-
-# Play back at original speed
-script -p demo-scenario-1.log
+docker exec cost-db psql -U user -d costdb -c \
+  "SELECT meter_name, round(sum(cost_amount)::numeric, 4) as total_cost, currency
+   FROM cost_entries WHERE resource_type = 'model'
+   GROUP BY meter_name, currency ORDER BY meter_name;"
 ```
 
-### Option C: tmux split panes (live demo layout)
-
-For a live demo, use a 3-pane tmux layout:
-
-```bash
-# Create the layout
-tmux new-session -s demo -d
-
-# Pane 0 (top-left): watcher logs
-tmux send-keys -t demo 'cd inventory-watcher && OSAC_BASE_URL=http://localhost:8011 OSAC_TOKEN=$(cat /tmp/osac_token.txt) INVENTORY_DB_URL=postgres://user:pass@localhost:5434/costdb ./inventory-watcher' Enter
-
-# Pane 1 (top-right): live DB view
-tmux split-window -h -t demo
-tmux send-keys -t demo 'watch -n 2 "docker exec cost-db psql -U user -d costdb -c \"SELECT name, cores, memory_gib, state FROM inventory_compute_instance ORDER BY name;\""' Enter
-
-# Pane 2 (bottom): command input
-tmux split-window -v -t demo
-tmux send-keys -t demo 'echo "Ready for demo commands"' Enter
-
-tmux attach -t demo
-```
-
-Layout:
-```
-┌─────────────────────┬─────────────────────┐
-│  Watcher logs       │  Live DB view       │
-│  (streaming)        │  (watch -n 2)       │
-│                     │                     │
-├─────────────────────┴─────────────────────┤
-│  Command input (create/delete instances)  │
-│                                           │
-└───────────────────────────────────────────┘
-```
+---
 
 ## Talking Points
 
-1. **No Kafka needed** — the gRPC Watch stream provides real-time events,
-   the reconciler catches anything missed. Same pattern as Kubernetes
-   controllers.
-
-2. **Sub-second ingestion** — creating a VM in OSAC appears in the cost
-   database within 1-2 seconds. No polling, no batch processing.
-
-3. **Capacity-based billing** — metering entries track provisioned resources
-   × time. A 4-core VM running for 60 seconds = 240 cpu_core_seconds.
-   You pay for what's provisioned, not what's used.
-
-4. **No data loss on deletion** — final metering entries are produced
-   immediately on DELETE, covering the gap since the last sweep.
-
-5. **Immutable audit trail** — every event is stored in raw_events before
-   processing. Full replay capability.
-
-6. **Billable state filtering** — only RUNNING VMs are metered. STOPPED
-   VMs are tracked in inventory but produce no cost.
+1. **Full pipeline in one binary** — events → inventory → metering → cost → quotas
+2. **Sub-second ingestion** — VM appears in cost DB within 1-2 seconds
+3. **Capacity-based billing** — provisioned resources × time × rate = cost
+4. **Automatic rating** — metering entries converted to dollars every 30s
+5. **Quota API** — real-time consumption vs limits with threshold checks
+6. **OpenMeter-compatible** — same CloudEvents format, just a URL change
+7. **No Kafka** — Watch stream + reconciler, same as Kubernetes controllers
+8. **No data loss** — final metering on DELETE, immutable raw event log
+9. **Billable state filtering** — only RUNNING VMs produce cost

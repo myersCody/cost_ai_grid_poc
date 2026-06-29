@@ -19,6 +19,10 @@ func NewStore(pool *pgxpool.Pool, logger *slog.Logger) *Store {
 	return &Store{pool: pool, logger: logger}
 }
 
+func (s *Store) Pool() *pgxpool.Pool {
+	return s.pool
+}
+
 // RunMigrations creates the inventory tables if they don't exist.
 func (s *Store) RunMigrations(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, schema)
@@ -94,6 +98,24 @@ CREATE TABLE IF NOT EXISTS inventory_cluster (
 
 CREATE INDEX IF NOT EXISTS idx_cl_alive ON inventory_cluster (deleted_at) WHERE deleted_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS inventory_model (
+    model_id       TEXT PRIMARY KEY,
+    name           TEXT NOT NULL DEFAULT '',
+    model_name     TEXT NOT NULL DEFAULT '',
+    tenant         TEXT NOT NULL DEFAULT '',
+    project        TEXT NOT NULL DEFAULT '',
+    template       TEXT NOT NULL DEFAULT '',
+    state          TEXT NOT NULL DEFAULT '',
+    labels         JSONB DEFAULT '{}'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL,
+    deleted_at     TIMESTAMPTZ,
+    last_event_id  TEXT NOT NULL DEFAULT '',
+    last_updated   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_alive ON inventory_model (deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_model_tenant ON inventory_model (tenant);
+
 CREATE TABLE IF NOT EXISTS inventory_instance_type (
     instance_type_id TEXT PRIMARY KEY,
     name             TEXT NOT NULL DEFAULT '',
@@ -137,6 +159,71 @@ CREATE TABLE IF NOT EXISTS metering_entries (
 
 CREATE INDEX IF NOT EXISTS idx_me_tenant_meter ON metering_entries (tenant_id, meter_name, period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_me_resource ON metering_entries (resource_id, meter_name);
+
+CREATE TABLE IF NOT EXISTS rates (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      TEXT,
+    resource_type  TEXT NOT NULL,
+    meter_name     TEXT NOT NULL,
+    koku_metric    TEXT NOT NULL DEFAULT '',
+    cost_type      TEXT NOT NULL DEFAULT 'Infrastructure',
+    price_per_unit NUMERIC(18,10) NOT NULL,
+    currency       TEXT NOT NULL DEFAULT 'USD',
+    tiers          JSONB,
+    description    TEXT NOT NULL DEFAULT '',
+    effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    effective_to   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_rates_lookup ON rates (resource_type, meter_name, effective_from);
+
+CREATE TABLE IF NOT EXISTS cost_entries (
+    id                BIGSERIAL PRIMARY KEY,
+    metering_entry_id BIGINT NOT NULL,
+    rate_id           BIGINT NOT NULL,
+    tenant_id         TEXT NOT NULL DEFAULT '',
+    resource_type     TEXT NOT NULL,
+    resource_id       TEXT NOT NULL,
+    meter_name        TEXT NOT NULL,
+    metered_value     NUMERIC(18,6) NOT NULL,
+    cost_amount       NUMERIC(18,10) NOT NULL,
+    currency          TEXT NOT NULL DEFAULT 'USD',
+    period_start      TIMESTAMPTZ NOT NULL,
+    period_end        TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ce_tenant_period ON cost_entries (tenant_id, period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_ce_metering ON cost_entries (metering_entry_id);
+
+CREATE TABLE IF NOT EXISTS quotas (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    project_id     TEXT NOT NULL DEFAULT '',
+    resource_type  TEXT NOT NULL DEFAULT '',
+    meter_name     TEXT NOT NULL,
+    limit_value    NUMERIC(18,6) NOT NULL,
+    unit           TEXT NOT NULL,
+    period         TEXT NOT NULL DEFAULT 'monthly',
+    effective_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    effective_to   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_quotas_tenant ON quotas (tenant_id, meter_name);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id             BIGSERIAL PRIMARY KEY,
+    tenant_id      TEXT NOT NULL,
+    meter_name     TEXT NOT NULL,
+    threshold_pct  NUMERIC NOT NULL,
+    consumed       NUMERIC(18,6) NOT NULL,
+    limit_value    NUMERIC(18,6) NOT NULL,
+    period         TEXT NOT NULL,
+    state          TEXT NOT NULL DEFAULT 'firing',
+    fired_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, meter_name, threshold_pct, period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts (tenant_id, period);
 `
 
 // InsertRawEvent stores an event immutably. Returns false if the event was
@@ -251,6 +338,55 @@ func (s *Store) BillableClusters(ctx context.Context) ([]ClusterRecord, error) {
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// UpsertModel inserts or updates a model deployment in the inventory.
+func (s *Store) UpsertModel(ctx context.Context, rec ModelRecord) error {
+	labelsJSON, err := marshalLabels(rec.Labels)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO inventory_model
+			(model_id, name, model_name, tenant, project, template, state, labels, created_at, deleted_at, last_event_id, last_updated)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+		ON CONFLICT (model_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			model_name = EXCLUDED.model_name,
+			tenant = EXCLUDED.tenant,
+			project = EXCLUDED.project,
+			template = EXCLUDED.template,
+			state = EXCLUDED.state,
+			labels = EXCLUDED.labels,
+			deleted_at = EXCLUDED.deleted_at,
+			last_event_id = EXCLUDED.last_event_id,
+			last_updated = NOW()
+	`, rec.ModelID, rec.Name, rec.ModelName, rec.Tenant, rec.Project,
+		rec.Template, rec.State, labelsJSON, rec.CreatedAt, rec.DeletedAt, rec.LastEventID)
+
+	if err != nil {
+		return fmt.Errorf("upsert model %s: %w", rec.ModelID, err)
+	}
+
+	s.logger.Debug("upserted model", "id", rec.ModelID, "model_name", rec.ModelName, "state", rec.State)
+	return nil
+}
+
+// MarkModelDeleted sets the deleted_at timestamp on a model.
+func (s *Store) MarkModelDeleted(ctx context.Context, modelID string, deletedAt time.Time, eventID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE inventory_model
+		SET deleted_at = $2, last_event_id = $3, last_updated = NOW()
+		WHERE model_id = $1 AND deleted_at IS NULL
+	`, modelID, deletedAt, eventID)
+
+	if err != nil {
+		return fmt.Errorf("mark model deleted %s: %w", modelID, err)
+	}
+
+	s.logger.Debug("marked model deleted", "id", modelID)
+	return nil
 }
 
 // UpdateClusterLastMetered sets last_metered_at for a cluster.
@@ -542,6 +678,284 @@ func (s *Store) InsertDailyUsageSummary(ctx context.Context, summary DailyUsageS
 func (s *Store) DeleteDailyUsageSummaries(ctx context.Context, date time.Time) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM daily_usage_summary WHERE usage_date = $1`, date)
 	return err
+}
+
+// UpsertRate inserts or updates a rate definition.
+func (s *Store) UpsertRate(ctx context.Context, rec RateRecord) (int64, error) {
+	var tiersJSON []byte
+	if rec.Tiers != nil {
+		var err error
+		tiersJSON, err = json.Marshal(rec.Tiers)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO rates
+			(tenant_id, resource_type, meter_name, koku_metric, cost_type, price_per_unit, currency, tiers, description, effective_from, effective_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT DO NOTHING
+		RETURNING id
+	`, rec.TenantID, rec.ResourceType, rec.MeterName, rec.KokuMetric, rec.CostType,
+		rec.PricePerUnit, rec.Currency, tiersJSON, rec.Description,
+		rec.EffectiveFrom, rec.EffectiveTo).Scan(&id)
+
+	if err != nil {
+		// ON CONFLICT DO NOTHING means no row returned if it already exists.
+		// That's fine — return 0 to indicate no insert.
+		return 0, nil
+	}
+	return id, nil
+}
+
+// FindRate looks up the applicable rate for a meter. Prefers tenant-specific
+// rates over global defaults.
+func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName string, at time.Time) (*RateRecord, error) {
+	var rec RateRecord
+	var tiersJSON []byte
+
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, resource_type, meter_name, koku_metric, cost_type,
+		       price_per_unit, currency, tiers, description, effective_from, effective_to
+		FROM rates
+		WHERE resource_type = $1 AND meter_name = $2
+		  AND effective_from <= $3
+		  AND (effective_to IS NULL OR effective_to > $3)
+		  AND (tenant_id = $4 OR tenant_id IS NULL OR tenant_id = '')
+		ORDER BY CASE WHEN tenant_id = $4 THEN 0 ELSE 1 END
+		LIMIT 1
+	`, resourceType, meterName, at, tenantID).Scan(
+		&rec.ID, &rec.TenantID, &rec.ResourceType, &rec.MeterName,
+		&rec.KokuMetric, &rec.CostType,
+		&rec.PricePerUnit, &rec.Currency, &tiersJSON, &rec.Description,
+		&rec.EffectiveFrom, &rec.EffectiveTo)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if tiersJSON != nil {
+		if err := json.Unmarshal(tiersJSON, &rec.Tiers); err != nil {
+			return nil, fmt.Errorf("unmarshal tiers for rate %d: %w", rec.ID, err)
+		}
+	}
+
+	return &rec, nil
+}
+
+// UnratedMeteringEntries returns metering entries that don't have a corresponding cost entry.
+func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]MeteringEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT me.id, me.raw_event_id, me.resource_type, me.resource_id, me.tenant_id,
+		       me.meter_name, me.value, me.unit, me.period_start, me.period_end
+		FROM metering_entries me
+		LEFT JOIN cost_entries ce ON ce.metering_entry_id = me.id
+		WHERE ce.id IS NULL
+		ORDER BY me.id
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []MeteringEntry
+	for rows.Next() {
+		var r MeteringEntry
+		if err := rows.Scan(&r.ID, &r.RawEventID, &r.ResourceType, &r.ResourceID,
+			&r.TenantID, &r.MeterName, &r.Value, &r.Unit, &r.PeriodStart, &r.PeriodEnd); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// InsertCostEntry stores a computed cost record.
+func (s *Store) InsertCostEntry(ctx context.Context, entry CostEntry) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO cost_entries
+			(metering_entry_id, rate_id, tenant_id, resource_type, resource_id, meter_name,
+			 metered_value, cost_amount, currency, period_start, period_end)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, entry.MeteringEntryID, entry.RateID, entry.TenantID, entry.ResourceType,
+		entry.ResourceID, entry.MeterName, entry.MeteredValue, entry.CostAmount,
+		entry.Currency, entry.PeriodStart, entry.PeriodEnd)
+
+	return err
+}
+
+// RateCount returns the number of rates in the table.
+func (s *Store) RateCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM rates`).Scan(&count)
+	return count, err
+}
+
+// UpsertQuota inserts a quota definition.
+func (s *Store) UpsertQuota(ctx context.Context, q QuotaRecord) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO quotas
+			(tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id
+	`, q.TenantID, q.ProjectID, q.ResourceType, q.MeterName, q.LimitValue,
+		q.Unit, q.Period, q.EffectiveFrom, q.EffectiveTo).Scan(&id)
+
+	if err != nil {
+		return 0, fmt.Errorf("upsert quota: %w", err)
+	}
+	return id, nil
+}
+
+// QuotasForTenant returns all active quotas for a tenant.
+func (s *Store) QuotasForTenant(ctx context.Context, tenantID string, at time.Time) ([]QuotaRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to
+		FROM quotas
+		WHERE tenant_id = $1
+		  AND effective_from <= $2
+		  AND (effective_to IS NULL OR effective_to > $2)
+		ORDER BY meter_name
+	`, tenantID, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []QuotaRecord
+	for rows.Next() {
+		var r QuotaRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
+			&r.LimitValue, &r.Unit, &r.Period, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// MeteringSum returns the total metered value for a tenant + meter in a time range.
+func (s *Store) MeteringSum(ctx context.Context, tenantID, meterName string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(value), 0)
+		FROM metering_entries
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND period_start >= $3 AND period_end <= $4
+	`, tenantID, meterName, from, to).Scan(&sum)
+	return sum, err
+}
+
+// CostSum returns the total cost for a tenant + meter in a time range.
+func (s *Store) CostSum(ctx context.Context, tenantID, meterName string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_amount), 0)
+		FROM cost_entries
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND period_start >= $3 AND period_end <= $4
+	`, tenantID, meterName, from, to).Scan(&sum)
+	return sum, err
+}
+
+// QuotaCount returns the number of quotas in the table.
+func (s *Store) QuotaCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM quotas`).Scan(&count)
+	return count, err
+}
+
+// InsertAlert records a threshold breach. Returns false if already fired
+// (UNIQUE constraint on tenant+meter+threshold+period).
+func (s *Store) InsertAlert(ctx context.Context, alert AlertRecord) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO alerts
+			(tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		ON CONFLICT (tenant_id, meter_name, threshold_pct, period) DO NOTHING
+	`, alert.TenantID, alert.MeterName, alert.ThresholdPct, alert.Consumed,
+		alert.LimitValue, alert.Period, "firing")
+
+	if err != nil {
+		return false, fmt.Errorf("insert alert: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// AlertsForTenant returns all alerts for a tenant in a period.
+func (s *Store) AlertsForTenant(ctx context.Context, tenantID, period string) ([]AlertRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at
+		FROM alerts
+		WHERE tenant_id = $1 AND period = $2
+		ORDER BY meter_name, threshold_pct
+	`, tenantID, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AlertRecord
+	for rows.Next() {
+		var r AlertRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.MeterName, &r.ThresholdPct,
+			&r.Consumed, &r.LimitValue, &r.Period, &r.State, &r.FiredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// AlertsForTenantMeter returns alerts for a specific tenant + meter + period.
+func (s *Store) AlertsForTenantMeter(ctx context.Context, tenantID, meterName, period string) ([]AlertRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, meter_name, threshold_pct, consumed, limit_value, period, state, fired_at
+		FROM alerts
+		WHERE tenant_id = $1 AND meter_name = $2 AND period = $3
+		ORDER BY threshold_pct
+	`, tenantID, meterName, period)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []AlertRecord
+	for rows.Next() {
+		var r AlertRecord
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.MeterName, &r.ThresholdPct,
+			&r.Consumed, &r.LimitValue, &r.Period, &r.State, &r.FiredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// AllTenantsWithQuotas returns distinct tenant IDs that have active quotas.
+func (s *Store) AllTenantsWithQuotas(ctx context.Context, at time.Time) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT tenant_id FROM quotas
+		WHERE effective_from <= $1 AND (effective_to IS NULL OR effective_to > $1)
+	`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		results = append(results, t)
+	}
+	return results, rows.Err()
 }
 
 func marshalLabels(labels json.RawMessage) ([]byte, error) {

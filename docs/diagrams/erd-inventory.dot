@@ -1,0 +1,124 @@
+// ERD: Inventory & Events
+// Tables that track OSAC resources and raw event log.
+//
+// Source: inventory-watcher/internal/inventory/store.go (schema)
+// Models: inventory-watcher/internal/inventory/models.go
+
+digraph erd_inventory {
+    graph [
+        rankdir=LR
+        fontname="Helvetica"
+        fontsize=12
+        label="Inventory & Events\n(store.go / models.go)"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+    ]
+    node [
+        shape=plain
+        fontname="Helvetica"
+        fontsize=10
+    ]
+    edge [
+        fontname="Helvetica"
+        fontsize=9
+        color="#666666"
+    ]
+
+    raw_events [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F4FD">
+            <TR><TD COLSPAN="3" BGCOLOR="#2196F3"><FONT COLOR="white"><B>raw_events</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>id</B></TD><TD>BIGSERIAL</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">event_id</TD><TD>TEXT</TD><TD>UNIQUE</TD></TR>
+            <TR><TD ALIGN="LEFT">event_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">event_source</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">event_time</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">data</TD><TD>JSONB</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">received_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    inventory_project [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F5E9">
+            <TR><TD COLSPAN="3" BGCOLOR="#4CAF50"><FONT COLOR="white"><B>inventory_project</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>project_id</B></TD><TD>TEXT</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">labels</TD><TD>JSONB</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">created_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">deleted_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    inventory_compute_instance [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F5E9">
+            <TR><TD COLSPAN="3" BGCOLOR="#4CAF50"><FONT COLOR="white"><B>inventory_compute_instance</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>instance_id</B></TD><TD>TEXT</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">project</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">instance_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">cores</TD><TD>INTEGER</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">memory_gib</TD><TD>INTEGER</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">state</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">labels</TD><TD>JSONB</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">created_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">deleted_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">last_metered_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    inventory_cluster [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F5E9">
+            <TR><TD COLSPAN="3" BGCOLOR="#4CAF50"><FONT COLOR="white"><B>inventory_cluster</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>cluster_id</B></TD><TD>TEXT</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">template</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">node_sets</TD><TD>JSONB</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">state</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">created_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">deleted_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">last_metered_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    inventory_model [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F5E9">
+            <TR><TD COLSPAN="3" BGCOLOR="#4CAF50"><FONT COLOR="white"><B>inventory_model</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>model_id</B></TD><TD>TEXT</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">model_name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">project</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">template</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">state</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">created_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">deleted_at</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    inventory_instance_type [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E8F5E9">
+            <TR><TD COLSPAN="3" BGCOLOR="#4CAF50"><FONT COLOR="white"><B>inventory_instance_type</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>instance_type_id</B></TD><TD>TEXT</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">cores</TD><TD>INTEGER</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">memory_gib</TD><TD>INTEGER</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">state</TD><TD>TEXT</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    // Relationships
+    inventory_project -> inventory_compute_instance [label="tenant" style=dashed]
+    inventory_project -> inventory_model [label="tenant" style=dashed]
+    inventory_project -> inventory_cluster [label="tenant" style=dashed]
+    inventory_instance_type -> inventory_compute_instance [label="instance_type" style=dashed]
+    raw_events -> inventory_compute_instance [label="produces\n(CREATED/UPDATED)" style=dotted color="#999999"]
+    raw_events -> inventory_cluster [label="produces" style=dotted color="#999999"]
+    raw_events -> inventory_model [label="produces" style=dotted color="#999999"]
+}

@@ -19,3 +19,11 @@ func IsComputeInstanceBillable(state string) bool {
 func IsClusterBillable(state string) bool {
 	return billableClusterStates[state]
 }
+
+var billableModelStates = map[string]bool{
+	"MODEL_STATE_RUNNING": true,
+}
+
+func IsModelBillable(state string) bool {
+	return billableModelStates[state]
+}

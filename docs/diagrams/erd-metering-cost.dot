@@ -1,0 +1,98 @@
+// ERD: Metering, Rating & Quotas
+// Tables that track usage, apply rates, compute cost, and enforce quotas.
+//
+// Source: inventory-watcher/internal/inventory/store.go (schema)
+// Models: inventory-watcher/internal/inventory/models.go
+// Rating: inventory-watcher/internal/rating/rating.go
+
+digraph erd_metering_cost {
+    graph [
+        rankdir=LR
+        fontname="Helvetica"
+        fontsize=12
+        label="Metering, Rating & Quotas\n(store.go / models.go / rating.go)"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+    ]
+    node [
+        shape=plain
+        fontname="Helvetica"
+        fontsize=10
+    ]
+    edge [
+        fontname="Helvetica"
+        fontsize=9
+        color="#666666"
+    ]
+
+    metering_entries [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF3E0">
+            <TR><TD COLSPAN="3" BGCOLOR="#FF9800"><FONT COLOR="white"><B>metering_entries</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>id</B></TD><TD>BIGSERIAL</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">raw_event_id</TD><TD>BIGINT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tenant_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">meter_name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">value</TD><TD>NUMERIC(18,6)</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">unit</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">period_start</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">period_end</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    rates [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F3E5F5">
+            <TR><TD COLSPAN="3" BGCOLOR="#9C27B0"><FONT COLOR="white"><B>rates</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>id</B></TD><TD>BIGSERIAL</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">tenant_id</TD><TD>TEXT</TD><TD>nullable</TD></TR>
+            <TR><TD ALIGN="LEFT">resource_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">meter_name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">price_per_unit</TD><TD>NUMERIC(18,10)</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">currency</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">tiers</TD><TD>JSONB</TD><TD>nullable</TD></TR>
+            <TR><TD ALIGN="LEFT">effective_from</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">effective_to</TD><TD>TIMESTAMPTZ</TD><TD>nullable</TD></TR>
+        </TABLE>
+    >]
+
+    cost_entries [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFEBEE">
+            <TR><TD COLSPAN="3" BGCOLOR="#F44336"><FONT COLOR="white"><B>cost_entries</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>id</B></TD><TD>BIGSERIAL</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">metering_entry_id</TD><TD>BIGINT</TD><TD>FK</TD></TR>
+            <TR><TD ALIGN="LEFT">rate_id</TD><TD>BIGINT</TD><TD>FK</TD></TR>
+            <TR><TD ALIGN="LEFT">tenant_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">meter_name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">metered_value</TD><TD>NUMERIC(18,6)</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">cost_amount</TD><TD>NUMERIC(18,10)</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">currency</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">period_start</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">period_end</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+        </TABLE>
+    >]
+
+    quotas [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E0F2F1">
+            <TR><TD COLSPAN="3" BGCOLOR="#009688"><FONT COLOR="white"><B>quotas</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>id</B></TD><TD>BIGSERIAL</TD><TD>PK</TD></TR>
+            <TR><TD ALIGN="LEFT">tenant_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">project_id</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">resource_type</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">meter_name</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">limit_value</TD><TD>NUMERIC(18,6)</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">unit</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">period</TD><TD>TEXT</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">effective_from</TD><TD>TIMESTAMPTZ</TD><TD></TD></TR>
+            <TR><TD ALIGN="LEFT">effective_to</TD><TD>TIMESTAMPTZ</TD><TD>nullable</TD></TR>
+        </TABLE>
+    >]
+
+    // Data flow
+    metering_entries -> cost_entries [label="rated by\n(rating sweep)" color="#F44336" fontcolor="#F44336"]
+    rates -> cost_entries [label="rate applied" color="#9C27B0" fontcolor="#9C27B0"]
+    metering_entries -> quotas [label="SUM() compared\nagainst limit" style=dashed color="#009688" fontcolor="#009688"]
+}

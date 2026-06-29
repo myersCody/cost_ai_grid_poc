@@ -48,6 +48,21 @@ type ClusterRecord struct {
 	LastMeteredAt *time.Time      `json:"last_metered_at"`
 }
 
+type ModelRecord struct {
+	ModelID     string          `json:"model_id"`
+	Name        string          `json:"name"`
+	ModelName   string          `json:"model_name"`
+	Tenant      string          `json:"tenant"`
+	Project     string          `json:"project"`
+	Template    string          `json:"template"`
+	State       string          `json:"state"`
+	Labels      json.RawMessage `json:"labels"`
+	CreatedAt   time.Time       `json:"created_at"`
+	DeletedAt   *time.Time      `json:"deleted_at"`
+	LastEventID string          `json:"last_event_id"`
+	LastUpdated time.Time       `json:"last_updated"`
+}
+
 type InstanceTypeRecord struct {
 	InstanceTypeID string    `json:"instance_type_id"`
 	Name           string    `json:"name"`
@@ -81,6 +96,76 @@ type MeteringEntry struct {
 	Unit         string    `json:"unit"`
 	PeriodStart  time.Time `json:"period_start"`
 	PeriodEnd    time.Time `json:"period_end"`
+}
+
+type Tier struct {
+	UpTo         *float64 `json:"up_to"`
+	PricePerUnit float64  `json:"price_per_unit"`
+}
+
+type RateRecord struct {
+	ID            int64      `json:"id"`
+	TenantID      *string    `json:"tenant_id"`
+	ResourceType  string     `json:"resource_type"`
+	MeterName     string     `json:"meter_name"`
+	KokuMetric    string     `json:"koku_metric"`
+	CostType      string     `json:"cost_type"`
+	PricePerUnit  float64    `json:"price_per_unit"`
+	Currency      string     `json:"currency"`
+	Tiers         []Tier     `json:"tiers"`
+	Description   string     `json:"description"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
+}
+
+type CostEntry struct {
+	ID              int64     `json:"id"`
+	MeteringEntryID int64     `json:"metering_entry_id"`
+	RateID          int64     `json:"rate_id"`
+	TenantID        string    `json:"tenant_id"`
+	ResourceType    string    `json:"resource_type"`
+	ResourceID      string    `json:"resource_id"`
+	MeterName       string    `json:"meter_name"`
+	MeteredValue    float64   `json:"metered_value"`
+	CostAmount      float64   `json:"cost_amount"`
+	Currency        string    `json:"currency"`
+	PeriodStart     time.Time `json:"period_start"`
+	PeriodEnd       time.Time `json:"period_end"`
+}
+
+type QuotaRecord struct {
+	ID            int64      `json:"id"`
+	TenantID      string     `json:"tenant_id"`
+	ProjectID     string     `json:"project_id"`
+	ResourceType  string     `json:"resource_type"`
+	MeterName     string     `json:"meter_name"`
+	LimitValue    float64    `json:"limit_value"`
+	Unit          string     `json:"unit"`
+	Period        string     `json:"period"`
+	EffectiveFrom time.Time  `json:"effective_from"`
+	EffectiveTo   *time.Time `json:"effective_to"`
+}
+
+type QuotaStatus struct {
+	MeterName  string             `json:"meter_name"`
+	Unit       string             `json:"unit"`
+	Limit      float64            `json:"limit"`
+	Consumed   float64            `json:"consumed"`
+	Percentage float64            `json:"percentage"`
+	Thresholds map[string]bool    `json:"thresholds"`
+	Alerts     []AlertRecord      `json:"alerts,omitempty"`
+}
+
+type AlertRecord struct {
+	ID           int64     `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	MeterName    string    `json:"meter_name"`
+	ThresholdPct float64   `json:"threshold_pct"`
+	Consumed     float64   `json:"consumed"`
+	LimitValue   float64   `json:"limit_value"`
+	Period       string    `json:"period"`
+	State        string    `json:"state"`
+	FiredAt      time.Time `json:"fired_at"`
 }
 
 type DailyUsageSummary struct {
