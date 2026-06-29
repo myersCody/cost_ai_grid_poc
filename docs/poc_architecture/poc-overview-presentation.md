@@ -60,7 +60,7 @@ flowchart LR
 | **Cluster** (OCP) | Capacity | Time cluster is running × node count |
 | **VM** (OpenShift Virt) | Capacity | Time VM is running × CPU cores / memory |
 | **AI Model** (OpenShift AI) | Consumption | Tokens in + tokens out + requests |
-| Bare Metal | — | Not in scope for POC |
+| Bare Metal | — | TBD |
 
 ---
 
