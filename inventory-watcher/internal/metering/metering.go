@@ -47,6 +47,7 @@ func (m *Meter) sweep(ctx context.Context) {
 
 	m.meterComputeInstances(ctx, now)
 	m.meterClusters(ctx, now)
+	m.meterBareMetalInstances(ctx, now)
 }
 
 func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
@@ -203,6 +204,46 @@ func clusterMeters(cl inventory.ClusterRecord, durationSeconds float64, periodSt
 	}
 
 	return entries
+}
+
+func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
+	instances, err := m.store.BillableBareMetalInstances(ctx)
+	if err != nil {
+		m.logger.Error("failed to list billable bare metal instances", "error", err)
+		return
+	}
+
+	metered := 0
+	for _, inst := range instances {
+		periodStart := inst.CreatedAt
+		if inst.LastMeteredAt != nil {
+			periodStart = *inst.LastMeteredAt
+		}
+
+		durationSeconds := now.Sub(periodStart).Seconds()
+		if durationSeconds <= 0 {
+			continue
+		}
+
+		entries := []inventory.MeteringEntry{
+			{ResourceType: "bare_metal", ResourceID: inst.InstanceID, TenantID: inst.Tenant, MeterName: "bm_uptime_seconds", Value: durationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: now},
+		}
+
+		for _, entry := range entries {
+			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
+				m.logger.Error("failed to insert BM metering entry", "resource", inst.InstanceID, "error", err)
+			}
+		}
+
+		if err := m.store.UpdateBareMetalInstanceLastMetered(ctx, inst.InstanceID, now); err != nil {
+			m.logger.Error("failed to update BM last_metered_at", "resource", inst.InstanceID, "error", err)
+		}
+		metered++
+	}
+
+	if metered > 0 {
+		m.logger.Info("metering sweep complete", "bare_metal_instances", metered)
+	}
 }
 
 // MaaS metering data passed from event ingestion.

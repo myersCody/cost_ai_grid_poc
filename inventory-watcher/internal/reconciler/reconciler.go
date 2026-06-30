@@ -53,6 +53,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 	r.reconcileComputeInstances(ctx)
 	r.reconcileClusters(ctx)
 	r.reconcileInstanceTypes(ctx)
+	r.reconcileBareMetalInstances(ctx)
 
 	r.logger.Info("reconciliation complete")
 }
@@ -225,6 +226,72 @@ func (r *Reconciler) reconcileProjects(ctx context.Context) {
 	}
 
 	r.logger.Info("reconciled projects", "count", len(osacProjects))
+}
+
+func (r *Reconciler) reconcileBareMetalInstances(ctx context.Context) {
+	osacInstances, err := r.client.ListBareMetalInstances(ctx)
+	if err != nil {
+		r.logger.Error("failed to list OSAC bare metal instances", "error", err)
+		return
+	}
+
+	knownInstances, err := r.store.ListAliveBareMetalInstances(ctx)
+	if err != nil {
+		r.logger.Error("failed to list inventory bare metal instances", "error", err)
+		return
+	}
+
+	osacSet := make(map[string]*osac.BareMetalInstance, len(osacInstances))
+	for i := range osacInstances {
+		osacSet[osacInstances[i].ID] = &osacInstances[i]
+	}
+
+	knownSet := make(map[string]bool, len(knownInstances))
+	for _, ki := range knownInstances {
+		knownSet[ki.InstanceID] = true
+	}
+
+	created := 0
+	for id, bm := range osacSet {
+		if !knownSet[id] {
+			createdAt := time.Now()
+			if bm.Metadata.CreationTimestamp != nil {
+				createdAt = *bm.Metadata.CreationTimestamp
+			}
+
+			if err := r.store.UpsertBareMetalInstance(ctx, inventory.BareMetalInstanceRecord{
+				InstanceID:  bm.ID,
+				Name:        bm.Metadata.Name,
+				Tenant:      bm.Metadata.Tenant,
+				CatalogItem: bm.Spec.CatalogItem,
+				State:       bm.Status.State,
+				CreatedAt:   createdAt,
+				LastEventID: "reconcile",
+			}); err != nil {
+				r.logger.Error("failed to upsert bare metal from reconciliation", "id", id, "error", err)
+			} else {
+				created++
+			}
+		}
+	}
+
+	deleted := 0
+	for _, ki := range knownInstances {
+		if _, exists := osacSet[ki.InstanceID]; !exists {
+			if err := r.store.MarkBareMetalInstanceDeleted(ctx, ki.InstanceID, time.Now(), "reconcile"); err != nil {
+				r.logger.Error("failed to mark bare metal deleted from reconciliation", "id", ki.InstanceID, "error", err)
+			} else {
+				deleted++
+			}
+		}
+	}
+
+	r.logger.Info("reconciled bare metal instances",
+		"osac_count", len(osacInstances),
+		"inventory_count", len(knownInstances),
+		"created", created,
+		"deleted", deleted,
+	)
 }
 
 func (r *Reconciler) reconcileInstanceTypes(ctx context.Context) {

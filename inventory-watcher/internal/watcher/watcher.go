@@ -240,6 +240,8 @@ func eventResourceType(event osac.Event) string {
 		return "Project"
 	case event.Tenant != nil:
 		return "Tenant"
+	case event.BareMetalInstance != nil:
+		return "BareMetalInstance"
 	case event.HostType != nil:
 		return "HostType"
 	case event.ClusterTemplate != nil:

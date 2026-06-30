@@ -17,6 +17,7 @@ type Event struct {
 	Tenant                  *Tenant          `json:"tenant,omitempty"`
 	Role                    *Role            `json:"role,omitempty"`
 	RoleBinding             *RoleBinding     `json:"role_binding,omitempty"`
+	BareMetalInstance       *BareMetalInstance `json:"bare_metal_instance,omitempty"`
 }
 
 type EventsWatchResponse struct {
@@ -125,6 +126,21 @@ type Role struct {
 type RoleBinding struct {
 	ID       string   `json:"id"`
 	Metadata Metadata `json:"metadata"`
+}
+
+type BareMetalInstance struct {
+	ID       string                  `json:"id"`
+	Metadata Metadata                `json:"metadata"`
+	Spec     BareMetalInstanceSpec   `json:"spec"`
+	Status   BareMetalInstanceStatus `json:"status"`
+}
+
+type BareMetalInstanceSpec struct {
+	CatalogItem string `json:"catalog_item,omitempty"`
+}
+
+type BareMetalInstanceStatus struct {
+	State string `json:"state"`
 }
 
 // Event type constants matching the protobuf enum.

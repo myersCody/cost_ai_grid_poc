@@ -63,6 +63,20 @@ type ModelRecord struct {
 	LastUpdated time.Time       `json:"last_updated"`
 }
 
+type BareMetalInstanceRecord struct {
+	InstanceID    string          `json:"instance_id"`
+	Name          string          `json:"name"`
+	Tenant        string          `json:"tenant"`
+	CatalogItem   string          `json:"catalog_item"`
+	State         string          `json:"state"`
+	Labels        json.RawMessage `json:"labels"`
+	CreatedAt     time.Time       `json:"created_at"`
+	DeletedAt     *time.Time      `json:"deleted_at"`
+	LastEventID   string          `json:"last_event_id"`
+	LastUpdated   time.Time       `json:"last_updated"`
+	LastMeteredAt *time.Time      `json:"last_metered_at"`
+}
+
 type InstanceTypeRecord struct {
 	InstanceTypeID string    `json:"instance_type_id"`
 	Name           string    `json:"name"`

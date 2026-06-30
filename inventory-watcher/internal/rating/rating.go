@@ -199,6 +199,7 @@ func SeedDefaultRates(ctx context.Context, store *inventory.Store, logger *slog.
 		{ResourceType: "model", MeterName: "maas_tokens_in", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_tokens_out", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_requests", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 5.00 / 1_000_000, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "bare_metal", MeterName: "bm_uptime_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.05 / 3600, Currency: "USD", EffectiveFrom: now},
 	}
 
 	for _, rate := range defaults {

@@ -27,3 +27,11 @@ var billableModelStates = map[string]bool{
 func IsModelBillable(state string) bool {
 	return billableModelStates[state]
 }
+
+var billableBareMetalStates = map[string]bool{
+	"BARE_METAL_INSTANCE_STATE_RUNNING": true,
+}
+
+func IsBareMetalBillable(state string) bool {
+	return billableBareMetalStates[state]
+}

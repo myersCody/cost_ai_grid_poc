@@ -116,6 +116,23 @@ CREATE TABLE IF NOT EXISTS inventory_model (
 CREATE INDEX IF NOT EXISTS idx_model_alive ON inventory_model (deleted_at) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_model_tenant ON inventory_model (tenant);
 
+CREATE TABLE IF NOT EXISTS inventory_bare_metal_instance (
+    instance_id    TEXT PRIMARY KEY,
+    name           TEXT NOT NULL DEFAULT '',
+    tenant         TEXT NOT NULL DEFAULT '',
+    catalog_item   TEXT NOT NULL DEFAULT '',
+    state          TEXT NOT NULL DEFAULT '',
+    labels         JSONB DEFAULT '{}'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL,
+    deleted_at     TIMESTAMPTZ,
+    last_event_id  TEXT NOT NULL DEFAULT '',
+    last_updated   TIMESTAMPTZ DEFAULT NOW(),
+    last_metered_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_bm_alive ON inventory_bare_metal_instance (deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_bm_tenant ON inventory_bare_metal_instance (tenant);
+
 CREATE TABLE IF NOT EXISTS inventory_instance_type (
     instance_type_id TEXT PRIMARY KEY,
     name             TEXT NOT NULL DEFAULT '',
@@ -394,6 +411,103 @@ func (s *Store) UpdateClusterLastMetered(ctx context.Context, clusterID string, 
 	_, err := s.pool.Exec(ctx, `
 		UPDATE inventory_cluster SET last_metered_at = $2 WHERE cluster_id = $1
 	`, clusterID, t)
+	return err
+}
+
+// UpsertBareMetalInstance inserts or updates a bare metal instance.
+func (s *Store) UpsertBareMetalInstance(ctx context.Context, rec BareMetalInstanceRecord) error {
+	labelsJSON, err := marshalLabels(rec.Labels)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO inventory_bare_metal_instance
+			(instance_id, name, tenant, catalog_item, state, labels, created_at, deleted_at, last_event_id, last_updated)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+		ON CONFLICT (instance_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			tenant = EXCLUDED.tenant,
+			catalog_item = EXCLUDED.catalog_item,
+			state = EXCLUDED.state,
+			labels = EXCLUDED.labels,
+			deleted_at = EXCLUDED.deleted_at,
+			last_event_id = EXCLUDED.last_event_id,
+			last_updated = NOW()
+	`, rec.InstanceID, rec.Name, rec.Tenant, rec.CatalogItem,
+		rec.State, labelsJSON, rec.CreatedAt, rec.DeletedAt, rec.LastEventID)
+
+	if err != nil {
+		return fmt.Errorf("upsert bare metal instance %s: %w", rec.InstanceID, err)
+	}
+	s.logger.Debug("upserted bare metal instance", "id", rec.InstanceID, "name", rec.Name, "state", rec.State)
+	return nil
+}
+
+// MarkBareMetalInstanceDeleted sets the deleted_at timestamp.
+func (s *Store) MarkBareMetalInstanceDeleted(ctx context.Context, instanceID string, deletedAt time.Time, eventID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE inventory_bare_metal_instance
+		SET deleted_at = $2, last_event_id = $3, last_updated = NOW()
+		WHERE instance_id = $1 AND deleted_at IS NULL
+	`, instanceID, deletedAt, eventID)
+	return err
+}
+
+// BillableBareMetalInstances returns alive bare metal instances in billable states.
+func (s *Store) BillableBareMetalInstances(ctx context.Context) ([]BareMetalInstanceRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT instance_id, name, tenant, catalog_item, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
+		FROM inventory_bare_metal_instance
+		WHERE deleted_at IS NULL AND state = 'BARE_METAL_INSTANCE_STATE_RUNNING'
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []BareMetalInstanceRecord
+	for rows.Next() {
+		var r BareMetalInstanceRecord
+		if err := rows.Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.CatalogItem, &r.State, &r.Labels,
+			&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// ListAliveBareMetalInstances returns all bare metal instances not deleted.
+func (s *Store) ListAliveBareMetalInstances(ctx context.Context) ([]BareMetalInstanceRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT instance_id, name, tenant, catalog_item, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
+		FROM inventory_bare_metal_instance WHERE deleted_at IS NULL
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []BareMetalInstanceRecord
+	for rows.Next() {
+		var r BareMetalInstanceRecord
+		if err := rows.Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.CatalogItem, &r.State, &r.Labels,
+			&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// UpdateBareMetalInstanceLastMetered sets last_metered_at.
+func (s *Store) UpdateBareMetalInstanceLastMetered(ctx context.Context, instanceID string, t time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE inventory_bare_metal_instance SET last_metered_at = $2 WHERE instance_id = $1
+	`, instanceID, t)
 	return err
 }
 
