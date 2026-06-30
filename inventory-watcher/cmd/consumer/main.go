@@ -98,7 +98,13 @@ func main() {
 
 	if cfg.IngestListenAddr != "" {
 		h := ingest.NewHandler(store, m, logger)
-		srv := &http.Server{Addr: cfg.IngestListenAddr, Handler: h.ServeMux()}
+		srv := &http.Server{
+			Addr:           cfg.IngestListenAddr,
+			Handler:        h.ServeMux(),
+			ReadTimeout:    10 * time.Second,
+			WriteTimeout:   10 * time.Second,
+			MaxHeaderBytes: 1 << 20,
+		}
 		g.Go(func() error {
 			logger.Info("ingest endpoint listening", "addr", cfg.IngestListenAddr)
 			return srv.ListenAndServe()

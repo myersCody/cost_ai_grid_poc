@@ -92,7 +92,7 @@ func (c *Client) WatchEvents(ctx context.Context, handler func(Event) error) err
 	c.logger.Info("watch stream connected")
 
 	scanner := bufio.NewScanner(resp.Body)
-	// gRPC-Gateway streams newline-delimited JSON.
+	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB max line size
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {

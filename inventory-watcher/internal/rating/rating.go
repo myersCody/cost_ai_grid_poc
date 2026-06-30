@@ -105,7 +105,7 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 
 		for _, q := range quotas {
 			consumed, err := r.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
-			if err != nil || consumed == 0 {
+			if err != nil || consumed == 0 || q.LimitValue <= 0 {
 				continue
 			}
 

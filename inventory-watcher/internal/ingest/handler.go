@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -26,7 +27,6 @@ type CloudEvent struct {
 	Data            json.RawMessage `json:"data"`
 }
 
-// VMaaS heartbeat event data (from osac-metering-discover-poc collect.sh).
 type ComputeInstanceEventData struct {
 	DurationSeconds  int    `json:"duration_seconds"`
 	CPUCoreSeconds   int64  `json:"cpu_core_seconds"`
@@ -40,19 +40,17 @@ type ComputeInstanceEventData struct {
 	MemoryGiB        int32  `json:"memory_gib"`
 }
 
-// CaaS heartbeat event data (from osac-metering-discover-poc collect-caas.sh).
 type ClusterEventData struct {
-	DurationSeconds    int    `json:"duration_seconds"`
-	WorkerNodeSeconds  int64  `json:"worker_node_seconds"`
-	NodeCount          int32  `json:"node_count"`
-	TenantID           string `json:"tenant_id"`
-	ClusterID          string `json:"cluster_id"`
-	Template           string `json:"template"`
-	State              string `json:"state"`
-	HostType           string `json:"host_type"`
+	DurationSeconds   int    `json:"duration_seconds"`
+	WorkerNodeSeconds int64  `json:"worker_node_seconds"`
+	NodeCount         int32  `json:"node_count"`
+	TenantID          string `json:"tenant_id"`
+	ClusterID         string `json:"cluster_id"`
+	Template          string `json:"template"`
+	State             string `json:"state"`
+	HostType          string `json:"host_type"`
 }
 
-// MaaS event data (proposed — OSAC doesn't emit these yet).
 type MaaSEventData struct {
 	TenantID        string `json:"tenant_id"`
 	ModelID         string `json:"model_id"`
@@ -69,6 +67,9 @@ const (
 	EventTypeComputeInstance = "osac.compute_instance.lifecycle"
 	EventTypeCluster         = "osac.cluster.lifecycle"
 	EventTypeModel           = "osac.model.lifecycle"
+
+	maxRequestBodySize = 1 << 20 // 1MB
+	maxIDLength        = 256
 )
 
 type Handler struct {
@@ -87,21 +88,36 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"status":"ok"}`)
+		writeJSON(w, map[string]string{"status": "ok"})
 	})
 	return mux
 }
 
 func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
 	var ce CloudEvent
 	if err := json.NewDecoder(r.Body).Decode(&ce); err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusBadRequest)
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if ce.ID == "" || ce.Type == "" {
+		writeErrorJSON(w, "id and type are required", http.StatusBadRequest)
 		return
 	}
 
 	ctx := r.Context()
 
 	resourceType, resourceID, tenantID := classifyEvent(ce)
+	if resourceID == "" || tenantID == "" {
+		writeErrorJSON(w, "event data must include resource_id and tenant_id", http.StatusBadRequest)
+		return
+	}
+	if len(resourceID) > maxIDLength || len(tenantID) > maxIDLength {
+		writeErrorJSON(w, "resource_id or tenant_id exceeds maximum length", http.StatusBadRequest)
+		return
+	}
 
 	fullJSON, _ := json.Marshal(ce)
 	inserted, err := h.store.InsertRawEvent(ctx, inventory.RawEvent{
@@ -115,42 +131,49 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 		Data:         fullJSON,
 	})
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		writeErrorJSON(w, "failed to store event", http.StatusInternalServerError)
+		h.logger.Error("failed to store raw event", "error", err, "event_id", ce.ID)
 		return
 	}
 	if !inserted {
 		w.WriteHeader(http.StatusConflict)
-		fmt.Fprintln(w, `{"status":"duplicate"}`)
+		writeJSON(w, map[string]string{"status": "duplicate"})
 		return
 	}
 
+	var processingErr error
 	switch ce.Type {
 	case EventTypeComputeInstance:
-		h.handleComputeInstanceEvent(ctx, ce)
+		processingErr = h.handleComputeInstanceEvent(ctx, ce)
 	case EventTypeCluster:
-		h.handleClusterEvent(ctx, ce)
+		processingErr = h.handleClusterEvent(ctx, ce)
 	case EventTypeModel:
-		h.handleModelEvent(ctx, ce)
+		processingErr = h.handleModelEvent(ctx, ce)
 	default:
 		h.logger.Warn("unknown CloudEvent type", "type", ce.Type)
 	}
 
+	if processingErr != nil {
+		h.logger.Error("event processing failed", "error", processingErr, "event_id", ce.ID, "type", ce.Type)
+		writeErrorJSON(w, "event stored but processing failed", http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusAccepted)
-	fmt.Fprintln(w, `{"status":"accepted"}`)
+	writeJSON(w, map[string]string{"status": "accepted"})
 }
 
-func (h *Handler) handleComputeInstanceEvent(ctx interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(any) any }, ce CloudEvent) {
+func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent) error {
 	var data ComputeInstanceEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
-		h.logger.Error("failed to parse compute instance event data", "error", err)
-		return
+		return err
 	}
 
 	if !metering.IsComputeInstanceBillable(data.State) {
-		return
+		return nil
 	}
 
-	_ = h.store.UpsertComputeInstance(ctx, inventory.ComputeInstanceRecord{
+	if err := h.store.UpsertComputeInstance(ctx, inventory.ComputeInstanceRecord{
 		InstanceID:  data.InstanceID,
 		Tenant:      data.TenantID,
 		Cores:       data.Cores,
@@ -158,64 +181,40 @@ func (h *Handler) handleComputeInstanceEvent(ctx interface{ Deadline() (time.Tim
 		State:       data.State,
 		CreatedAt:   ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second),
 		LastEventID: ce.ID,
-	})
+	}); err != nil {
+		return err
+	}
 
 	periodStart := ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second)
 
 	entries := []inventory.MeteringEntry{
-		{
-			ResourceType: "compute_instance",
-			ResourceID:   data.InstanceID,
-			TenantID:     data.TenantID,
-			MeterName:    "vm_uptime_seconds",
-			Value:        float64(data.DurationSeconds),
-			Unit:         "seconds",
-			PeriodStart:  periodStart,
-			PeriodEnd:    ce.Time,
-		},
-		{
-			ResourceType: "compute_instance",
-			ResourceID:   data.InstanceID,
-			TenantID:     data.TenantID,
-			MeterName:    "vm_cpu_core_seconds",
-			Value:        float64(data.CPUCoreSeconds),
-			Unit:         "core_seconds",
-			PeriodStart:  periodStart,
-			PeriodEnd:    ce.Time,
-		},
-		{
-			ResourceType: "compute_instance",
-			ResourceID:   data.InstanceID,
-			TenantID:     data.TenantID,
-			MeterName:    "vm_memory_gib_seconds",
-			Value:        float64(data.MemoryGiBSeconds),
-			Unit:         "gib_seconds",
-			PeriodStart:  periodStart,
-			PeriodEnd:    ce.Time,
-		},
+		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_uptime_seconds", Value: float64(data.DurationSeconds), Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
+		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_cpu_core_seconds", Value: float64(data.CPUCoreSeconds), Unit: "core_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
+		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_memory_gib_seconds", Value: float64(data.MemoryGiBSeconds), Unit: "gib_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
 	}
 
 	for _, entry := range entries {
 		if err := h.store.InsertMeteringEntry(ctx, entry); err != nil {
-			h.logger.Error("failed to insert VM metering entry", "error", err)
+			return err
 		}
 	}
 
-	_ = h.store.UpdateComputeInstanceLastMetered(ctx, data.InstanceID, ce.Time)
+	if err := h.store.UpdateComputeInstanceLastMetered(ctx, data.InstanceID, ce.Time); err != nil {
+		return err
+	}
 
-	h.logger.Debug("ingested VM heartbeat", "instance", data.InstanceID,
-		"cores", data.Cores, "duration", data.DurationSeconds)
+	h.logger.Debug("ingested VM heartbeat", "instance", data.InstanceID, "cores", data.Cores, "duration", data.DurationSeconds)
+	return nil
 }
 
-func (h *Handler) handleClusterEvent(ctx interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(any) any }, ce CloudEvent) {
+func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
 	var data ClusterEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
-		h.logger.Error("failed to parse cluster event data", "error", err)
-		return
+		return err
 	}
 
 	if !metering.IsClusterBillable(data.State) {
-		return
+		return nil
 	}
 
 	periodStart := ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second)
@@ -223,52 +222,35 @@ func (h *Handler) handleClusterEvent(ctx interface{ Deadline() (time.Time, bool)
 	var entries []inventory.MeteringEntry
 
 	if data.HostType == "_control_plane" {
-		entries = append(entries, inventory.MeteringEntry{
-			ResourceType: "cluster",
-			ResourceID:   data.ClusterID,
-			TenantID:     data.TenantID,
-			MeterName:    "cluster_uptime_seconds",
-			Value:        float64(data.DurationSeconds),
-			Unit:         "seconds",
-			PeriodStart:  periodStart,
-			PeriodEnd:    ce.Time,
-		})
+		entries = append(entries, inventory.MeteringEntry{ResourceType: "cluster", ResourceID: data.ClusterID, TenantID: data.TenantID, MeterName: "cluster_uptime_seconds", Value: float64(data.DurationSeconds), Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time})
 	}
 
 	if data.WorkerNodeSeconds > 0 {
-		entries = append(entries, inventory.MeteringEntry{
-			ResourceType: "cluster",
-			ResourceID:   data.ClusterID,
-			TenantID:     data.TenantID,
-			MeterName:    "cluster_worker_node_seconds",
-			Value:        float64(data.WorkerNodeSeconds),
-			Unit:         "node_seconds",
-			PeriodStart:  periodStart,
-			PeriodEnd:    ce.Time,
-		})
+		entries = append(entries, inventory.MeteringEntry{ResourceType: "cluster", ResourceID: data.ClusterID, TenantID: data.TenantID, MeterName: "cluster_worker_node_seconds", Value: float64(data.WorkerNodeSeconds), Unit: "node_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time})
 	}
 
 	for _, entry := range entries {
 		if err := h.store.InsertMeteringEntry(ctx, entry); err != nil {
-			h.logger.Error("failed to insert cluster metering entry", "error", err)
+			return err
 		}
 	}
 
-	_ = h.store.UpdateClusterLastMetered(ctx, data.ClusterID, ce.Time)
+	if err := h.store.UpdateClusterLastMetered(ctx, data.ClusterID, ce.Time); err != nil {
+		return err
+	}
 
-	h.logger.Debug("ingested cluster heartbeat", "cluster", data.ClusterID,
-		"host_type", data.HostType, "duration", data.DurationSeconds)
+	h.logger.Debug("ingested cluster heartbeat", "cluster", data.ClusterID, "host_type", data.HostType, "duration", data.DurationSeconds)
+	return nil
 }
 
-func (h *Handler) handleModelEvent(ctx interface{ Deadline() (time.Time, bool); Done() <-chan struct{}; Err() error; Value(any) any }, ce CloudEvent) {
+func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 	var data MaaSEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
-		h.logger.Error("failed to parse model event data", "error", err)
-		return
+		return err
 	}
 
 	createdAt := ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second)
-	_ = h.store.UpsertModel(ctx, inventory.ModelRecord{
+	if err := h.store.UpsertModel(ctx, inventory.ModelRecord{
 		ModelID:     data.ModelID,
 		Name:        data.ModelName,
 		ModelName:   data.ModelName,
@@ -277,7 +259,9 @@ func (h *Handler) handleModelEvent(ctx interface{ Deadline() (time.Time, bool); 
 		State:       data.State,
 		CreatedAt:   createdAt,
 		LastEventID: ce.ID,
-	})
+	}); err != nil {
+		return err
+	}
 
 	h.meter.MeterMaaSEvent(ctx, metering.MaaSUsage{
 		ModelID:         data.ModelID,
@@ -290,6 +274,7 @@ func (h *Handler) handleModelEvent(ctx interface{ Deadline() (time.Time, bool); 
 		EventTime:       ce.Time,
 		DurationSeconds: float64(data.DurationSeconds),
 	})
+	return nil
 }
 
 func classifyEvent(ce CloudEvent) (resourceType, resourceID, tenantID string) {
@@ -299,7 +284,9 @@ func classifyEvent(ce CloudEvent) (resourceType, resourceID, tenantID string) {
 		ClusterID  string `json:"cluster_id"`
 		ModelID    string `json:"model_id"`
 	}
-	_ = json.Unmarshal(ce.Data, &peek)
+	if err := json.Unmarshal(ce.Data, &peek); err != nil {
+		return ce.Type, "", ce.Subject
+	}
 
 	tenantID = peek.TenantID
 	if tenantID == "" {
@@ -316,6 +303,17 @@ func classifyEvent(ce CloudEvent) (resourceType, resourceID, tenantID string) {
 	default:
 		return ce.Type, "", tenantID
 	}
+}
+
+func writeJSON(w http.ResponseWriter, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeErrorJSON(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
 type quotaStatusResponse struct {
@@ -335,7 +333,11 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if tenantID == "" {
-		http.Error(w, `{"error":"tenant_id required"}`, http.StatusBadRequest)
+		writeErrorJSON(w, "tenant_id required", http.StatusBadRequest)
+		return
+	}
+	if len(tenantID) > maxIDLength {
+		writeErrorJSON(w, "tenant_id exceeds maximum length", http.StatusBadRequest)
 		return
 	}
 
@@ -347,7 +349,8 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 
 	quotas, err := h.store.QuotasForTenant(ctx, tenantID, now)
 	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
+		writeErrorJSON(w, "failed to query quotas", http.StatusInternalServerError)
+		h.logger.Error("quota query failed", "error", err, "tenant", tenantID)
 		return
 	}
 
@@ -388,6 +391,5 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 		Quotas:   statuses,
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, resp)
 }
