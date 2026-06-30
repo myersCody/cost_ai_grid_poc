@@ -143,6 +143,22 @@ message Metadata {
 | GET | `/api/fulfillment/v1/instance_types` | [`ListInstanceTypes`](../inventory-watcher/internal/osac/client.go) | Sync instance type catalog |
 | GET | `/api/fulfillment/v1/projects` | [`ListProjects`](../inventory-watcher/internal/osac/client.go) | Sync project hierarchy |
 
+### Pagination
+
+All List endpoints use `offset`/`limit` query parameters (defined in the
+OSAC proto). Our client pages through all results with `limit=100` until
+`offset >= total`.
+
+> **Known limitation:** OSAC only supports offset-based pagination, which
+> is an anti-pattern for changing datasets — resources created or deleted
+> between page fetches can cause items to be skipped or duplicated. The
+> better approach (cursor/keyset pagination) would require OSAC to add a
+> `continue` token or `after` parameter to the proto. For the PoC with
+> <100 resources this is not a practical problem; the reconciler runs
+> periodically and catches any missed items on the next cycle. For
+> production with thousands of resources, this should be raised with the
+> OSAC team.
+
 ## Messages Not Yet in OSAC (Mock Only)
 
 | Resource | Status | Our handling |
