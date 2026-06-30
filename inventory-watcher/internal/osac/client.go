@@ -142,28 +142,44 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 }
 
 type listResponse[T any] struct {
-	Items []T    `json:"items"`
-	Size  int    `json:"size"`
-	Page  int    `json:"page"`
-	Total int    `json:"total"`
+	Items []T `json:"items"`
+	Size  int `json:"size"`
+	Total int `json:"total"`
 }
 
+const listPageSize = 100
+
 func listAll[T any](ctx context.Context, c *Client, path string) ([]T, error) {
-	resp, err := c.doRequest(ctx, "GET", path)
-	if err != nil {
-		return nil, fmt.Errorf("list request to %s: %w", path, err)
-	}
-	defer resp.Body.Close()
+	var all []T
+	offset := 0
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("list %s returned status %d: %s", path, resp.StatusCode, body)
+	for {
+		pagePath := fmt.Sprintf("%s?offset=%d&limit=%d", path, offset, listPageSize)
+		resp, err := c.doRequest(ctx, "GET", pagePath)
+		if err != nil {
+			return nil, fmt.Errorf("list request to %s: %w", pagePath, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			resp.Body.Close()
+			return nil, fmt.Errorf("list %s returned status %d: %s", pagePath, resp.StatusCode, body)
+		}
+
+		var result listResponse[T]
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("decoding list response from %s: %w", pagePath, err)
+		}
+		resp.Body.Close()
+
+		all = append(all, result.Items...)
+
+		if len(all) >= result.Total || result.Size == 0 {
+			break
+		}
+		offset += result.Size
 	}
 
-	var result listResponse[T]
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding list response from %s: %w", path, err)
-	}
-
-	return result.Items, nil
+	return all, nil
 }
