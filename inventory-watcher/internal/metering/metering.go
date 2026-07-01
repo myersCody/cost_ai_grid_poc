@@ -248,15 +248,17 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 
 // MaaS metering data passed from event ingestion.
 type MaaSUsage struct {
-	ModelID         string
-	ModelName       string
-	TenantID        string
-	State           string
-	TokensIn        int64
-	TokensOut       int64
-	Requests        int64
-	EventTime       time.Time
-	DurationSeconds float64
+	ModelID             string
+	ModelName           string
+	TenantID            string
+	State               string
+	TokensIn            int64
+	TokensOut           int64
+	CachedInputTokens   int64
+	ReasoningTokens     int64
+	Requests            int64
+	EventTime           time.Time
+	DurationSeconds     float64
 }
 
 // MeterMaaSEvent produces metering entries from a MaaS usage event.
@@ -305,6 +307,32 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			TenantID:     usage.TenantID,
 			MeterName:    "maas_tokens_out",
 			Value:        float64(usage.TokensOut),
+			Unit:         "tokens",
+			PeriodStart:  periodStart,
+			PeriodEnd:    periodEnd,
+		})
+	}
+
+	if usage.CachedInputTokens > 0 {
+		entries = append(entries, inventory.MeteringEntry{
+			ResourceType: "model",
+			ResourceID:   usage.ModelID,
+			TenantID:     usage.TenantID,
+			MeterName:    "maas_tokens_cached",
+			Value:        float64(usage.CachedInputTokens),
+			Unit:         "tokens",
+			PeriodStart:  periodStart,
+			PeriodEnd:    periodEnd,
+		})
+	}
+
+	if usage.ReasoningTokens > 0 {
+		entries = append(entries, inventory.MeteringEntry{
+			ResourceType: "model",
+			ResourceID:   usage.ModelID,
+			TenantID:     usage.TenantID,
+			MeterName:    "maas_tokens_reasoning",
+			Value:        float64(usage.ReasoningTokens),
 			Unit:         "tokens",
 			PeriodStart:  periodStart,
 			PeriodEnd:    periodEnd,

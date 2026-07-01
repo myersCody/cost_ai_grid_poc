@@ -1100,3 +1100,84 @@ func marshalLabels(labels json.RawMessage) ([]byte, error) {
 	}
 	return labels, nil
 }
+
+// CostReport returns aggregated cost data grouped by the specified dimension.
+// groupBy must be one of: "tenant", "resource_type", "meter", "resource".
+func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy string, from, to time.Time) ([]CostReportRow, error) {
+	var groupCol string
+	switch groupBy {
+	case "resource_type":
+		groupCol = "ce.resource_type"
+	case "meter":
+		groupCol = "ce.meter_name"
+	case "resource":
+		groupCol = "ce.resource_id"
+	default:
+		groupCol = "ce.tenant_id"
+	}
+
+	where := "WHERE ce.period_start >= $1 AND ce.period_end <= $2"
+	args := []any{from, to}
+	argN := 3
+
+	if tenantID != "" {
+		where += fmt.Sprintf(" AND ce.tenant_id = $%d", argN)
+		args = append(args, tenantID)
+		argN++
+	}
+	if resourceType != "" {
+		where += fmt.Sprintf(" AND ce.resource_type = $%d", argN)
+		args = append(args, resourceType)
+		argN++
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s AS grp,
+		       count(*)::int AS entries,
+		       COALESCE(SUM(ce.cost_amount), 0) AS cost,
+		       COALESCE(SUM(CASE WHEN r.cost_type = 'Infrastructure' THEN ce.cost_amount ELSE 0 END), 0) AS infra_cost,
+		       COALESCE(SUM(CASE WHEN r.cost_type = 'Supplementary' THEN ce.cost_amount ELSE 0 END), 0) AS supp_cost,
+		       ce.currency
+		FROM cost_entries ce
+		LEFT JOIN rates r ON ce.rate_id = r.id
+		%s
+		GROUP BY %s, ce.currency
+		ORDER BY cost DESC
+	`, groupCol, where, groupCol)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("cost report: %w", err)
+	}
+	defer rows.Close()
+
+	var results []CostReportRow
+	for rows.Next() {
+		var r CostReportRow
+		if err := rows.Scan(&r.Group, &r.Entries, &r.Cost, &r.InfrastructureCost, &r.SupplementaryCost, &r.Currency); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// PipelineSummary returns counts from all pipeline tables.
+func (s *Store) PipelineSummary(ctx context.Context) (*PipelineSummary, error) {
+	var ps PipelineSummary
+	err := s.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*)::int FROM raw_events),
+			(SELECT count(*)::int FROM metering_entries),
+			(SELECT count(*)::int FROM cost_entries),
+			(SELECT count(*)::int FROM rates),
+			(SELECT count(*)::int FROM inventory_compute_instance WHERE deleted_at IS NULL),
+			(SELECT count(*)::int FROM inventory_cluster WHERE deleted_at IS NULL),
+			(SELECT count(*)::int FROM inventory_model WHERE deleted_at IS NULL)
+	`).Scan(&ps.RawEvents, &ps.MeteringEntries, &ps.CostEntries, &ps.Rates,
+		&ps.LiveVMs, &ps.LiveClusters, &ps.LiveModels)
+	if err != nil {
+		return nil, fmt.Errorf("pipeline summary: %w", err)
+	}
+	return &ps, nil
+}

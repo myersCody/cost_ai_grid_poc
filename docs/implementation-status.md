@@ -25,9 +25,9 @@
 | REQ-1b | CRITICAL | Heartbeat ingestion | **Done** | — | Local 60s sweep = heartbeat equivalent ([ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md)) |
 | REQ-2 | CRITICAL | Real-time cost calc | **Done** | — | <1ms/event, cost within 30s |
 | REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
-| REQ-3 | HIGH | Granular cost tracking | Partial | — | Data exists, no export API |
-| REQ-3a | HIGH | Tenant/project attribution | **Done** | — | Tenant → Project hierarchy |
-| REQ-3b | MEDIUM | Service catalog sync | Partial | — | Instance types synced, rates manual |
+| REQ-3 | HIGH | Granular cost tracking | Partial | — | Report API added; [cost-reports feasibility](poc_architecture/reporting/cost-reports-feasibility.md) |
+| REQ-3a | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open | [Open questions](#req-3a--tenantproject-attribution); [roadmap RBAC note](roadmap.md#osac-projects--rbac-from-pau) |
+| REQ-3b | MEDIUM | Service catalog sync | Partial | — | Instance types synced, catalog items not yet; [FOCUS backlog](roadmap.md#focus-format-cost-5710) |
 | REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
 | REQ-5 | MEDIUM | Chargeback reporting | Partial | — | SQL queries, no formatted export |
 | REQ-8 | HIGH | Bare metal costing | **Done** | Watch `oneof` gap — uses reconciler | [req8 gap analysis](req8-bare-metal-gap-analysis.md) |
@@ -154,8 +154,8 @@ entity we already track or are a separate concept.
 ---
 
 ### REQ-3a — Tenant/Project Attribution
-**Status:** Done
-**Spec:** [csv_poc_requirements_summary.md#req-3a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-3a--osac-tenantproject-attribution)
+**Status:** Done (data layer); Open questions on authz/RBAC
+**Spec:** [poc_requirements_overview.md#req-3a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-3a--osac-tenantproject-attribution)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -163,6 +163,14 @@ entity we already track or are a separate concept.
 | Drill-down to project level | Done | `inventory_project` table; [`internal/inventory/store.go`](../inventory-watcher/internal/inventory/store.go) |
 | Tenant/project read from OSAC | Done | Reconciler syncs projects |
 | Multi-tenant on shared infra | Done | Per-tenant metering and cost isolation |
+
+**Open questions (from spec + Pau's input):**
+- Will providers view cost in the Cost Management UI or in OSAC?
+- Are quotas/budgets scoped per OSAC project (currently per tenant)?
+- RBAC for cross-project cost data: use Insights RBAC (one role per OSAC
+  project, Koku-compatible) or Keycloak (OSAC-native)? Decision depends on
+  whether this PoC merges into Koku or replaces it.
+  See [roadmap — OSAC Projects → RBAC](roadmap.md#osac-projects--rbac-from-pau).
 
 ---
 

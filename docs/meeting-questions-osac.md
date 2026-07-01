@@ -59,6 +59,12 @@
    fulfillment-service, it appears in the Watch stream and we handle it
    like VMs. If not, we need a different integration path.
 
+10. **Token granularity** — The IPP external-metering plugin sends 4 token
+    dimensions: prompt, completion, cached, reasoning. We currently meter
+    `tokens_in` and `tokens_out`. Should we match the 4-dimension model,
+    or map prompt→in, completion→out and add cached+reasoning as separate
+    meters? Pricing may differ per dimension (e.g., cached tokens cheaper).
+
 ## Threshold Notifications (REQ-10)
 
 10. **Does OSAC have an alerting/webhook endpoint?** — We implemented
@@ -81,9 +87,31 @@
     we should align on topic naming, serialization format (JSON
     CloudEvents vs protobuf), and consumer group semantics.
 
+14. **MaaS event delivery guarantees** — The IPP's `reportUsage` call
+    (`POST /api/v1/events`) is currently fire-and-forget HTTP. For
+    production, events cannot be lost. Options: Kafka, persistent local
+    buffer with replay, or CloudEvents webhook with retry + DLQ. What
+    infrastructure does OSAC already run? We'd rather build on that than
+    introduce new components.
+
 ## Cluster Lifecycle (REQ-1a)
 
-14. **"Cluster orders" vs Cluster entity** — The requirements mention
+15. **"Cluster orders" vs Cluster entity** — The requirements mention
     "cluster orders" but OSAC has `Cluster` objects. Are these the same
     thing, or is there a separate cluster ordering workflow we should
     track?
+
+## Tenant/Project Attribution (REQ-3a)
+
+16. **Cost UI ownership** — Will providers view cost data in the Cost
+    Management UI or in OSAC's own UI? This affects where we build
+    reporting and who needs access.
+
+17. **Quota scope** — Are quotas/budgets scoped per OSAC project or per
+    tenant? Currently we scope quotas per tenant. If per-project is
+    needed, we need project-level quota records.
+
+18. **RBAC model** — For cross-project cost visibility, should we use
+    Insights RBAC (one role per OSAC project — Koku-compatible) or
+    Keycloak (OSAC-native)? Depends on whether this PoC merges into
+    Koku or becomes a standalone replacement.

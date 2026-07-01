@@ -1,0 +1,445 @@
+openapi: 3.0.3
+info:
+  title: MaaS External Metering API
+  description: |
+    External metering interface for MaaS (Models-as-a-Service) chargeback.
+    Defines two required interfaces:
+    - **Token Usage** (CloudEvents v1.0) - Reports token consumption per inference request
+    - **Circuit Breaker** - Pre-request balance/entitlement check to gate access
+
+    Modeled on OpenMeter's API patterns and CNCF CloudEvents specification.
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: http://{ec2-host}:8080
+    description: AWS EC2 deployment
+    variables:
+      ec2-host:
+        default: localhost
+
+tags:
+  - name: Circuit Breaker
+    description: Pre-request entitlement/balance check (Interface B)
+  - name: Token Usage
+    description: Post-response usage event ingestion (Interface A)
+  - name: Grants
+    description: Credit management for customers
+  - name: Dashboard
+    description: Simulator dashboard endpoints (not part of the metering interface)
+
+paths:
+  /api/v1/customers/{customerId}/entitlements/{featureKey}/value:
+    get:
+      operationId: checkEntitlementValue
+      summary: Check customer entitlement balance (Circuit Breaker)
+      description: |
+        Pre-request check to determine if a customer has access and remaining
+        budget to proceed with an inference request. Called by the gateway plugin
+        before forwarding the request to the model.
+
+        Returns `hasAccess: false` when the customer is blocked or has exhausted
+        their token budget. The gateway plugin maps this to HTTP 429 (Too Many Requests).
+
+        Customers are auto-created on first check with a default balance of 10,000 tokens.
+      tags:
+        - Circuit Breaker
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Customer identifier (maps to `x-maas-username` header from Authorino)
+          schema:
+            type: string
+            example: jdoe
+        - name: featureKey
+          in: path
+          required: true
+          description: Entitlement feature key (e.g., `inference-tokens`)
+          schema:
+            type: string
+            example: inference-tokens
+        - name: model
+          in: query
+          required: true
+          description: Model to check balance for. Balance is tracked per (customer, model) pair.
+          schema:
+            type: string
+            example: gpt-4o
+      responses:
+        "200":
+          description: Entitlement value returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementValue"
+              examples:
+                allowed:
+                  summary: Customer has access
+                  value:
+                    hasAccess: true
+                    balance: 9770
+                    usage: 230
+                    overage: 0
+                denied:
+                  summary: Customer blocked or exhausted
+                  value:
+                    hasAccess: false
+                    balance: 0
+                    usage: 10000
+                    overage: 0
+
+  /api/v1/events:
+    post:
+      operationId: ingestUsageEvent
+      summary: Ingest token usage event (Token Usage)
+      description: |
+        Reports token consumption after an inference request completes.
+        Accepts a CloudEvents v1.0 formatted event with token usage data.
+
+        Events are deduplicated by `source` + `id` combination.
+        Usage is deducted from the customer's balance based on `total_tokens` in the data payload.
+
+        The `subject` field identifies the customer for aggregation.
+        The `data` payload includes user, group, and subscription for chargeback attribution.
+      tags:
+        - Token Usage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenUsageCloudEvent"
+            example:
+              specversion: "1.0"
+              id: "evt-550e8400-e29b-41d4-a716-446655440000"
+              source: "maas-gateway"
+              type: "inference.tokens.used"
+              subject: "jdoe"
+              time: "2026-05-11T14:30:00Z"
+              datacontenttype: "application/json"
+              data:
+                user: "jdoe"
+                group: "finance-team"
+                subscription: "premium"
+                model: "gpt-4o"
+                prompt_tokens: 150
+                completion_tokens: 80
+                total_tokens: 230
+      responses:
+        "204":
+          description: Event accepted
+        "400":
+          description: Invalid CloudEvents format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Duplicate event (same source + id)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/customers/{customerId}/grants:
+    post:
+      operationId: createGrant
+      summary: Add token credits to a customer
+      description: |
+        Adds token credits to a customer's balance. Used for topping up
+        or granting initial credits.
+      tags:
+        - Grants
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: jdoe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantRequest"
+            example:
+              amount: 5000
+      responses:
+        "200":
+          description: Grant applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantResponse"
+
+  /api/v1/dashboard/state:
+    get:
+      operationId: getDashboardState
+      summary: Get full dashboard state snapshot
+      tags:
+        - Dashboard
+      responses:
+        "200":
+          description: Current state of all customers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardState"
+
+  /api/v1/dashboard/events:
+    get:
+      operationId: streamDashboardEvents
+      summary: SSE stream for real-time dashboard updates
+      tags:
+        - Dashboard
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/dashboard/toggle/{customerId}:
+    post:
+      operationId: toggleCustomerModelAccess
+      summary: Toggle customer model blocked/unblocked status
+      tags:
+        - Dashboard
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: model
+          in: query
+          required: true
+          description: Model to toggle access for
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Customer access toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
+
+components:
+  schemas:
+    EntitlementValue:
+      type: object
+      required:
+        - hasAccess
+        - balance
+        - usage
+        - overage
+        - model
+      properties:
+        hasAccess:
+          type: boolean
+          description: Whether the customer can proceed with this model
+        balance:
+          type: number
+          description: Remaining token budget for this model
+        usage:
+          type: number
+          description: Total tokens consumed for this model
+        overage:
+          type: number
+          description: Tokens used beyond budget (0 if within budget)
+        model:
+          type: string
+          description: Model this entitlement applies to
+
+    TokenUsageCloudEvent:
+      type: object
+      description: CloudEvents v1.0 envelope with token usage data
+      required:
+        - specversion
+        - id
+        - source
+        - type
+        - subject
+        - time
+        - data
+      properties:
+        specversion:
+          type: string
+          enum: ["1.0"]
+          description: CloudEvents specification version
+        id:
+          type: string
+          description: Unique event identifier (UUID). Dedup key combined with `source`
+        source:
+          type: string
+          format: uri-reference
+          description: Origin system identifier
+          example: "maas-gateway"
+        type:
+          type: string
+          enum: ["inference.tokens.used"]
+          description: Event type classification
+        subject:
+          type: string
+          description: Customer/tenant ID for aggregation
+        time:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp of when the inference completed
+        datacontenttype:
+          type: string
+          default: "application/json"
+        data:
+          $ref: "#/components/schemas/TokenUsageData"
+
+    TokenUsageData:
+      type: object
+      description: Token usage payload for chargeback attribution
+      required:
+        - user
+        - group
+        - model
+        - prompt_tokens
+        - completion_tokens
+        - total_tokens
+      properties:
+        user:
+          type: string
+          description: Username from Authorino (`x-maas-username` header)
+          example: "jdoe"
+        group:
+          type: string
+          description: User's group from Authorino (`x-maas-group` header) for org-level chargeback
+          example: "finance-team"
+        subscription:
+          type: string
+          description: MaaS subscription name (`x-maas-subscription` header) for billing tier
+          example: "premium"
+        model:
+          type: string
+          description: Model identifier used for the inference request
+          example: "gpt-4o"
+        prompt_tokens:
+          type: integer
+          minimum: 0
+          description: Number of tokens in the prompt/input
+        completion_tokens:
+          type: integer
+          minimum: 0
+          description: Number of tokens generated in the response
+        total_tokens:
+          type: integer
+          minimum: 0
+          description: Sum of prompt + completion tokens
+
+    GrantRequest:
+      type: object
+      required:
+        - amount
+        - model
+      properties:
+        amount:
+          type: number
+          minimum: 0
+          description: Number of token credits to add
+        model:
+          type: string
+          description: Model to add credits for
+
+    GrantResponse:
+      type: object
+      properties:
+        customerId:
+          type: string
+        model:
+          type: string
+          description: Model the grant applies to
+        balance:
+          type: number
+          description: New balance after grant
+        granted:
+          type: number
+          description: Amount granted
+
+    DashboardState:
+      type: object
+      properties:
+        customers:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/CustomerState"
+        recentEvents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardEvent"
+
+    CustomerState:
+      type: object
+      properties:
+        customerId:
+          type: string
+        models:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ModelUsage"
+          description: Per-model balance and usage tracking
+        lastSeen:
+          type: string
+          format: date-time
+
+    ModelUsage:
+      type: object
+      properties:
+        model:
+          type: string
+        balance:
+          type: number
+          description: Remaining token budget for this model
+        usage:
+          type: number
+          description: Total tokens consumed for this model
+        blocked:
+          type: boolean
+          description: Whether this model is blocked for this customer
+
+    DashboardEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [balance-check, usage-report, toggle]
+        timestamp:
+          type: string
+          format: date-time
+        customerId:
+          type: string
+        details:
+          type: object
+
+    ToggleResponse:
+      type: object
+      properties:
+        customerId:
+          type: string
+        model:
+          type: string
+          description: Model that was toggled
+        blocked:
+          type: boolean
+          description: New blocked state after toggle
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string

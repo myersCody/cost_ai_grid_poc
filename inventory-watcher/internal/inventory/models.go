@@ -196,3 +196,22 @@ type DailyUsageSummary struct {
 	MemoryGBHours float64  `json:"memory_gb_hours"`
 	DurationHours float64  `json:"duration_hours"`
 }
+
+type CostReportRow struct {
+	Group              string  `json:"group"`
+	Entries            int     `json:"entries"`
+	Cost               float64 `json:"cost"`
+	InfrastructureCost float64 `json:"infrastructure_cost"`
+	SupplementaryCost  float64 `json:"supplementary_cost"`
+	Currency           string  `json:"currency"`
+}
+
+type PipelineSummary struct {
+	RawEvents       int `json:"raw_events"`
+	MeteringEntries int `json:"metering_entries"`
+	CostEntries     int `json:"cost_entries"`
+	Rates           int `json:"rates"`
+	LiveVMs         int `json:"live_vms"`
+	LiveClusters    int `json:"live_clusters"`
+	LiveModels      int `json:"live_models"`
+}

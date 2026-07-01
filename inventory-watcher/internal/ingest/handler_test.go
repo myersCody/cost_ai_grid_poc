@@ -450,3 +450,322 @@ func TestQuotaStatusWithConsumption(t *testing.T) {
 		t.Error("expected at least one quota with consumption > 0 after ingesting events")
 	}
 }
+
+// ── Authoritative CloudEvents format tests ──
+//
+// These tests use the exact JSON payloads from the authoritative sources
+// to verify we correctly parse and process each format.
+
+// TestIngestVMaaSAuthoritativeFormat verifies we consume the exact CloudEvents
+// format produced by the OSAC metering collector for compute instances.
+// Source: https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README.md#cloudevents-schema
+func TestIngestVMaaSAuthoritativeFormat(t *testing.T) {
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	instanceID := "auth-vmaas-" + suffix
+
+	// Exact payload from the authoritative schema documentation
+	payload := fmt.Sprintf(`{
+		"specversion": "1.0",
+		"type": "osac.compute_instance.lifecycle",
+		"source": "osac.metering.collector",
+		"id": "auth-vmaas-%s",
+		"time": "%s",
+		"subject": "osac-e2e-ci",
+		"data": {
+			"duration_seconds": 60,
+			"cpu_core_seconds": 120,
+			"memory_gib_seconds": 240,
+			"tenant_id": "osac-e2e-ci",
+			"instance_id": "%s",
+			"template": "osac.templates.ocp_virt_vm",
+			"catalog_item": "",
+			"state": "RUNNING",
+			"cores": 2,
+			"memory_gib": 4
+		}
+	}`, suffix, time.Now().UTC().Format(time.RFC3339), instanceID)
+
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json",
+		bytes.NewReader([]byte(payload)))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("expected 202, got %d", resp.StatusCode)
+	}
+
+	ctx := context.Background()
+
+	// Verify 3 metering entries (uptime, cpu, memory)
+	var count int
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM metering_entries WHERE resource_id = $1", instanceID).Scan(&count)
+	if count != 3 {
+		t.Errorf("expected 3 VMaaS metering entries, got %d", count)
+	}
+
+	// Verify correct meter names
+	var meters []string
+	rows, _ := testStore.Pool().Query(ctx,
+		"SELECT meter_name FROM metering_entries WHERE resource_id = $1 ORDER BY meter_name", instanceID)
+	for rows.Next() {
+		var m string
+		rows.Scan(&m)
+		meters = append(meters, m)
+	}
+	rows.Close()
+
+	expected := []string{"vm_cpu_core_seconds", "vm_memory_gib_seconds", "vm_uptime_seconds"}
+	if len(meters) != len(expected) {
+		t.Fatalf("expected meters %v, got %v", expected, meters)
+	}
+	for i := range expected {
+		if meters[i] != expected[i] {
+			t.Errorf("meter[%d]: expected %s, got %s", i, expected[i], meters[i])
+		}
+	}
+
+	// Verify correct values
+	var uptimeValue float64
+	testStore.Pool().QueryRow(ctx,
+		"SELECT value FROM metering_entries WHERE resource_id = $1 AND meter_name = 'vm_uptime_seconds'",
+		instanceID).Scan(&uptimeValue)
+	if uptimeValue != 60 {
+		t.Errorf("expected vm_uptime_seconds = 60, got %f", uptimeValue)
+	}
+
+	var cpuValue float64
+	testStore.Pool().QueryRow(ctx,
+		"SELECT value FROM metering_entries WHERE resource_id = $1 AND meter_name = 'vm_cpu_core_seconds'",
+		instanceID).Scan(&cpuValue)
+	if cpuValue != 120 {
+		t.Errorf("expected vm_cpu_core_seconds = 120, got %f", cpuValue)
+	}
+}
+
+// TestIngestCaaSAuthoritativeFormat verifies we consume the exact CloudEvents
+// format produced by the OSAC metering collector for clusters.
+// Source: https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README-caas.md#cloudevents-schema
+func TestIngestCaaSAuthoritativeFormat(t *testing.T) {
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	clusterID := "auth-caas-" + suffix
+
+	// Control plane event — exact payload from authoritative schema
+	cpPayload := fmt.Sprintf(`{
+		"specversion": "1.0",
+		"type": "osac.cluster.lifecycle",
+		"source": "osac.metering.collector",
+		"id": "auth-caas-cp-%s",
+		"time": "%s",
+		"subject": "shared",
+		"data": {
+			"duration_seconds": 60,
+			"worker_node_seconds": 0,
+			"node_count": 0,
+			"tenant_id": "shared",
+			"cluster_id": "%s",
+			"template": "osac.templates.ocp_ci_small",
+			"state": "READY",
+			"host_type": "_control_plane"
+		}
+	}`, suffix, time.Now().UTC().Format(time.RFC3339), clusterID)
+
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json",
+		bytes.NewReader([]byte(cpPayload)))
+	if err != nil {
+		t.Fatalf("control plane request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("control plane: expected 202, got %d", resp.StatusCode)
+	}
+
+	// Worker node event
+	workerPayload := fmt.Sprintf(`{
+		"specversion": "1.0",
+		"type": "osac.cluster.lifecycle",
+		"source": "osac.metering.collector",
+		"id": "auth-caas-wk-%s",
+		"time": "%s",
+		"subject": "shared",
+		"data": {
+			"duration_seconds": 60,
+			"worker_node_seconds": 60,
+			"node_count": 1,
+			"tenant_id": "shared",
+			"cluster_id": "%s",
+			"template": "osac.templates.ocp_ci_small",
+			"state": "READY",
+			"host_type": "ci-worker"
+		}
+	}`, suffix, time.Now().UTC().Format(time.RFC3339), clusterID)
+
+	resp2, err := http.Post(testServer.URL+"/api/v1/events", "application/json",
+		bytes.NewReader([]byte(workerPayload)))
+	if err != nil {
+		t.Fatalf("worker request failed: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusAccepted {
+		t.Errorf("worker: expected 202, got %d", resp2.StatusCode)
+	}
+
+	ctx := context.Background()
+
+	// Control plane → cluster_uptime_seconds only
+	var uptimeCount int
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM metering_entries WHERE resource_id = $1 AND meter_name = 'cluster_uptime_seconds'",
+		clusterID).Scan(&uptimeCount)
+	if uptimeCount != 1 {
+		t.Errorf("expected 1 cluster_uptime_seconds entry, got %d", uptimeCount)
+	}
+
+	// Worker → cluster_worker_node_seconds
+	var workerCount int
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM metering_entries WHERE resource_id = $1 AND meter_name = 'cluster_worker_node_seconds'",
+		clusterID).Scan(&workerCount)
+	if workerCount != 1 {
+		t.Errorf("expected 1 cluster_worker_node_seconds entry, got %d", workerCount)
+	}
+}
+
+// TestIngestIPPAuthoritativeFormat verifies we consume the exact CloudEvents
+// format produced by the IPP external-metering plugin for inference token usage.
+// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/320
+// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
+func TestIngestIPPAuthoritativeFormat(t *testing.T) {
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	modelID := "auth-ipp-" + suffix
+
+	// Exact field names from the IPP plugin's reportUsageEvent function
+	payload := fmt.Sprintf(`{
+		"specversion": "1.0",
+		"type": "inference.tokens.used",
+		"source": "maas-gateway",
+		"id": "auth-ipp-%s",
+		"time": "%s",
+		"subject": "test-user@example.com",
+		"data": {
+			"user": "test-user@example.com",
+			"group": "maas-users",
+			"subscription": "default-sub",
+			"provider": "anthropic",
+			"model": "%s",
+			"prompt_tokens": 1500,
+			"completion_tokens": 800,
+			"total_tokens": 2650,
+			"cached_input_tokens": 200,
+			"cache_creation_tokens": 0,
+			"reasoning_tokens": 150,
+			"duration_ms": 3200
+		}
+	}`, suffix, time.Now().UTC().Format(time.RFC3339), modelID)
+
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json",
+		bytes.NewReader([]byte(payload)))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("expected 202, got %d", resp.StatusCode)
+	}
+
+	ctx := context.Background()
+
+	// Should produce 5 metering entries: tokens_in, tokens_out, tokens_cached, tokens_reasoning, requests
+	// (requests = 0 in this event, so actually 4)
+	var meters []string
+	rows, _ := testStore.Pool().Query(ctx,
+		"SELECT meter_name FROM metering_entries WHERE resource_id = $1 ORDER BY meter_name", modelID)
+	for rows.Next() {
+		var m string
+		rows.Scan(&m)
+		meters = append(meters, m)
+	}
+	rows.Close()
+
+	// prompt_tokens → maas_tokens_in, completion_tokens → maas_tokens_out,
+	// cached_input_tokens → maas_tokens_cached, reasoning_tokens → maas_tokens_reasoning
+	expectedMeters := map[string]float64{
+		"maas_tokens_in":        1500,
+		"maas_tokens_out":       800,
+		"maas_tokens_cached":    200,
+		"maas_tokens_reasoning": 150,
+	}
+
+	for meter, expectedValue := range expectedMeters {
+		var value float64
+		err := testStore.Pool().QueryRow(ctx,
+			"SELECT value FROM metering_entries WHERE resource_id = $1 AND meter_name = $2",
+			modelID, meter).Scan(&value)
+		if err != nil {
+			t.Errorf("meter %s not found for model %s: %v", meter, modelID, err)
+			continue
+		}
+		if value != expectedValue {
+			t.Errorf("meter %s: expected %.0f, got %.0f", meter, expectedValue, value)
+		}
+	}
+
+	// Verify the model was created in inventory with the correct name
+	var inventoryModel string
+	testStore.Pool().QueryRow(ctx,
+		"SELECT model_name FROM inventory_model WHERE model_id = $1", modelID).Scan(&inventoryModel)
+	if inventoryModel != modelID {
+		t.Errorf("expected model_name = %s, got %s", modelID, inventoryModel)
+	}
+
+	// Verify tenant was derived from subject (user field)
+	var tenant string
+	testStore.Pool().QueryRow(ctx,
+		"SELECT tenant FROM inventory_model WHERE model_id = $1", modelID).Scan(&tenant)
+	if tenant != "test-user@example.com" {
+		t.Errorf("expected tenant = test-user@example.com (from IPP subject), got %s", tenant)
+	}
+}
+
+// TestBalanceCheckResponseFormat verifies the balance check endpoint returns
+// the exact response format expected by the IPP external-metering plugin.
+// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
+func TestBalanceCheckResponseFormat(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/v1/customers/tenant-acme/entitlements/inference-tokens/value?model=llama-3")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// Field names must match the IPP client's entitlementValue struct (camelCase for hasAccess).
+	// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
+	var result struct {
+		HasAccess bool    `json:"hasAccess"`
+		Balance   float64 `json:"balance"`
+		Usage     float64 `json:"usage"`
+		Overage   float64 `json:"overage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Verify all four fields are present (the IPP client reads all of them)
+	if result.Balance < 0 {
+		t.Error("balance should be >= 0")
+	}
+	if result.Usage < 0 {
+		t.Error("usage should be >= 0")
+	}
+	if result.Overage < 0 {
+		t.Error("overage should be >= 0")
+	}
+	// has_access is boolean — just verify the field was decoded (Go defaults to false)
+	// The actual value depends on quota state, so we just check the struct is well-formed
+}

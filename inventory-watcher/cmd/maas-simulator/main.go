@@ -25,25 +25,33 @@ type CloudEvent struct {
 }
 
 type EventData struct {
-	TenantID        string `json:"tenant_id"`
-	ModelID         string `json:"model_id"`
-	ModelName       string `json:"model_name"`
-	Template        string `json:"template"`
-	State           string `json:"state"`
-	TokensIn        int64  `json:"tokens_in"`
-	TokensOut       int64  `json:"tokens_out"`
-	Requests        int64  `json:"requests"`
-	DurationSeconds int    `json:"duration_seconds"`
+	// IPP-compatible fields (real format)
+	User                string `json:"user"`
+	Group               string `json:"group"`
+	Subscription        string `json:"subscription"`
+	Provider            string `json:"provider"`
+	Model               string `json:"model"`
+	PromptTokens        int64  `json:"prompt_tokens"`
+	CompletionTokens    int64  `json:"completion_tokens"`
+	TotalTokens         int64  `json:"total_tokens"`
+	CachedInputTokens   int64  `json:"cached_input_tokens"`
+	CacheCreationTokens int64  `json:"cache_creation_tokens"`
+	ReasoningTokens     int64  `json:"reasoning_tokens"`
+	DurationMs          int64  `json:"duration_ms"`
+	// Fields for backwards compat with our pipeline
+	TenantID string `json:"tenant_id"`
+	ModelID  string `json:"model_id"`
 }
 
 var models = []struct {
-	id   string
-	name string
+	id       string
+	name     string
+	provider string
 }{
-	{"model-llama-3-8b", "llama-3-8b"},
-	{"model-llama-3-70b", "llama-3-70b"},
-	{"model-mistral-7b", "mistral-7b"},
-	{"model-granite-34b", "granite-34b"},
+	{"model-claude-sonnet", "claude-sonnet-4-20250514", "anthropic"},
+	{"model-claude-opus", "claude-opus-4-20250514", "anthropic"},
+	{"model-llama-3-70b", "meta-llama/llama-3-70b", "vllm"},
+	{"model-granite-34b", "ibm/granite-34b-code", "vllm"},
 }
 
 var tenants = []string{"tenant-acme", "tenant-globex", "tenant-initech"}
@@ -53,6 +61,7 @@ func main() {
 	count := flag.Int("count", 100, "total number of events to send")
 	rate := flag.Int("rate", 50, "events per second (0 = unlimited)")
 	workers := flag.Int("workers", 4, "concurrent sender goroutines")
+	format := flag.String("format", "ipp", "event format: ipp (real) or legacy (old mock)")
 	flag.Parse()
 
 	fmt.Printf("MaaS Simulator\n")
@@ -60,6 +69,7 @@ func main() {
 	fmt.Printf("  events:  %d\n", *count)
 	fmt.Printf("  rate:    %d/s\n", *rate)
 	fmt.Printf("  workers: %d\n", *workers)
+	fmt.Printf("  format:  %s\n", *format)
 	fmt.Println()
 
 	url := *target + "/api/v1/events"
@@ -100,28 +110,60 @@ func main() {
 	for i := 0; i < *count; i++ {
 		model := models[rand.Intn(len(models))]
 		tenant := tenants[rand.Intn(len(tenants))]
-		tokensIn := int64(rand.Intn(50000) + 1000)
-		tokensOut := int64(rand.Intn(20000) + 500)
+		promptTokens := int64(rand.Intn(50000) + 1000)
+		completionTokens := int64(rand.Intn(20000) + 500)
+		cachedTokens := int64(rand.Intn(5000))
+		reasoningTokens := int64(0)
+		if model.provider == "anthropic" {
+			reasoningTokens = int64(rand.Intn(10000))
+		}
 
-		ce := CloudEvent{
-			SpecVersion:     "1.0",
-			Type:            "osac.model.lifecycle",
-			Source:          "maas-simulator",
-			ID:              fmt.Sprintf("sim-%d-%d", time.Now().UnixNano(), i),
-			Time:            time.Now().UTC(),
-			Subject:         tenant,
-			DataContentType: "application/json",
-			Data: EventData{
-				TenantID:        tenant,
-				ModelID:         model.id,
-				ModelName:       model.name,
-				Template:        "osac.templates.maas_small",
-				State:           "MODEL_STATE_RUNNING",
-				TokensIn:        tokensIn,
-				TokensOut:       tokensOut,
-				Requests:        int64(rand.Intn(200) + 1),
-				DurationSeconds: 60,
-			},
+		var ce CloudEvent
+		if *format == "legacy" {
+			ce = CloudEvent{
+				SpecVersion:     "1.0",
+				Type:            "osac.model.lifecycle",
+				Source:          "maas-simulator",
+				ID:              fmt.Sprintf("sim-%d-%d", time.Now().UnixNano(), i),
+				Time:            time.Now().UTC(),
+				Subject:         tenant,
+				DataContentType: "application/json",
+				Data: EventData{
+					TenantID:         tenant,
+					ModelID:          model.id,
+					Model:            model.name,
+					PromptTokens:     promptTokens,
+					CompletionTokens: completionTokens,
+					TotalTokens:      promptTokens + completionTokens,
+					DurationMs:       int64(rand.Intn(5000) + 500),
+				},
+			}
+		} else {
+			ce = CloudEvent{
+				SpecVersion:     "1.0",
+				Type:            "inference.tokens.used",
+				Source:          "maas-gateway",
+				ID:              fmt.Sprintf("sim-%d-%d", time.Now().UnixNano(), i),
+				Time:            time.Now().UTC(),
+				Subject:         tenant,
+				DataContentType: "application/json",
+				Data: EventData{
+					User:                tenant,
+					Group:               "maas-users",
+					Subscription:        "default",
+					Provider:            model.provider,
+					Model:               model.name,
+					PromptTokens:        promptTokens,
+					CompletionTokens:    completionTokens,
+					TotalTokens:         promptTokens + completionTokens + cachedTokens + reasoningTokens,
+					CachedInputTokens:   cachedTokens,
+					CacheCreationTokens: 0,
+					ReasoningTokens:     reasoningTokens,
+					DurationMs:          int64(rand.Intn(5000) + 500),
+					TenantID:            tenant,
+					ModelID:             model.id,
+				},
+			}
 		}
 		ch <- ce
 

@@ -69,7 +69,57 @@ sweep covers that gap — same as we do for InstanceTypes and Projects today.
 
 **Effort:** Small — copy the VM pattern.
 
-### 4. REQ-3/REQ-5 — Report/export API (MEDIUM)
+### 4. Balance Check Endpoint — IPP Compatibility (HIGH VALUE)
+
+**Why:** The OSAC Inference Platform Plugin (IPP) calls a balance check on
+every inference request to gate access. If we implement this, the IPP can
+use us directly as the metering backend — replacing OpenMeter.
+
+**What:**
+- `GET /api/v1/customers/{id}/entitlements/{key}/value?model={model}`
+- Return `{has_access, balance, usage, overage}` — see [CloudEvents catalog](cloudevents-catalog.md#balance-check-api-ipp-plugin--cost-consumer)
+- ~40 lines — reuses existing `MeteringSum()` + `QuotasForTenant()` logic
+
+**Result:** Together with our existing `POST /api/v1/events` (usage report),
+we implement both endpoints the IPP expects. Drop-in replacement for
+OpenMeter/metering-simulator.
+
+**Effort:** Small — reuse `handleQuotaStatus` logic with different input/output format.
+
+See [MaaS simulators input](inputs/2026-06-30-maas-simulators-metering-endpoints.md).
+
+### 5. llm-katan Integration Test (MEDIUM)
+
+**Why:** Replace our simple `maas-simulator` with the OSAC team's
+[llm-katan](https://github.com/yossiovadia/llm-katan) simulator for a
+more realistic demo — it goes through the full OIDC/Authorino/IPP auth
+pipeline with realistic inference payloads.
+
+**What:**
+- Set up llm-katan locally, point its metering URL at our ingest endpoint
+- Verify events flow: llm-katan → IPP → `POST /api/v1/events` → our pipeline
+- Test `POST /api/v1/check` balance gating with llm-katan
+
+**Effort:** Medium — setup + configuration, no code changes on our side.
+
+### 6. Update MaaS Token Meters to Match IPP Format (MEDIUM)
+
+**Why:** The real IPP plugin sends 5 token dimensions: `prompt_tokens`,
+`completion_tokens`, `cached_input_tokens`, `cache_creation_tokens`,
+`reasoning_tokens`. We currently meter only `tokens_in`/`tokens_out`.
+
+**What:**
+- Accept both naming conventions in the ingest handler (backwards compat)
+- Add `maas_tokens_cached` and `maas_tokens_reasoning` meters
+- Accept event type `inference.tokens.used` alongside `osac.model.lifecycle`
+- Handle `subject` = username (not tenant_id) — may need Keycloak mapping
+
+**Details:** See [CloudEvents catalog](cloudevents-catalog.md#maas--inference-token-usage-ipp-plugin)
+for the full format comparison.
+
+**Effort:** Medium — handler changes + new rate definitions + identity mapping question.
+
+### 7. REQ-3/REQ-5 — Report/export API (MEDIUM)
 
 **Why:** Cost data exists but is only queryable via psql/scripts.
 
@@ -160,6 +210,50 @@ The Watch stream stays for inventory sync. The metering sweep is replaced
 by the collector. The ingest endpoint becomes the single entry point for
 all metering data. Everything downstream (rating, quotas, reports) is
 unchanged.
+
+## Backlog — Consider for Reports
+
+### FOCUS Format (COST-5710)
+
+[COST-5710](https://redhat.atlassian.net/browse/COST-5710) — Support the
+[FOCUS spec](https://focus.finops.org/focus-specification/v1-1/) (FinOps
+Open Cost and Usage Specification). Filed by Pau, currently in Refinement.
+
+Three aspects relevant to our report API:
+
+- **FOCUS export** — generate FOCUS-formatted cost data from our
+  `cost_entries` table. Our data model (resource_id, resource_type,
+  metered_value, cost_amount, currency, period) maps well to FOCUS columns
+  (ResourceId, ResourceType, BilledCost, PricingUnit, BillingPeriod).
+  Consider FOCUS column naming when designing the report API response.
+- **FOCUS ingest** — accept FOCUS-formatted files as a cost data source.
+  Not a PoC concern but relevant for multi-cloud cost aggregation.
+- **Named endpoints** — FOCUS export suggests per-integration endpoints
+  rather than generic query params.
+
+Not a PoC requirement, but when building the report/export API (REQ-3/REQ-5),
+align field naming with FOCUS where practical so we don't have to rename
+later.
+
+### OSAC Projects → RBAC (from Pau)
+
+OSAC has a "project" concept (we already sync `inventory_project` via the
+reconciler). For authorization, two paths:
+
+- **Koku approach:** Create one Insights RBAC role per OSAC project,
+  synchronize inventories and permissions through the existing RBAC system.
+- **New approach:** Use Keycloak directly, same as OSAC does for its own
+  authz. Simpler integration but diverges from Koku's RBAC model.
+
+The deeper question: this PoC ("cost-event-consumer" — needs a codename)
+will eventually either merge into Koku or replace it. If merge, we need
+Insights RBAC compatibility. If replace, Keycloak is cleaner. This decision
+affects how we implement project-level access control.
+
+For PoC: not in scope. Our report/quota APIs have no authz — any caller
+can query any tenant. But the `tenant_id` and project filtering is there
+in the data model, so adding authz later is a query-level concern, not a
+schema change.
 
 ## Open Items
 
