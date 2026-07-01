@@ -1,18 +1,35 @@
 # Cost ↔ OSAC Quota Integration — Technical Spec (Draft)
 
-> **Status:** Draft — **deferred** until architecture option is chosen
+> **Status:** Partially implemented — see phase table below for current state
 > **Parent:** [alerting-osac-integration.md](alerting-osac-integration.md) — options, ownership, constraints
 > **Related:** [data-model.md](../data-model.md), [event-types.md](../event-types.md)
 
-Do not treat this as agreed contract. Wire formats, paths, and schema details here are starting points for implementation once Option 1 (or another route) is confirmed.
+Wire formats and paths marked **[implemented]** reflect actual PoC code. Sections marked **[aspirational]** remain unbuilt and are starting points for the next implementation round.
 
 ---
 
 ## Limit sync — OSAC → Cost
 
+> **[aspirational]** OSAC reconciler sync is not yet implemented. Quotas are currently seeded locally at startup.
+
+**Current PoC behaviour (implemented):** On startup, `rating.SeedDefaultQuotas()` populates the `quotas` table with hardcoded limits for demo tenants (`tenant-acme`, `tenant-globex`, `tenant-initech`, `shared`). No OSAC REST calls are made for quota sync.
+
+**Seeded meters and limits (per tenant):**
+
+| Meter | Limit | Unit |
+|---|---|---|
+| `vm_cpu_core_seconds` | 360,000 | core_seconds |
+| `vm_memory_gib_seconds` | 1,440,000 | gib_seconds |
+| `vm_uptime_seconds` | 86,400 | seconds |
+| `maas_tokens_in` | 10,000,000 | tokens |
+| `maas_tokens_out` | 5,000,000 | tokens |
+| `maas_requests` | 100,000 | requests |
+
+**Future OSAC sync design (aspirational):**
+
 Same pattern as inventory: **periodic reconciler** (5–15 min + startup) + optional **Watch** events (`Quota`/`Budget` CREATED/UPDATED/DELETED). Reconciler alone is sufficient for PoC.
 
-> **Proposed** — paths and shape to confirm with OSAC.
+> Paths and shape to confirm with OSAC.
 
 | Method | Endpoint |
 |---|---|
@@ -48,7 +65,7 @@ Auth: Bearer JWT (same as other fulfillment List endpoints).
 
 Budgets: same pattern with `limit_value` + `currency` instead of `meter_name` / `unit`.
 
-**Cost cache (`quotas` table):** read-only mirror keyed by `external_id` (OSAC UUID). Cost must not expose limit CRUD in PoC.
+**Cost cache (`quotas` table) — aspirational:** read-only mirror keyed by `external_id` (OSAC UUID). The current table does not have `external_id`, `synced_at`, or `deleted_at` columns — these are needed before OSAC sync can be wired up.
 
 | Condition | Cost behavior |
 |---|---|
@@ -60,6 +77,14 @@ Budgets: same pattern with `limit_value` + `currency` instead of `meter_name` / 
 ---
 
 ## Alert lifecycle (REQ-10)
+
+**[implemented — simplified]** The PoC implements a fire-once model. Full state machine with hysteresis, resolution, and acknowledgement is aspirational.
+
+**Implemented behaviour:** After each rating sweep, `rating.evaluateThresholds()` sums metered consumption per (tenant, meter) for the current calendar month and compares against quota limits. For each threshold crossed, it calls `store.InsertAlert()` with `ON CONFLICT (tenant_id, meter_name, threshold_pct, period) DO NOTHING`. Alerts are written once and never updated — there is no `resolved` or `acknowledged` transition.
+
+Thresholds are hardcoded to `[50, 70, 90, 100]` percent. No `alert_rules` table exists.
+
+**Aspirational full state machine:**
 
 ```mermaid
 stateDiagram-v2
@@ -83,6 +108,10 @@ Local state: `alerts` table — see [data-model.md](../data-model.md). Optional 
 ---
 
 ## Outbound CloudEvent — `cost.quota.threshold.v1`
+
+> **[aspirational]** Not yet implemented. No webhook emitter exists in the PoC. Threshold breaches are stored in the `alerts` table only; nothing is pushed to OSAC.
+
+**Planned design:**
 
 Same CloudEvents 1.0 envelope as [event-types.md](../event-types.md), with:
 
@@ -142,49 +171,55 @@ Resolved events use the same schema with `"state": "resolved"` and `consumed_pct
 
 ## Pull API — quota/budget status (REQ-9)
 
-Read-only, idempotent, sub-second. Not an alerting channel.
+**[implemented — simplified]** The pull API is live at a different path with a condensed response shape.
+
+**Implemented endpoint:**
 
 ```
-GET /api/cost/v1/tenants/{tenant_id}/quota-status
+GET /api/v1/quotas/{tenant_id}
 ```
 
-Query params: `project_id`, `meter_name`, `limit_kind` (`quota` | `budget` | both).
+Handler: `ingest.handleQuotaStatus`. No query params. Always evaluates the current calendar month.
 
-Single-quota shortcut for OPA: `GET .../tenants/{tenant_id}/quotas/{quota_id}/status` → one object or `404`.
-
-Auth: Bearer JWT; OSAC service account needs `cost:quota:read`.
-
-**Response:**
+**Implemented response shape:**
 
 ```json
 {
   "tenant_id": "tenant-acme",
-  "evaluated_at": "2026-06-25T18:01:05Z",
-  "quotas": [{
-    "quota_id": "019ec123-abcd-1234-abcd-ef5678901234",
-    "limit_kind": "quota",
-    "meter_name": "vm_cpu_core_seconds",
-    "period": "monthly",
-    "period_start": "2026-06-01T00:00:00Z",
-    "period_end": "2026-06-30T23:59:59Z",
-    "limit_value": 10000.0,
-    "consumed_value": 7200.0,
-    "consumed_pct": 72.0,
-    "unit": "core_seconds",
-    "status": "approaching",
-    "highest_threshold_fired": 70.0,
-    "within_limit": true
-  }],
-  "budgets": [{
-    "quota_id": "019ec123-abcd-1234-abcd-ef5678901235",
-    "limit_kind": "budget",
-    "consumed_pct": 70.0,
-    "currency": "USD",
-    "status": "approaching",
-    "within_limit": true
-  }]
+  "period": "2026-06",
+  "quotas": [
+    {
+      "meter_name": "vm_cpu_core_seconds",
+      "unit": "core_seconds",
+      "limit": 360000.0,
+      "consumed": 7200.0,
+      "percentage": 2.0,
+      "thresholds": {
+        "50": false,
+        "70": false,
+        "90": false,
+        "100": false
+      },
+      "alerts": []
+    }
+  ]
 }
 ```
+
+`thresholds` is a map of threshold percentage string → boolean (whether that level has been crossed). `alerts` lists any `AlertRecord` rows for this tenant/meter/period (inserted by the threshold evaluator).
+
+**Differences from aspirational spec:**
+
+| Aspirational | Implemented |
+|---|---|
+| Path `/api/cost/v1/tenants/{id}/quota-status` | Path `/api/v1/quotas/{id}` |
+| Separate `quotas` + `budgets` arrays | Single `quotas` array (no budget support) |
+| `evaluated_at`, `quota_id`, `limit_kind`, `period_start/end`, `within_limit`, `highest_threshold_fired`, `status` field | `period` label only; no `evaluated_at`, `within_limit`, `status` enum, or per-quota metadata |
+| Query params (`project_id`, `meter_name`, `limit_kind`) | None |
+| Single-quota shortcut endpoint | Not implemented |
+| Auth: Bearer JWT | No auth on quota endpoint in current PoC |
+
+**`status` enum (aspirational — not yet emitted):**
 
 | `status` | Condition |
 |---|---|
@@ -200,71 +235,85 @@ Auth: Bearer JWT; OSAC service account needs `cost:quota:read`.
 
 ## Schema extensions
 
-See [data-model.md](../data-model.md). Additions:
+See [data-model.md](../data-model.md).
 
-**`quotas` cache:** `external_id`, `synced_at`, `deleted_at` — populated only by OSAC sync job.
+Missing vs. aspirational spec: `external_id` (OSAC UUID), `synced_at`, `deleted_at`, per-quota `thresholds` array. These are required before OSAC reconciler sync can be added.
 
-**`alert_rules`:** `quota_id`, `threshold_pct`, `threshold_level`, `resolve_pct` (default `threshold_pct - 5`), `enabled`.
+**`alert_rules` table:** Not implemented. Thresholds are hardcoded to `[50, 70, 90, 100]` in `rating.evaluateThresholds()` and `ingest.handleQuotaStatus()`.
 
-**`alerts`:** `limit_kind`, `project_id`, `meter_name`, `period_start`/`period_end`, `threshold_level`, `delivery_status`, `last_delivery_at`, `delivery_attempts`, `ce_id`.
+
+Missing vs. aspirational spec: `limit_kind`, `project_id`, `period_start`, `period_end`, `threshold_level`, `delivery_status`, `last_delivery_at`, `delivery_attempts`, `ce_id`. These are required for outbound CloudEvent delivery tracking and budget support.
 
 ---
 
 ## Evaluation pseudocode
 
+**[implemented — see `rating.evaluateThresholds()`]**
+
+The evaluator runs at the end of each rating sweep (not directly post-metering). When the rating batch is empty it still calls `evaluateThresholds()` so quota checks happen even when no new metering arrived.
+
 ```
-[metering sweep completes]
-  → aggregate consumption per (tenant, project?, meter_name, period)
-  → for each active cached limit:
-      → consumed_pct = consumed / limit × 100
-      → update alerts table (hysteresis rules above)
-      → if state changed: POST CloudEvent (REQ-10)
-      → status visible via pull API (REQ-9)
+[rating sweep completes (or batch is empty)]
+  → AllTenantsWithQuotas(now)
+  → for each tenant:
+      → QuotasForTenant(tenant, now)
+      → for each quota:
+          → consumed = MeteringSum(tenant, meter_name, period_start, period_end)
+          → pct = consumed / limit_value * 100
+          → for each threshold in [50, 70, 90, 100]:
+              → if pct >= threshold:
+                  → InsertAlert(... ON CONFLICT DO NOTHING)
+                  → log "threshold alert fired" if inserted
 ```
 
-Quota aggregation:
+Implemented `MeteringSum` query (matches spec):
 
 ```sql
 SELECT COALESCE(SUM(value), 0)
 FROM metering_entries
-WHERE tenant_id = :tenant_id
-  AND (project_id = :project_id OR :project_id IS NULL)
-  AND meter_name = :meter_name
-  AND period_start >= :period_start
-  AND period_end   <= :period_end;
+WHERE tenant_id = $1 AND meter_name = $2
+  AND period_start >= $3 AND period_end <= $4;
 ```
 
-Budget: `SUM(cost_entries.cost_amount)` over the same window.
+Period window: first day of current calendar month → first day of next month.
+
+**Not yet implemented:**
+- Hysteresis / resolution (alerts are insert-once, never cleared)
+- `project_id` filter in consumption aggregation
+- Budget evaluation: `SUM(cost_entries.cost_amount)` over the same window
+- Outbound CloudEvent after state change
 
 ---
 
 ## PoC implementation plan
 
-| Phase | Deliverable | Depends on |
+| Phase | Deliverable | Status |
 |---|---|---|
-| **P0** | OSAC limit List API (or mock) + Cost reconciler → `quotas` cache | API contract |
-| **P1** | `alert_rules`; thresholds from OSAC spec or Cost defaults | P0 |
-| **P2** | Quota evaluator (post-sweep) | P1 |
-| **P3** | `alerts` lifecycle + hysteresis | P2 |
-| **P4** | Pull API | P2 |
-| **P5** | Push webhook emitter | P3, OSAC webhook URL |
-| **P6** | Budget evaluation | `cost_entries` + rates |
+| **P0** | Quotas table + seeded limits | **Done** (seeded locally; OSAC sync not yet wired) |
+| **P1** | `alert_rules`; configurable thresholds | **Skipped** — thresholds hardcoded to `[50, 70, 90, 100]` in rating and ingest |
+| **P2** | Quota evaluator (post-sweep) | **Done** — `rating.evaluateThresholds()` runs after each rating batch |
+| **P3** | `alerts` lifecycle + hysteresis | **Partial** — fire-once `alerts` table; no resolution or hysteresis |
+| **P4** | Pull API | **Done** — `GET /api/v1/quotas/{tenant_id}`; shape differs from spec |
+| **P5** | Push webhook emitter | **Not started** — requires `delivery_status` columns + OSAC webhook URL |
+| **P6** | Budget evaluation | **Not started** — `CostSum` query exists; no budget table or evaluator |
 
-Minimum demo: mock limit API + P0–P4 on `vm_cpu_core_seconds`.
+**OSAC sync (P0 upgrade):** adding `external_id`, `synced_at`, `deleted_at` to `quotas` and wiring a reconciler against `/api/fulfillment/v1/quotas` is the next concrete step to move from local seeds to live limits.
+
+Minimum demo achieved: seeded quotas + P2 (evaluator) + P4 (pull API) on `vm_cpu_core_seconds` and other meters.
 
 ---
 
 ## Testing
 
-| Test | Assert |
-|---|---|
-| Fire at 70% | Alert row + CloudEvent after metering crosses threshold |
-| No duplicate fires | Single `firing` delivery while held at 71% for 3 sweeps |
-| Hysteresis | `resolved` event below 65% |
-| Pull API | `consumed_value` matches `SUM(metering_entries)` |
-| Webhook retry | 503 then 200 → eventual delivery |
-| Limit sync | CRUD in OSAC reflected in Cost cache after reconciler |
-| Period boundary | Counters reset on new period |
+| Test | Assert | Status |
+|---|---|---|
+| Fire at 70% | Alert row inserted after metering crosses threshold | **Testable now** (no CloudEvent yet) |
+| No duplicate fires | Single `firing` row held for 3 sweeps (UNIQUE constraint) | **Testable now** |
+| Hysteresis | `resolved` event below 65% | **Aspirational** — not implemented |
+| Pull API | `consumed_value` matches `SUM(metering_entries)` | **Testable now** |
+| Webhook retry | 503 then 200 → eventual delivery | **Aspirational** — webhook not implemented |
+| Limit sync | OSAC quota CRUD reflected in Cost cache after reconciler | **Aspirational** — OSAC sync not implemented |
+| Period boundary | Counters reset on new period | **Testable now** (period filter in `MeteringSum`) |
 
 ---
 

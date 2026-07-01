@@ -256,7 +256,6 @@ sequenceDiagram
 
 - [alerting-spec-draft.md](alerting-spec-draft.md) — API schemas, data model, implementation plan *(after route chosen)*
 - [architecture.md](../architecture.md) — system context
-- [data-model.md](../data-model.md) — planned `quotas`, `alerts` tables
 - [event-types.md](../event-types.md) — CloudEvent taxonomy
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
 - [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
