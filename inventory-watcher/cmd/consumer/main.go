@@ -13,10 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/osac-project/cost-event-consumer/internal/authn"
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/rating"
@@ -105,6 +108,22 @@ func main() {
 	g.Go(func() error { return m.Run(ctx) })
 	g.Go(func() error { return rt.Run(ctx) })
 
+	// Metrics server on a separate port (no auth).
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", promhttp.Handler())
+	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metricsMux}
+	g.Go(func() error {
+		logger.Info("metrics endpoint listening", "addr", ":"+cfg.MetricsPort)
+		if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
+		<-ctx.Done()
+		return metricsSrv.Close()
+	})
+
 	if cfg.IngestListenAddr != "" {
 		h := ingest.NewHandler(store, m, cfg, logger)
 
@@ -116,7 +135,7 @@ func main() {
 
 		srv := &http.Server{
 			Addr:           cfg.IngestListenAddr,
-			Handler:        auth.Wrap(h.ServeMux()),
+			Handler:        metrics.HTTPMiddleware(auth.Wrap(h.ServeMux())),
 			ReadTimeout:    10 * time.Second,
 			WriteTimeout:   10 * time.Second,
 			MaxHeaderBytes: 1 << 20,
