@@ -4,7 +4,7 @@
 > cost/quota consumption hits defined levels (50%, 70%, 90%, 100%).
 > OSAC consumes these to trigger OPA-enforced rate limiting.
 >
-> **Source:** [poc_requirements_overview.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-10--threshold-notification-back-channel-to-osac)
+> **Source:** [poc_requirements_overview.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-10-threshold-notification-back-channel-to-osac)
 >
 > **Depends on:** REQ-9 (Quota status API) — **Done**
 >

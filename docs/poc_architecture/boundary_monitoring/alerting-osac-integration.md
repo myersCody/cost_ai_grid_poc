@@ -260,5 +260,4 @@ sequenceDiagram
 - [event-types.md](../event-types.md) — CloudEvent taxonomy
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
 - [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
-- [Requirements brief §3–§5](../../requirements/ai_grid_poc_requirements_brief.md)
-- [CSV PoC REQ-9, REQ-10](../../requirements/csv_poc_requirements_summary.md)
+- [Requirements overview — REQ-9, REQ-10](../../requirements/poc_requirements_overview.md#req-9-quotabudget-status-api)

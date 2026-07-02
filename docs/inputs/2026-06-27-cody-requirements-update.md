@@ -42,7 +42,7 @@ To discuss with Moti on Monday:
 
 From our own analysis, the key gaps are:
 - `BareMetalInstance` not in the Watch stream `oneof` payload
-  (see [req8 gap analysis](../req8-bare-metal-gap-analysis.md))
+  (see [req8 gap analysis](../requirements/req8-bare-metal-gap-analysis.md))
 - No `Model` entity in OSAC at all (MaaS)
 - No BMaaS or MaaS metering collector scripts
 

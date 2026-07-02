@@ -20,19 +20,19 @@
 |---|---|---|---|---|---|
 | POC-ENV | CRITICAL | On-prem deployment | Not started | RHCM team scope | N/A — deployment, not consumer |
 | POC-ARCH | CRITICAL | Capacity-based charging | **Done** | — | Standalone Go component, heartbeat-driven |
-| REQ-1 | CRITICAL | OSAC integration | **Done** | — | [req1 gap analysis](req1-osac-integration-gap-analysis.md) |
+| REQ-1 | CRITICAL | OSAC integration | **Done** | — | [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md) |
 | REQ-1a | HIGH | Cluster lifecycle | **Done** | Verify "cluster orders" = Cluster | Tracking clusters with node sets |
 | REQ-1b | CRITICAL | Heartbeat ingestion | **Done** | — | Local 60s sweep = heartbeat equivalent ([ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md)) |
 | REQ-2 | CRITICAL | Real-time cost calc | **Done** | — | <1ms/event, cost within 30s |
-| REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
+| REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
 | REQ-3 | HIGH | Granular cost tracking | Partial | — | Report API added; [cost-reports feasibility](poc_architecture/reporting/cost-reports-feasibility.md) |
 | REQ-3a | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open | [Open questions](#req-3a--tenantproject-attribution); [roadmap RBAC note](roadmap.md#osac-projects--rbac-from-pau) |
 | REQ-3b | MEDIUM | Service catalog sync | Partial | — | Instance types synced, catalog items not yet; [FOCUS backlog](roadmap.md#focus-format-cost-5710) |
-| REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
+| REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
 | REQ-5 | MEDIUM | Chargeback reporting | Partial | — | SQL queries, no formatted export |
-| REQ-8 | HIGH | Bare metal costing | **Done** | Watch `oneof` gap — uses reconciler | [req8 gap analysis](req8-bare-metal-gap-analysis.md) |
+| REQ-8 | HIGH | Bare metal costing | **Done** | Watch `oneof` gap — uses reconciler | [req8 gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
 | REQ-9 | HIGH | Quota/budget status API | **Done** | — | `GET /api/v1/quotas/{tenant_id}` |
-| REQ-10 | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred | [req10 analysis](req10-threshold-notifications-analysis.md) |
+| REQ-10 | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred | [req10 analysis](requirements/req10-threshold-notifications-analysis.md) |
 | REQ-11 | MUST HAVE | Cost tiers | **Done** | — | Tiered pricing in rate engine |
 | REQ-12 | TBD | Daily OCP Virt costs | TBD | PM definition | Not scoped |
 | REQ-13 | HIGH | Custom rate dimensions | Not started | — | [Research done](research/rating-engine-options.md) |
@@ -52,7 +52,7 @@
 
 ### POC-ENV — On-Premise Deployment
 **Status:** Not started
-**Spec:** [csv_poc_requirements_summary.md#poc-env](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#poc-env--on-premise-deployment)
+**Spec:** [poc_requirements_overview.md#poc-env](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#poc-env--on-premise-deployment)
 
 Deployment concern — outside scope of our consumer component. Requires
 Helm chart / OLM work for RHCM on-prem.
@@ -61,7 +61,7 @@ Helm chart / OLM work for RHCM on-prem.
 
 ### POC-ARCH — Capacity-Based Charging Model
 **Status:** Done
-**Spec:** [csv_poc_requirements_summary.md#poc-arch](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#poc-arch--capacity-based-charging-model)
+**Spec:** [poc_requirements_overview.md#poc-arch](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#poc-arch-capacity-based-charging-model)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -70,13 +70,13 @@ Helm chart / OLM work for RHCM on-prem.
 | No dependency on workload cluster metrics | Done | All data from OSAC management layer |
 | Demo-ready: show cost within SLA | Done | <1ms per event; cost entries within 30s |
 
-**Related docs:** [req1 gap analysis](req1-osac-integration-gap-analysis.md)
+**Related docs:** [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md)
 
 ---
 
 ### REQ-1 — OSAC Integration via Region Management Cluster
 **Status:** Done
-**Spec:** [csv_poc_requirements_summary.md#req-1](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-1--osac-integration-via-region-management-cluster)
+**Spec:** [poc_requirements_overview.md#req-1](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1-osac-integration-via-region-management-cluster)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -85,13 +85,13 @@ Helm chart / OLM work for RHCM on-prem.
 | Tenant lifecycle synced | Done | Watch stream + reconciler |
 | Workload info includes tenant/project/resource IDs | Done | All inventory records have tenant, project fields |
 
-**Related docs:** [req1 gap analysis](req1-osac-integration-gap-analysis.md), [gRPC messages catalog](grpc-messages-catalog.md)
+**Related docs:** [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md), [gRPC messages catalog](grpc-messages-catalog.md)
 
 ---
 
 ### REQ-1b — OSAC Heartbeat Event Ingestion
 **Status:** Done
-**Spec:** [poc_requirements_overview.md#req-1b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1b--osac-heartbeat-event-ingestion)
+**Spec:** [poc_requirements_overview.md#req-1b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1b-osac-heartbeat-event-ingestion)
 
 > **Clarification:** "Heartbeat events" are CloudEvents emitted periodically
 > by the OSAC metering collector — same schema as lifecycle events, just fired
@@ -110,7 +110,7 @@ Helm chart / OLM work for RHCM on-prem.
 
 ### REQ-2 — Near-Real-Time Cost Calculation
 **Status:** Done
-**Spec:** [csv_poc_requirements_summary.md#req-2](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-2--near-real-time-cost-calculation)
+**Spec:** [poc_requirements_overview.md#req-2](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2-near-real-time-cost-calculation)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -125,7 +125,7 @@ Helm chart / OLM work for RHCM on-prem.
 
 ### REQ-1a — Cluster Lifecycle via Cluster Orders
 **Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-1a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-1a--osac-cluster-lifecycle-via-cluster-orders)
+**Spec:** [poc_requirements_overview.md#req-1a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1a-osac-cluster-lifecycle-via-cluster-orders)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -141,7 +141,7 @@ entity we already track or are a separate concept.
 
 ### REQ-3 — Granular Cost Tracking
 **Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-3](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-3--granular-cost-tracking)
+**Spec:** [poc_requirements_overview.md#req-3](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-3-granular-cost-tracking)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -155,7 +155,7 @@ entity we already track or are a separate concept.
 
 ### REQ-3a — Tenant/Project Attribution
 **Status:** Done (data layer); Open questions on authz/RBAC
-**Spec:** [poc_requirements_overview.md#req-3a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-3a--osac-tenantproject-attribution)
+**Spec:** [poc_requirements_overview.md#req-3a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-3a-osac-tenantproject-attribution)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -176,19 +176,19 @@ entity we already track or are a separate concept.
 
 ### REQ-8 — Bare Metal Costing
 **Status:** Not started (blocked on OSAC)
-**Spec:** [poc_requirements_overview.md#req-8](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-8--bare-metal-costing-osac-bare-metal-service)
+**Spec:** [poc_requirements_overview.md#req-8](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-8-bare-metal-costing-osac-bare-metal-service)
 
 Proto and REST API exist but BareMetalInstance is not in the Watch stream
 `oneof` — no real-time events. Our implementation is the same pattern as VMs
 (small effort), blocked on OSAC adding it to the event payload.
 
-**Related docs:** [req8 gap analysis](req8-bare-metal-gap-analysis.md)
+**Related docs:** [req8 gap analysis](requirements/req8-bare-metal-gap-analysis.md)
 
 ---
 
 ### REQ-9 — Quota/Budget Status API
 **Status:** Done
-**Spec:** [csv_poc_requirements_summary.md#req-9](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-9--quotabudget-status-api)
+**Spec:** [poc_requirements_overview.md#req-9](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-9-quotabudget-status-api)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -201,7 +201,7 @@ Proto and REST API exist but BareMetalInstance is not in the Watch stream
 
 ### REQ-10 — Threshold Notifications to OSAC
 **Status:** Not started
-**Spec:** [poc_requirements_overview.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-10--threshold-notification-back-channel-to-osac)
+**Spec:** [poc_requirements_overview.md#req-10](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-10-threshold-notification-back-channel-to-osac)
 
 Depends on REQ-9 (done). Next step: when a threshold is crossed, emit a
 webhook/event to OSAC. Needs transport agreement (webhook vs CloudEvent).
@@ -210,7 +210,7 @@ webhook/event to OSAC. Needs transport agreement (webhook vs CloudEvent).
 
 ### REQ-2a — Cloud Events from OpenShift AI (MaaS)
 **Status:** Done (mock)
-**Spec:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a--cloud-events-from-openshift-ai-maas)
+**Spec:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a-cloud-events-from-openshift-ai-maas--token-metering)
 
 > **Note:** Previously deferred from PoC; now in-scope per v1.1 spec.
 
@@ -222,13 +222,13 @@ webhook/event to OSAC. Needs transport agreement (webhook vs CloudEvent).
 | MaaS cost computed within 60s | Done | Rating sweep every 30s |
 
 Blocked on real OSAC Model entity and MaaS CloudEvents schema.
-See [req2 gap analysis](req2-maas-costing-gap-analysis.md).
+See [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md).
 
 ---
 
 ### REQ-4 — Token Metering (MaaS)
 **Status:** Done (mock)
-**Spec:** [poc_requirements_overview.md#req-4](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-4--token-metering-maas)
+**Spec:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a-cloud-events-from-openshift-ai-maas--token-metering)
 
 > **Note:** Previously deferred from PoC; now in-scope per v1.1 spec.
 
@@ -242,7 +242,7 @@ See [req2 gap analysis](req2-maas-costing-gap-analysis.md).
 
 ### REQ-13 — Custom Rate Dimensions
 **Status:** Not started
-**Spec:** [poc_requirements_overview.md#req-13](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-13--custom-rate-dimensions-custom-metrics)
+**Spec:** [poc_requirements_overview.md#req-13](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-13-custom-metrics--custom-rates)
 
 Ability to create custom rates from arbitrary CloudEvent dimensions.
 See [rating engine research](research/rating-engine-options.md) — GoRules/Zen
@@ -254,7 +254,7 @@ recommended for post-PoC programmable rating.
 
 ### REQ-11 — Cost Tiers
 **Status:** Done
-**Spec:** [poc_requirements_overview.md#req-11](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-11--cost-tiers)
+**Spec:** [poc_requirements_overview.md#req-11](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-11-cost-tiers)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -268,7 +268,7 @@ recommended for post-PoC programmable rating.
 
 ### REQ-3b — Service Catalog Sync from OSAC
 **Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-3b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-3b--service-catalog-sync-from-osac)
+**Spec:** [poc_requirements_overview.md#req-3b](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-3b-service-catalog-sync-from-osac)
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
@@ -282,7 +282,7 @@ recommended for post-PoC programmable rating.
 
 ### REQ-5 — Chargeback Reporting
 **Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-5](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-5--chargeback-reporting)
+**Spec:** [poc_requirements_overview.md#req-5](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-5-chargeback-reporting)
 
 Cost data exists and is queryable. No export mechanism or formatted reports.
 See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
@@ -353,9 +353,9 @@ if the user doesn't have access to the requested tenant.
 
 | Req | Title | Status | Notes |
 |---|---|---|---|
-| [REQ-6](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-6--platform-security--access-control) | Security & Access Control | Partial | Authn done, authz gap |
-| [REQ-7](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-7--reconciliation-auditing--dispute-tracing) | Reconciliation & Auditing | Partial | `raw_events` provides immutable audit trail |
-| [REQ-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12--daily-openshift-virtualization-costs) | Daily OCP Virt Costs | TBD | Pending PM confirmation |
+| [REQ-6](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-6-platform-security--access-control) | Security & Access Control | Partial | Authn done, authz gap |
+| [REQ-7](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-7-audit-trail) | Audit Trail | Partial | `raw_events` provides immutable audit trail |
+| [REQ-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12-daily-openshift-virtualization-costs) | Daily OCP Virt Costs | TBD | Pending PM confirmation |
 
 ---
 
@@ -374,11 +374,11 @@ if the user doesn't have access to the requested tenant.
 | [gRPC Messages Catalog](grpc-messages-catalog.md) | OSAC proto messages we consume |
 | [API Reference](api-reference.md) | HTTP endpoints we expose |
 | [Rating Engine Options](research/rating-engine-options.md) | CloudKitty, GoRules, Drools evaluation |
-| [req1 Gap Analysis](req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
-| [req2 Gap Analysis](req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |
-| [req8 Gap Analysis](req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
-| [req10 Analysis](req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
-| [Requirements Comparison](requirements-comparison.md) | Updated spec vs original brief |
+| [req1 Gap Analysis](requirements/req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
+| [req2 Gap Analysis](requirements/req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |
+| [req8 Gap Analysis](requirements/req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
+| [req10 Analysis](requirements/req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
+| [Requirements Comparison](requirements/requirements-comparison.md) | Updated spec vs original brief |
 | [Demo Scenario 1](demo-scenario-1.md) | Infrastructure metering demo |
 | [Demo Scenario 2](demo-scenario-2-maas.md) | MaaS metering + cost demo |
 | [Local Dev Setup](local-dev-setup.md) | How to run everything |
