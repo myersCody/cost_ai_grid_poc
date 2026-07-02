@@ -5,6 +5,27 @@
 >
 > Date: 2026-07-04
 
+## Key Question: Direct Routing or OSAC Enrichment?
+
+Can IPP CloudEvents come directly to our cost pipeline, or do they need
+to go through OSAC first for enrichment?
+
+**Answer from the source code:**
+- **Tenant attribution: YES, direct routing works.** The `subscription`
+  field carries `{namespace}/{name}` where the namespace is the OSAC
+  tenant. We can parse it ourselves — no enrichment needed.
+- **Project attribution: NO, not enough data.** There is no `project_id`
+  in the event. If we need project-level cost breakdown, events need
+  enrichment from OSAC (e.g., Keycloak user → project lookup) or the IPP
+  needs to add the field upstream.
+- **Cleanest long-term path:** Ask IPP to inject `X-MaaS-Tenant` (and
+  optionally `X-MaaS-Project`) headers via the Authorino AuthPolicy.
+  The data is already available at auth time — it just isn't surfaced.
+
+This means: **for the PoC, direct routing with subscription parsing is
+sufficient.** For production with project-level attribution, we need
+either upstream enrichment or a lookup table.
+
 ## The Problem
 
 Our cost pipeline needs `tenant_id` on every metering and cost entry.
