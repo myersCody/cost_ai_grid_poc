@@ -2,7 +2,7 @@
 
 ## Overview
 
-The inventory-watcher uses PostgreSQL (port 5434) with 11 tables organized
+The inventory-watcher uses PostgreSQL (port 5434) with 14 tables organized
 into two groups:
 
 1. **Inventory & Events** — raw event log and current state of OSAC resources
@@ -28,8 +28,9 @@ into two groups:
 | `inventory_compute_instance` | [`ComputeInstanceRecord`](../inventory-watcher/internal/inventory/models.go) | VMs tracked from OSAC. `last_metered_at` for duration-based metering. |
 | `inventory_cluster` | [`ClusterRecord`](../inventory-watcher/internal/inventory/models.go) | Clusters with `node_sets` JSONB for worker node tracking. |
 | `inventory_model` | [`ModelRecord`](../inventory-watcher/internal/inventory/models.go) | MaaS model deployments (mock — OSAC doesn't have this yet). |
-| `inventory_bare_metal_instance` | [`BareMetalInstanceRecord`](../inventory-watcher/internal/inventory/models.go) | Bare metal instances synced via reconciler. `last_metered_at` for duration metering. |
+| `inventory_bare_metal_instance` | [`BareMetalInstanceRecord`](../inventory-watcher/internal/inventory/models.go) | Bare metal instances. References `catalog_item`. Metered for uptime. |
 | `inventory_instance_type` | [`InstanceTypeRecord`](../inventory-watcher/internal/inventory/models.go) | Instance type catalog (cores, memory) synced from OSAC. |
+| `inventory_catalog_item` | [`CatalogItemRecord`](../inventory-watcher/internal/inventory/models.go) | Catalog items (SKU definitions) for cluster, compute, and bare metal. Links template → published offering. |
 
 ### Relationships
 

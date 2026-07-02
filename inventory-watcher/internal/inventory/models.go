@@ -77,6 +77,18 @@ type BareMetalInstanceRecord struct {
 	LastMeteredAt *time.Time      `json:"last_metered_at"`
 }
 
+type CatalogItemRecord struct {
+	CatalogItemID string    `json:"catalog_item_id"`
+	ItemType      string    `json:"item_type"`
+	Name          string    `json:"name"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Template      string    `json:"template"`
+	Published     bool      `json:"published"`
+	Tenant        string    `json:"tenant"`
+	LastUpdated   time.Time `json:"last_updated"`
+}
+
 type InstanceTypeRecord struct {
 	InstanceTypeID string    `json:"instance_type_id"`
 	Name           string    `json:"name"`

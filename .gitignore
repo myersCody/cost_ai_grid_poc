@@ -92,3 +92,4 @@ inventory-watcher/consumer
 server.key
 server.crt
 docs/.markdown-viewer-temp.html
+*.markdown-viewer-temp.html
