@@ -124,6 +124,8 @@ func (h *Handler) ServeMux() *http.ServeMux {
 		w.WriteHeader(http.StatusOK)
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
+	mux.HandleFunc("GET /healthz", h.handleLiveness)
+	mux.HandleFunc("GET /readyz", h.handleReadiness)
 	if h.cfg != nil && h.cfg.DebugDashboard {
 		mux.HandleFunc("GET /debug/dashboard", h.handleDebugDashboard)
 		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -659,4 +661,18 @@ func (h *Handler) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleDebugDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(dashboardHTML))
+}
+
+// handleLiveness implements Kubernetes liveness probe.
+// Returns 200 if the service is running (can handle traffic).
+func (h *Handler) handleLiveness(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// handleReadiness implements Kubernetes readiness probe.
+// Returns 200 if the service is ready to accept traffic.
+func (h *Handler) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, map[string]string{"status": "ready"})
 }
