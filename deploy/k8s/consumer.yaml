@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cost-event-consumer
+  namespace: cost-mgmt
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cost-event-consumer
+  template:
+    metadata:
+      labels:
+        app: cost-event-consumer
+    spec:
+      containers:
+        - name: consumer
+          image: quay.io/martin_povolny/cost-event-consumer:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8020
+            - name: metrics
+              containerPort: 9000
+          env:
+            - name: OSAC_BASE_URL
+              value: "http://fulfillment-rest-gateway.osac.svc:8000"
+            - name: OSAC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cost-consumer-secrets
+                  key: osac-token
+            - name: INVENTORY_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cost-db-credentials
+                  key: connection-url
+            - name: INGEST_LISTEN_ADDR
+              value: ":8020"
+            - name: LOG_FORMAT
+              value: "json"
+            - name: LOG_LEVEL
+              value: "info"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cost-event-consumer
+  namespace: cost-mgmt
+  labels:
+    app: cost-event-consumer
+spec:
+  ports:
+    - name: http
+      port: 8020
+    - name: metrics
+      port: 9000
+  selector:
+    app: cost-event-consumer
