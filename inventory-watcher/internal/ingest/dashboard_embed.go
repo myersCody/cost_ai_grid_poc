@@ -28,7 +28,7 @@ const dashboardHTML = `<!DOCTYPE html>
   .summary-item .value { font-size: 1.6rem; font-weight: 700; color: var(--accent); }
   .summary-item .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
   .content { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
-  .tabs { display: flex; gap: 0; margin-bottom: 1.5rem; }
+  .tabs { display: flex; gap: 0; margin-bottom: 1.5rem; align-items: center; }
   .tab { padding: 0.6rem 1.2rem; background: white; border: 1px solid var(--border); cursor: pointer; font-size: 0.9rem; color: var(--muted); }
   .tab:first-child { border-radius: 6px 0 0 6px; }
   .tab:last-child { border-radius: 0 6px 6px 0; }
@@ -117,7 +117,8 @@ const dashboardHTML = `<!DOCTYPE html>
     <div class="tab" data-group="resource_type" data-view="cost" onclick="switchTab(this)">By Resource Type</div>
     <div class="tab" data-group="meter" data-view="cost" onclick="switchTab(this)">By Meter</div>
     <div class="tab" data-group="resource" data-view="cost" onclick="switchTab(this)">By Resource</div>
-    <div class="tab" data-view="config" onclick="switchTab(this)">Environment</div>
+    <div style="flex:1"></div>
+    <div class="tab" data-view="config" onclick="switchTab(this)" style="border-radius:6px">Environment</div>
   </div>
 
   <div id="costView">
