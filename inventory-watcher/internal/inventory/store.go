@@ -511,6 +511,21 @@ func (s *Store) UpdateBareMetalInstanceLastMetered(ctx context.Context, instance
 	return err
 }
 
+// GetBareMetalInstance returns a single bare metal instance by ID.
+func (s *Store) GetBareMetalInstance(ctx context.Context, instanceID string) (*BareMetalInstanceRecord, error) {
+	var r BareMetalInstanceRecord
+	err := s.pool.QueryRow(ctx, `
+		SELECT instance_id, name, tenant, catalog_item, state, labels,
+		       created_at, deleted_at, last_event_id, last_updated, last_metered_at
+		FROM inventory_bare_metal_instance WHERE instance_id = $1
+	`, instanceID).Scan(&r.InstanceID, &r.Name, &r.Tenant, &r.CatalogItem, &r.State, &r.Labels,
+		&r.CreatedAt, &r.DeletedAt, &r.LastEventID, &r.LastUpdated, &r.LastMeteredAt)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 // UpsertProject inserts or updates a project in the inventory.
 func (s *Store) UpsertProject(ctx context.Context, rec ProjectRecord) error {
 	labelsJSON, err := marshalLabels(rec.Labels)
