@@ -87,6 +87,12 @@ bash snippets/test-inventory-watcher.sh
 
 ## Documentation Maintenance Rules
 
+**Doc tree convention:** requirements-related docs (gap analyses,
+requirements comparison, the canonical requirements overview) live under
+`docs/requirements/`. ADRs go in `docs/decisions/`. Research docs go in
+`docs/research/`. Everything else (implementation status, API reference,
+data model, catalogs) stays in `docs/`.
+
 When modifying source code, keep the corresponding docs in sync:
 
 ### When modifying `internal/osac/types.go` or `internal/watcher/watcher.go`:
