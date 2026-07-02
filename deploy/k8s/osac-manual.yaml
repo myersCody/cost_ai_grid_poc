@@ -1,0 +1,158 @@
+# OIDC Server - simple Python OIDC discovery endpoint
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: osac-oidc
+  namespace: osac
+spec:
+  ports:
+    - port: 8013
+      name: https
+  selector:
+    app: osac-oidc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osac-oidc
+  namespace: osac
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: osac-oidc
+  template:
+    metadata:
+      labels:
+        app: osac-oidc
+    spec:
+      containers:
+        - name: oidc
+          image: python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install cryptography >/dev/null 2>&1
+              python3 /scripts/oidc_server.py
+          ports:
+            - containerPort: 8013
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: certs
+              mountPath: /certs
+      volumes:
+        - name: scripts
+          configMap:
+            name: osac-oidc-script
+        - name: certs
+          secret:
+            secretName: osac-server-cert
+---
+# gRPC Server
+apiVersion: v1
+kind: Service
+metadata:
+  name: fulfillment-grpc
+  namespace: osac
+spec:
+  ports:
+    - port: 8010
+      name: grpc
+  selector:
+    app: osac-grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osac-grpc
+  namespace: osac
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: osac-grpc
+  template:
+    metadata:
+      labels:
+        app: osac-grpc
+    spec:
+      containers:
+        - name: grpc
+          image: ghcr.io/osac-project/fulfillment-service:main
+          command:
+            - /usr/local/bin/fulfillment-service
+            - start
+            - grpc-server
+            - --log-level=info
+            - --grpc-listener-address=0.0.0.0:8010
+            - --grpc-listener-tls-crt=/certs/tls.crt
+            - --grpc-listener-tls-key=/certs/tls.key
+            - --ca-file=/certs/tls.crt
+            - --db-url=postgres://user:pass@osac-db:5432/db
+            - --token-issuer=https://osac-grpc.osac.svc:8010
+            - --token-signer-key=/certs/tls.key
+            - --token-signer-crt=/certs/tls.crt
+            - --token-encryption-crt=/certs/tls.crt
+            - --grpc-authn-trusted-token-issuers=https://osac-oidc.osac.svc:8013
+          ports:
+            - containerPort: 8010
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+      volumes:
+        - name: certs
+          secret:
+            secretName: osac-server-cert
+---
+# REST Gateway
+apiVersion: v1
+kind: Service
+metadata:
+  name: fulfillment-rest-gateway
+  namespace: osac
+spec:
+  ports:
+    - port: 8000
+      name: http
+  selector:
+    app: osac-rest
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osac-rest
+  namespace: osac
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: osac-rest
+  template:
+    metadata:
+      labels:
+        app: osac-rest
+    spec:
+      containers:
+        - name: rest
+          image: ghcr.io/osac-project/fulfillment-service:main
+          command:
+            - /usr/local/bin/fulfillment-service
+            - start
+            - rest-gateway
+            - --log-level=info
+            - --http-listener-address=0.0.0.0:8000
+            - --grpc-server-address=fulfillment-grpc:8010
+            - --ca-file=/certs/tls.crt
+            - --metrics-listener-address=0.0.0.0:8012
+          ports:
+            - containerPort: 8000
+            - containerPort: 8012
+          volumeMounts:
+            - name: certs
+              mountPath: /certs
+      volumes:
+        - name: certs
+          secret:
+            secretName: osac-server-cert
