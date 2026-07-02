@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 )
@@ -103,11 +104,12 @@ const (
 type Handler struct {
 	store  *inventory.Store
 	meter  *metering.Meter
+	cfg    *config.Config
 	logger *slog.Logger
 }
 
-func NewHandler(store *inventory.Store, meter *metering.Meter, logger *slog.Logger) *Handler {
-	return &Handler{store: store, meter: meter, logger: logger}
+func NewHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Config, logger *slog.Logger) *Handler {
+	return &Handler{store: store, meter: meter, cfg: cfg, logger: logger}
 }
 
 func (h *Handler) ServeMux() *http.ServeMux {
@@ -117,10 +119,19 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
+	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		writeJSON(w, map[string]string{"status": "ok"})
 	})
+	if h.cfg != nil && h.cfg.DebugDashboard {
+		mux.HandleFunc("GET /debug/dashboard", h.handleDebugDashboard)
+		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" {
+				http.Redirect(w, r, "/debug/dashboard", http.StatusFound)
+			}
+		})
+	}
 	return mux
 }
 
@@ -634,4 +645,18 @@ func (h *Handler) handleBalanceCheck(w http.ResponseWriter, r *http.Request) {
 		Usage:     totalUsage,
 		Overage:   overage,
 	})
+}
+
+func (h *Handler) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if h.cfg == nil {
+		writeJSON(w, map[string]string{"error": "config not available"})
+		return
+	}
+	writeJSON(w, h.cfg.Diagnostics())
+}
+
+func (h *Handler) handleDebugDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(dashboardHTML))
 }

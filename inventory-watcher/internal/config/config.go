@@ -16,6 +16,79 @@ type Config struct {
 	LogLevel           string
 	IngestListenAddr   string
 	AuthIssuerURL      string
+	DebugDashboard     bool
+}
+
+// DiagnosticInfo returns config values safe to expose via the debug API (no secrets).
+type DiagnosticInfo struct {
+	OSACBaseURL       string `json:"osac_base_url"`
+	InventoryDBHost   string `json:"inventory_db_host"`
+	ReconcileInterval string `json:"reconcile_interval"`
+	SummarizeInterval string `json:"summarize_interval"`
+	MeteringInterval  string `json:"metering_interval"`
+	RatingInterval    string `json:"rating_interval"`
+	LogLevel          string `json:"log_level"`
+	IngestListenAddr  string `json:"ingest_listen_addr"`
+	AuthIssuerURL     string `json:"auth_issuer_url"`
+	DebugDashboard    bool   `json:"debug_dashboard"`
+	OSACTokenSet      bool   `json:"osac_token_set"`
+	OSACCACertSet     bool   `json:"osac_ca_cert_set"`
+}
+
+func (c *Config) Diagnostics() DiagnosticInfo {
+	dbHost := c.InventoryDBURL
+	if idx := findCredEnd(dbHost); idx > 0 {
+		dbHost = dbHost[:idx] + "****@" + dbHost[idx:]
+	}
+
+	return DiagnosticInfo{
+		OSACBaseURL:       c.OSACBaseURL,
+		InventoryDBHost:   maskDBURL(c.InventoryDBURL),
+		ReconcileInterval: c.ReconcileInterval.String(),
+		SummarizeInterval: c.SummarizeInterval.String(),
+		MeteringInterval:  "60s",
+		RatingInterval:    "30s",
+		LogLevel:          c.LogLevel,
+		IngestListenAddr:  c.IngestListenAddr,
+		AuthIssuerURL:     c.AuthIssuerURL,
+		DebugDashboard:    c.DebugDashboard,
+		OSACTokenSet:      c.OSACToken != "",
+		OSACCACertSet:     c.OSACCACert != "",
+	}
+}
+
+func maskDBURL(url string) string {
+	at := -1
+	for i, c := range url {
+		if c == '@' {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return url
+	}
+	scheme := ""
+	slashes := 0
+	for i, c := range url {
+		if c == '/' {
+			slashes++
+			if slashes == 2 {
+				scheme = url[:i+1]
+				break
+			}
+		}
+	}
+	return scheme + "****@" + url[at+1:]
+}
+
+func findCredEnd(url string) int {
+	for i, c := range url {
+		if c == '@' {
+			return i
+		}
+	}
+	return -1
 }
 
 func Load() *Config {
@@ -29,6 +102,7 @@ func Load() *Config {
 		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
 		IngestListenAddr:  os.Getenv("INGEST_LISTEN_ADDR"),
 		AuthIssuerURL:    os.Getenv("AUTH_ISSUER_URL"),
+		DebugDashboard:   envOrDefault("DEBUG_DASHBOARD", "true") != "false",
 	}
 }
 
