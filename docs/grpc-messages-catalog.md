@@ -182,5 +182,4 @@ message Metadata {
 
 | Resource | Status | Our handling |
 |---|---|---|
-| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
-| BareMetalInstance | [Proto exists](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/baremetal_instance_type.proto), not in Watch stream `oneof` | Implemented via reconciler polling |
+| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
