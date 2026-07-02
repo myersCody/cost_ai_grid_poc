@@ -54,6 +54,7 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 	r.reconcileClusters(ctx)
 	r.reconcileInstanceTypes(ctx)
 	r.reconcileBareMetalInstances(ctx)
+	r.reconcileCatalogItems(ctx)
 
 	r.logger.Info("reconciliation complete")
 }
@@ -314,4 +315,39 @@ func (r *Reconciler) reconcileInstanceTypes(ctx context.Context) {
 	}
 
 	r.logger.Info("reconciled instance types", "count", len(osacTypes))
+}
+
+func (r *Reconciler) reconcileCatalogItems(ctx context.Context) {
+	total := 0
+
+	syncCatalog := func(itemType string, items []osac.CatalogItem, err error) {
+		if err != nil {
+			r.logger.Error("failed to list catalog items", "type", itemType, "error", err)
+			return
+		}
+		for _, ci := range items {
+			if err := r.store.UpsertCatalogItem(ctx, inventory.CatalogItemRecord{
+				CatalogItemID: ci.ID,
+				ItemType:      itemType,
+				Name:          ci.Metadata.Name,
+				Title:         ci.Title,
+				Description:   ci.Description,
+				Template:      ci.Template,
+				Published:     ci.Published,
+				Tenant:        ci.Metadata.Tenant,
+			}); err != nil {
+				r.logger.Error("failed to upsert catalog item", "id", ci.ID, "type", itemType, "error", err)
+			}
+		}
+		total += len(items)
+	}
+
+	items, err := r.client.ListClusterCatalogItems(ctx)
+	syncCatalog("cluster", items, err)
+	items, err = r.client.ListComputeInstanceCatalogItems(ctx)
+	syncCatalog("compute_instance", items, err)
+	items, err = r.client.ListBareMetalInstanceCatalogItems(ctx)
+	syncCatalog("bare_metal_instance", items, err)
+
+	r.logger.Info("reconciled catalog items", "count", total)
 }

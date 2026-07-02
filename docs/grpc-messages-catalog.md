@@ -109,18 +109,30 @@ Our Go mapping: [`internal/osac/types.go`](../inventory-watcher/internal/osac/ty
 |---|---|
 | Proto definition | [baremetal_instance_type.proto](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/baremetal_instance_type.proto) |
 | Go type | [`internal/osac/types.go`](../inventory-watcher/internal/osac/types.go) → `BareMetalInstance` |
-| Handler | Reconciler only (not in Watch stream `oneof`) |
+| Handler | [`internal/watcher/watcher.go`](../inventory-watcher/internal/watcher/watcher.go) → `upsertBareMetalInstance` |
 | Inventory table | `inventory_bare_metal_instance` |
 | Metering | `bm_uptime_seconds` |
 
 **Key fields consumed:**
-- `id` — instance UUID
-- `metadata.name`, `metadata.tenant`, `metadata.creation_timestamp`
-- `spec.catalog_item` — references BareMetalInstanceCatalogItem for specs
-- `status.state` — billable when `BARE_METAL_INSTANCE_STATE_RUNNING`
+- `id`, `metadata.name`, `metadata.tenant`, `metadata.labels`
+- `spec.catalog_item` — reference to BareMetalInstanceCatalogItem
+- `status.state` — billable when `RUNNING` or `BARE_METAL_INSTANCE_STATE_RUNNING`
 
-**Note:** BareMetalInstance is NOT in the public Watch stream `oneof` payload.
-Inventory is synced via the reconciler polling `GET /api/fulfillment/v1/baremetal_instances`.
+**Note:** Not in the public Watch stream `oneof` — handled via REST List
+reconciliation. Available in the private Watch stream (field 27).
+
+## Catalog Items (Reconciler Only)
+
+Catalog items are synced via REST List polling (not in any Watch stream).
+All three types share the same Go struct (`CatalogItem`).
+
+| Type | REST Endpoint | Client Method |
+|---|---|---|
+| Cluster | `/api/fulfillment/v1/cluster_catalog_items` | `ListClusterCatalogItems` |
+| ComputeInstance | `/api/fulfillment/v1/compute_instance_catalog_items` | `ListComputeInstanceCatalogItems` |
+| BareMetalInstance | `/api/fulfillment/v1/baremetal_instance_catalog_items` | `ListBareMetalInstanceCatalogItems` |
+
+Inventory table: `inventory_catalog_item` (with `item_type` column to distinguish).
 
 ## Messages Received but Not Processed
 
@@ -162,26 +174,12 @@ message Metadata {
 | GET | `/api/fulfillment/v1/instance_types` | [`ListInstanceTypes`](../inventory-watcher/internal/osac/client.go) | Sync instance type catalog |
 | GET | `/api/fulfillment/v1/projects` | [`ListProjects`](../inventory-watcher/internal/osac/client.go) | Sync project hierarchy |
 | GET | `/api/fulfillment/v1/baremetal_instances` | [`ListBareMetalInstances`](../inventory-watcher/internal/osac/client.go) | Reconcile bare metal inventory |
-
-### Pagination
-
-All List endpoints use `offset`/`limit` query parameters (defined in the
-OSAC proto). Our client pages through all results with `limit=100` until
-`offset >= total`.
-
-> **Known limitation:** OSAC only supports offset-based pagination, which
-> is an anti-pattern for changing datasets — resources created or deleted
-> between page fetches can cause items to be skipped or duplicated. The
-> better approach (cursor/keyset pagination) would require OSAC to add a
-> `continue` token or `after` parameter to the proto. For the PoC with
-> <100 resources this is not a practical problem; the reconciler runs
-> periodically and catches any missed items on the next cycle. For
-> production with thousands of resources, this should be raised with the
-> OSAC team.
+| GET | `/api/fulfillment/v1/cluster_catalog_items` | [`ListClusterCatalogItems`](../inventory-watcher/internal/osac/client.go) | Sync cluster catalog items |
+| GET | `/api/fulfillment/v1/compute_instance_catalog_items` | [`ListComputeInstanceCatalogItems`](../inventory-watcher/internal/osac/client.go) | Sync compute catalog items |
+| GET | `/api/fulfillment/v1/baremetal_instance_catalog_items` | [`ListBareMetalInstanceCatalogItems`](../inventory-watcher/internal/osac/client.go) | Sync bare metal catalog items |
 
 ## Messages Not Yet in OSAC (Mock Only)
 
 | Resource | Status | Our handling |
 |---|---|---|
-| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
-| BareMetalInstance | [Proto exists](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/baremetal_instance_type.proto), not in Watch stream `oneof` | Implemented via reconciler polling |
+| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](req2-maas-costing-gap-analysis.md) |

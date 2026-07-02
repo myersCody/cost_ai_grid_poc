@@ -98,7 +98,7 @@ func main() {
 	g.Go(func() error { return rt.Run(ctx) })
 
 	if cfg.IngestListenAddr != "" {
-		h := ingest.NewHandler(store, m, logger)
+		h := ingest.NewHandler(store, m, cfg, logger)
 
 		auth, err := authn.New(cfg.AuthIssuerURL, cfg.OSACCACert, logger)
 		if err != nil {

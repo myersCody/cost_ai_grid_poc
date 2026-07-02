@@ -146,6 +146,21 @@ func (c *Client) ListBareMetalInstances(ctx context.Context) ([]BareMetalInstanc
 	return listAll[BareMetalInstance](ctx, c, "/api/fulfillment/v1/baremetal_instances")
 }
 
+// ListClusterCatalogItems returns all cluster catalog items from OSAC.
+func (c *Client) ListClusterCatalogItems(ctx context.Context) ([]CatalogItem, error) {
+	return listAll[CatalogItem](ctx, c, "/api/fulfillment/v1/cluster_catalog_items")
+}
+
+// ListComputeInstanceCatalogItems returns all compute instance catalog items from OSAC.
+func (c *Client) ListComputeInstanceCatalogItems(ctx context.Context) ([]CatalogItem, error) {
+	return listAll[CatalogItem](ctx, c, "/api/fulfillment/v1/compute_instance_catalog_items")
+}
+
+// ListBareMetalInstanceCatalogItems returns all bare metal catalog items from OSAC.
+func (c *Client) ListBareMetalInstanceCatalogItems(ctx context.Context) ([]CatalogItem, error) {
+	return listAll[CatalogItem](ctx, c, "/api/fulfillment/v1/baremetal_instance_catalog_items")
+}
+
 type listResponse[T any] struct {
 	Items []T `json:"items"`
 	Size  int `json:"size"`

@@ -143,6 +143,18 @@ type BareMetalInstanceStatus struct {
 	State string `json:"state"`
 }
 
+// CatalogItem represents a curated offering (SKU) that references a template.
+// All three catalog item types share the same structure.
+// Source: https://github.com/osac-project/fulfillment-service/tree/main/proto/public/osac/public/v1
+type CatalogItem struct {
+	ID          string   `json:"id"`
+	Metadata    Metadata `json:"metadata"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Template    string   `json:"template"`
+	Published   bool     `json:"published"`
+}
+
 // Event type constants matching the protobuf enum.
 const (
 	EventTypeCreated = "EVENT_TYPE_OBJECT_CREATED"

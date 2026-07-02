@@ -10,8 +10,13 @@
 | Method | Path | Description | Handler | Tests |
 |---|---|---|---|---|
 | GET | `/api/v1/health` | Health check | inline in `ServeMux` | `TestHealthEndpoint` |
-| POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestMaaSEventDuplicate`, `TestIngestMaaSEventNonBillable`, `TestIngestVMHeartbeat`, `TestIngestVMHeartbeatNonBillable`, `TestIngestClusterHeartbeat`, `TestIngestBadJSON` |
+| POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS, IPP) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestVMHeartbeat`, `TestIngestClusterHeartbeat`, `TestIngestIPPAuthoritativeFormat`, `TestIngestVMaaSAuthoritativeFormat`, `TestIngestCaaSAuthoritativeFormat` |
 | GET | `/api/v1/quotas/{tenant_id}` | Quota status with alerts | `handleQuotaStatus` | `TestQuotaStatus`, `TestQuotaStatusMissingTenant`, `TestQuotaStatusWithConsumption` |
+| GET | `/api/v1/reports/costs` | Cost report (JSON/CSV, group by tenant/type/meter/resource) | `handleCostReport` | — |
+| GET | `/api/v1/reports/summary` | Pipeline health counts | `handlePipelineSummary` | — |
+| GET | `/api/v1/customers/{id}/entitlements/{key}/value` | Balance check (IPP compatible) | `handleBalanceCheck` | `TestBalanceCheckResponseFormat` |
+| GET | `/api/v1/debug/config` | Diagnostic config (secrets masked) | `handleDebugConfig` | — |
+| GET | `/debug/dashboard` | Built-in diagnostic dashboard (HTML) | `handleDebugDashboard` | — |
 
 **Test file:** [`internal/ingest/handler_test.go`](../inventory-watcher/internal/ingest/handler_test.go)
 **Run:** `TEST_DB_URL=postgres://user:pass@localhost:5434/costdb_test go test ./internal/ingest/ -v`

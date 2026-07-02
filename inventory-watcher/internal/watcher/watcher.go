@@ -112,6 +112,12 @@ func extractEventMeta(event osac.Event) (resourceID, tenantID string, eventTime 
 		if event.InstanceType.Metadata.CreationTimestamp != nil {
 			eventTime = *event.InstanceType.Metadata.CreationTimestamp
 		}
+	case event.BareMetalInstance != nil:
+		resourceID = event.BareMetalInstance.ID
+		tenantID = event.BareMetalInstance.Metadata.Tenant
+		if event.BareMetalInstance.Metadata.CreationTimestamp != nil {
+			eventTime = *event.BareMetalInstance.Metadata.CreationTimestamp
+		}
 	case event.Project != nil:
 		resourceID = event.Project.ID
 		tenantID = event.Project.Metadata.Tenant
@@ -137,6 +143,9 @@ func (w *Watcher) handleCreateOrUpdate(ctx context.Context, event osac.Event) er
 			MemoryGiB:      it.Spec.MemoryGib,
 			State:          it.Spec.State,
 		})
+	}
+	if bm := event.BareMetalInstance; bm != nil {
+		return w.upsertBareMetalInstance(ctx, event.ID, bm)
 	}
 	if p := event.Project; p != nil {
 		createdAt := time.Now()
@@ -172,6 +181,14 @@ func (w *Watcher) handleDelete(ctx context.Context, event osac.Event) error {
 			deletedAt = *cl.Metadata.DeletionTimestamp
 		}
 		return w.store.MarkClusterDeleted(ctx, cl.ID, deletedAt, event.ID)
+	}
+	if bm := event.BareMetalInstance; bm != nil {
+		deletedAt := now
+		if bm.Metadata.DeletionTimestamp != nil {
+			deletedAt = *bm.Metadata.DeletionTimestamp
+		}
+		w.meter.MeterBareMetalInstanceFinal(ctx, bm.ID, deletedAt)
+		return w.store.MarkBareMetalInstanceDeleted(ctx, bm.ID, deletedAt, event.ID)
 	}
 	return nil
 }
@@ -225,6 +242,26 @@ func (w *Watcher) upsertCluster(ctx context.Context, eventID string, cl *osac.Cl
 		Labels:       labelsJSON,
 		CreatedAt:    createdAt,
 		LastEventID:  eventID,
+	})
+}
+
+func (w *Watcher) upsertBareMetalInstance(ctx context.Context, eventID string, bm *osac.BareMetalInstance) error {
+	createdAt := time.Now()
+	if bm.Metadata.CreationTimestamp != nil {
+		createdAt = *bm.Metadata.CreationTimestamp
+	}
+
+	labelsJSON, _ := json.Marshal(bm.Metadata.Labels)
+
+	return w.store.UpsertBareMetalInstance(ctx, inventory.BareMetalInstanceRecord{
+		InstanceID:  bm.ID,
+		Name:        bm.Metadata.Name,
+		Tenant:      bm.Metadata.Tenant,
+		CatalogItem: bm.Spec.CatalogItem,
+		State:       bm.Status.State,
+		Labels:      labelsJSON,
+		CreatedAt:   createdAt,
+		LastEventID: eventID,
 	})
 }
 

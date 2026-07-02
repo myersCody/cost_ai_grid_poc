@@ -246,6 +246,46 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 	}
 }
 
+// MeterBareMetalInstanceFinal produces final metering entries for a
+// bare metal instance that is being deleted.
+func (m *Meter) MeterBareMetalInstanceFinal(ctx context.Context, instanceID string, deletedAt time.Time) {
+	inst, err := m.store.GetBareMetalInstance(ctx, instanceID)
+	if err != nil {
+		m.logger.Debug("no inventory record for final BM metering", "id", instanceID)
+		return
+	}
+
+	if !IsBareMetalBillable(inst.State) {
+		return
+	}
+
+	periodStart := inst.CreatedAt
+	if inst.LastMeteredAt != nil {
+		periodStart = *inst.LastMeteredAt
+	}
+
+	durationSeconds := deletedAt.Sub(periodStart).Seconds()
+	if durationSeconds <= 0 {
+		return
+	}
+
+	entry := inventory.MeteringEntry{
+		ResourceType: "bare_metal",
+		ResourceID:   inst.InstanceID,
+		TenantID:     inst.Tenant,
+		MeterName:    "bm_uptime_seconds",
+		Value:        durationSeconds,
+		Unit:         "seconds",
+		PeriodStart:  periodStart,
+		PeriodEnd:    deletedAt,
+	}
+	if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
+		m.logger.Error("failed to insert final BM metering entry", "resource", instanceID, "error", err)
+	}
+
+	m.logger.Debug("final metering for deleted bare metal instance", "id", instanceID, "duration_seconds", durationSeconds)
+}
+
 // MaaS metering data passed from event ingestion.
 type MaaSUsage struct {
 	ModelID             string
