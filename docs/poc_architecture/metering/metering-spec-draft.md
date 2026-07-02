@@ -363,7 +363,7 @@ All metering entries carry `tenant_id`. Project attribution comes from the inven
 
 ## 14. References
 
-- [POC-ARCH requirements](../../requirements/csv_poc_requirements_summary.md#poc-arch--capacity-based-charging-model)
+- [POC-ARCH requirements](../../requirements/poc_requirements_overview.md#poc-arch-capacity-based-charging-model)
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
 - [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
 - [Cost calculation and billing spec](../pricing/cost-calculation-spec-draft.md)

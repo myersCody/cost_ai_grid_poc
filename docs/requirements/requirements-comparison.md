@@ -1,6 +1,6 @@
 # Requirements Comparison: Updated Spec vs Our Implementation
 
-> Comparing the [updated requirements summary](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md)
+> Comparing the [requirements overview](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
 > against what we've built in the `osac-cost-consumer` branch.
 
 ## Key Changes from Original Requirements Brief

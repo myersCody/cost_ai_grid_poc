@@ -68,9 +68,9 @@ When modifying source code, keep the corresponding docs in sync:
   request/response schemas, handler links
 
 ### When modifying `internal/metering/` or `internal/rating/`:
-- Update [docs/req1-osac-integration-gap-analysis.md](docs/req1-osac-integration-gap-analysis.md) —
+- Update [docs/requirements/req1-osac-integration-gap-analysis.md](docs/requirements/req1-osac-integration-gap-analysis.md) —
   metering pipeline description, meter list, implementation progress
-- Update [docs/req2-maas-costing-gap-analysis.md](docs/req2-maas-costing-gap-analysis.md) —
+- Update [docs/requirements/req2-maas-costing-gap-analysis.md](docs/requirements/req2-maas-costing-gap-analysis.md) —
   MaaS metering section if MaaS meters change
 
 ### When modifying `internal/inventory/store.go` (schema changes):
@@ -95,7 +95,7 @@ When modifying source code, keep the corresponding docs in sync:
 ### When adding or completing a requirement:
 - Update [docs/implementation-status.md](docs/implementation-status.md) —
   status table, acceptance criteria checkboxes, summary counts
-- Update [docs/requirements-comparison.md](docs/requirements-comparison.md) —
+- Update [docs/requirements/requirements-comparison.md](docs/requirements/requirements-comparison.md) —
   gap table if status changed
 
 ### When adding architecture decisions:
@@ -125,6 +125,5 @@ inventory-watcher/
 
 ## Spec References
 
-- [Updated requirements](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md)
-- [Original requirements brief](https://github.com/martinpovolny/cost_ai_grid_poc/blob/main/docs/requirements/ai_grid_poc_requirements_brief.md)
+- [Requirements overview](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
 - [OSAC fulfillment-service protos](https://github.com/osac-project/fulfillment-service/tree/main/proto/public/osac/public/v1)

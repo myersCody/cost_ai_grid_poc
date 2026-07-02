@@ -370,7 +370,7 @@ Blocked on OSAC MaaS CloudEvent schema.
 - [OSAC Console Mockups](https://heyethankim.github.io/osac-demo/)
 - [docs/dev/local-dev-setup.md](../dev/local-dev-setup.md) — local dev setup guide
 - [docs/demo-scenario-1.md](../demo-scenario-1.md) — end-to-end demo walkthrough
-- [docs/requirements/ai_grid_poc_requirements_brief.md](../requirements/ai_grid_poc_requirements_brief.md) — requirements spike
+- [docs/requirements/poc_requirements_overview.md](../requirements/poc_requirements_overview.md) — consolidated requirements
 - [inventory-watcher/internal/inventory/store.go](../../inventory-watcher/internal/inventory/store.go) — inline DB schema
 - [snippets/test-inventory-watcher.sh](../../snippets/test-inventory-watcher.sh) — E2E test suite
 - [metering/metering-spec-draft.md](metering/metering-spec-draft.md) — capacity-based metering specification

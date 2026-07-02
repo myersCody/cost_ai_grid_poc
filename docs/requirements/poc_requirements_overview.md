@@ -1,6 +1,6 @@
 # AI Grid PoC — Cost Management Requirements
 
-**Version:** 1.1
+**Version:** 1.2
 **Date:** June 26, 2026
 **Status:** Hardening (Still in Flux)
 
@@ -24,6 +24,7 @@ This document is the consolidated requirements reference for the Cost Management
 
 ### POC-ENV — On-Premise Deployment
 **Priority:** CRITICAL
+**Rank:** 1
 **Component Scope:** OUT OF SCOPE — This requirement covers deploying RHCM on-premise; it is owned by the RHCM/Cost Management team, not the consumer component.
 
 On-prem RHCM deployment to demo capacity-based charging with OSAC heartbeat events. Not all components may be needed.
@@ -43,8 +44,10 @@ On-prem RHCM deployment to demo capacity-based charging with OSAC heartbeat even
 
 ---
 
-### POC-ARCH — Capacity-Based Charging Model
+### POC-ARCH: Capacity-Based Charging Model
 **Priority:** CRITICAL
+[COST-7792](https://redhat.atlassian.net/browse/COST-7792)
+Rank: 2
 
 Charge based on what was provisioned (VM size, cluster config) and for how long. No metric scraping, no CSV pipeline changes; existing cost models may partially work. This is a standalone PoC component — a new data path driven by heartbeat events from OSAC.
 
@@ -68,8 +71,10 @@ Charge based on what was provisioned (VM size, cluster config) and for how long.
 
 ---
 
-### REQ-1 — OSAC Integration via Region Management Cluster
+### REQ-1: OSAC Integration via Region Management Cluster
 **Priority:** CRITICAL
+[COST-7793](https://redhat.atlassian.net/browse/COST-7793)
+Rank: 3
 
 Connect RHCM to the OSAC Region Management Cluster (gRPC/REST APIs) to read inventory, resource state, and tenant/project hierarchy. All data flows through the management layer, not individual workload clusters.
 
@@ -100,31 +105,10 @@ Connect RHCM to the OSAC Region Management Cluster (gRPC/REST APIs) to read inve
 
 ---
 
-### REQ-1a — OSAC Cluster Lifecycle via Cluster Orders
-**Priority:** HIGH
-
-Monitor OSAC "cluster orders" for state changes (created, running, stopped, destroyed) and calculate cost based on provisioned capacity and duration.
-
-**Acceptance Criteria:**
-- RHCM monitors cluster orders via the OSAC management layer
-- State changes (create, stop, start, destroy) are captured
-- Cluster rate set in Cost Management per cluster order
-- Cluster cost calculated based on provisioned capacity and duration
-- No dependency on internal workload cluster data
-
-**Current State:**
-- OSAC APIs confirmed (gRPC/REST) at Region Management Cluster
-- "Cluster orders" is the OSAC equivalent of a provisioned cluster
-- Confirmed architecture in Jun 23 meeting
-
-**Scope:**
-- IN: Cluster order monitoring and capacity-based cost calculation
-- OUT: Internal cluster metrics scraping (not needed for capacity model)
-
----
-
-### REQ-1b — OSAC Heartbeat Event Ingestion
+### REQ-1b: OSAC Heartbeat Event Ingestion
 **Priority:** CRITICAL
+[COST-7795](https://redhat.atlassian.net/browse/COST-7795)
+Rank: 4
 
 Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
 
@@ -151,8 +135,10 @@ Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 m
 
 ---
 
-### REQ-2 — Near-Real-Time Cost Calculation
+### REQ-2: Near-Real-Time Cost Calculation
 **Priority:** CRITICAL
+[COST-7796](https://redhat.atlassian.net/browse/COST-7796)
+Rank: 5
 
 Process OSAC heartbeat events and calculate costs within 60 seconds of receipt. End-to-end SLA is 90 seconds. This is a new HTTP data path, not a rework of the CSV pipeline.
 
@@ -175,58 +161,35 @@ Process OSAC heartbeat events and calculate costs within 60 seconds of receipt. 
 
 ---
 
-### REQ-2a — Cloud Events from OpenShift AI (MaaS)
+### REQ-1a: OSAC Cluster Lifecycle via Cluster Orders
 **Priority:** HIGH
+[COST-7794](https://redhat.atlassian.net/browse/COST-7794)
+Rank: 6
 
-Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEvents with token counts (input, output, inference) and request counts. Cost must compute MaaS cost within 60 seconds of receiving data.
+Monitor OSAC "cluster orders" for state changes (created, running, stopped, destroyed) and calculate cost based on provisioned capacity and duration.
 
 **Acceptance Criteria:**
-- RHCM can receive and process CloudEvents from OpenShift AI / OSAC for MaaS workloads
-- Events ingested within 30 seconds of emission
-- JSON/CloudEvents format parsed and stored
-- MaaS cost computed within 60 seconds of event receipt
-- Validated with at least one MaaS workload type
+- RHCM monitors cluster orders via the OSAC management layer
+- State changes (create, stop, start, destroy) are captured
+- Cluster rate set in Cost Management per cluster order
+- Cluster cost calculated based on provisioned capacity and duration
+- No dependency on internal workload cluster data
 
 **Current State:**
-- OpenShift AI CloudEvents capability is upcoming (v5)
-- Spike in progress investigating metrics for MaaS chargeback
-
-**Open Questions:**
-- Who collects RHOAI MaaS metrics — Cost or OSAC?
-- What fields will OSAC MaaS CloudEvents contain?
-- Transport for MaaS events: HTTP, Kafka, other?
-
-**Related Ticket:** COST-7164
+- OSAC APIs confirmed (gRPC/REST) at Region Management Cluster
+- "Cluster orders" is the OSAC equivalent of a provisioned cluster
+- Confirmed architecture in Jun 23 meeting
 
 **Scope:**
-- IN: Receive and process MaaS CloudEvents for consumption-based cost calculation
-- OUT: N/A
+- IN: Cluster order monitoring and capacity-based cost calculation
+- OUT: Internal cluster metrics scraping (not needed for capacity model)
 
 ---
 
-### REQ-3 — Granular Cost Tracking
+### REQ-3a: OSAC Tenant/Project Attribution
 **Priority:** HIGH
-
-Single system of record for cost data with drill-down by tenant, project, model, and user. Covers both capacity-based (compute hours) and consumption-based (token/request) dimensions.
-
-**Acceptance Criteria:**
-- Cost data filterable by: tenant, model/SKU, application, user
-- Dashboard shows near-real-time token consumption, compute hours, and estimated costs
-- Reporting supports export in CSV and JSON
-- Financial data decoupled from infrastructure state
-
-**Current State:**
-- Core RHCM cost tracking and reporting capability exists in-product
-- Dashboard and export functionality are in-product
-
-**Scope:**
-- IN: Granular cost breakdowns at listed dimensions for both capacity and MaaS workloads
-- OUT: Account hierarchy management
-
----
-
-### REQ-3a — OSAC Tenant/Project Attribution
-**Priority:** HIGH
+[COST-7799](https://redhat.atlassian.net/browse/COST-7799)
+Rank: 7
 
 Map OSAC's `Tenant → Project` hierarchy to RHCM's organizational model. All costs attributed to the correct tenant and project.
 
@@ -252,102 +215,33 @@ Map OSAC's `Tenant → Project` hierarchy to RHCM's organizational model. All co
 
 ---
 
-### REQ-3b — Service Catalog Sync from OSAC
-**Priority:** MEDIUM
-
-Read OSAC service catalog for pricing. Manual setup acceptable for PoC; API sync deferred to a later phase.
-
-**Acceptance Criteria:**
-- RHCM can read OSAC catalog items (instance types, storage tiers)
-- Price lists in RHCM correspond to OSAC catalog offerings
-- Cost calculations use catalog-based rates (capacity charging)
-
-**Current State:**
-- RHCM does not have a service catalog feature today
-- Existing per-cluster/per-VM cost models may partially work
-- Catalog lives in OSAC; RHCM is a downstream consumer
-- OSAC core team owns catalog
-
-**Scope:**
-- IN: Read OSAC catalog and apply capacity-based rates
-- OUT: Building a service catalog UI in RHCM; bilateral catalog sync
-
----
-
-### REQ-4 — Token Metering (MaaS)
+### REQ-3: Granular Cost Tracking
 **Priority:** HIGH
+[COST-7798](https://redhat.atlassian.net/browse/COST-7798)
+Rank: 8
 
-Track token dimensions (input, output, cached, reasoning) and GPU compute metrics for MaaS workloads provisioned via OSAC. Define MaaS rate structure priced per million units.
+Single system of record for cost data with drill-down by tenant, project, model, and user. Covers both capacity-based (compute hours) and consumption-based (token/request) dimensions.
 
 **Acceptance Criteria:**
-- Ingest `prompt_tokens`, `completion_tokens`, `cached_tokens` from vLLM / OSAC MaaS CloudEvents
-- Track hardware compute: GPU SKU, VRAM (GB-seconds), queue wait
-- Token data available for cost calculation and visible in dashboard
-- MaaS rate structure defined: tokens in/out, inference tokens, requests — priced per million units
+- Cost data filterable by: tenant, model/SKU, application, user
+- Dashboard shows near-real-time token consumption, compute hours, and estimated costs
+- Reporting supports export in CSV and JSON
+- Financial data decoupled from infrastructure state
 
 **Current State:**
-- Hardware compute metrics covered
-- Token details partially available via vLLM usage API
-- Custom IPP plugins may be needed
-
-**Open Questions:**
-- Who defines the MaaS rate structure: Cost team, OSAC, or agreed jointly?
-
-**Related Ticket:** COST-7164
+- Core RHCM cost tracking and reporting capability exists in-product
+- Dashboard and export functionality are in-product
 
 **Scope:**
-- IN: Token and request metering; MaaS rate definition; consumption-based cost calculation
-- OUT: Per-workload GPU-second metric scraping; real-time inference monitoring
+- IN: Granular cost breakdowns at listed dimensions for both capacity and MaaS workloads
+- OUT: Account hierarchy management
 
 ---
 
-### REQ-5 — Chargeback Reporting
-**Priority:** MEDIUM
-
-Export chargeback reports covering both capacity-based (provisioned compute hours) and consumption-based (GPU hours, token consumption) dimensions per tenant/project.
-
-**Acceptance Criteria:**
-- Reports map provisioned compute hours and GPU hours to token consumption per tenant/project
-- Exportable in standard formats (CSV, JSON)
-- Accurate and consistent with the cost tracking dashboard
-
-**Current State:**
-- Core RHCM chargeback capability exists in-product
-
-**Scope:**
-- IN: Chargeback reports for all PoC workloads (capacity and MaaS)
-- OUT: Integration with external billing systems
-
----
-
-### REQ-8 — Bare Metal Costing (OSAC Bare Metal Service)
+### REQ-9: Quota/Budget Status API
 **Priority:** HIGH
-
-Support bare metal nodes provisioned through OSAC (BMaaS), including potential standalone nodes outside OpenShift clusters. Consume bare metal service CloudEvents for capacity-based costing.
-
-**Acceptance Criteria:**
-- RHCM receives and processes bare metal service CloudEvents from OSAC
-- Costs calculated for bare metal nodes based on provisioned capacity
-- Standalone bare metal nodes (not attached to OpenShift) supported if required by AI Grid
-
-**Current State:**
-- OSAC bare metal service is actively being built (confirmed Jun 24)
-- RHCM already supports OpenShift bare metal costing
-- Open question: do we need to support nodes outside OpenShift clusters?
-- Standalone bare metal requirements under investigation
-
-**Open Questions:**
-- OSAC needs to define the BMaaS CloudEvents schema first
-- Do we need to support nodes outside of an OCP cluster?
-
-**Scope:**
-- IN: Bare metal capacity-based costing via OSAC CloudEvents
-- OUT: Standalone bare metal support TBD pending requirements review
-
----
-
-### REQ-9 — Quota/Budget Status API
-**Priority:** HIGH
+[COST-7801](https://redhat.atlassian.net/browse/COST-7801)
+Rank: 9
 
 Provide a workflow to allow OSAC to check quota and budge status before allowing resource creation.
 
@@ -380,8 +274,10 @@ Provide a workflow to allow OSAC to check quota and budge status before allowing
 
 ---
 
-### REQ-10 — Threshold Notification Back Channel to OSAC
+### REQ-10: Threshold Notification Back Channel to OSAC
 **Priority:** HIGH
+[COST-7807](https://redhat.atlassian.net/browse/COST-7807)
+Rank: 10
 
 Send threshold notifications from RHCM to OSAC when cost/quota consumption hits defined levels (50%, 70%, 90%, 100%). OSAC consumes these notifications to trigger OPA-enforced rate limiting. Transport and format TBD.
 
@@ -407,8 +303,140 @@ Send threshold notifications from RHCM to OSAC when cost/quota consumption hits 
 
 ---
 
-### REQ-11 — Cost Tiers
-**Priority:** MUST HAVE
+### REQ-13: Custom Metrics / Custom Rates
+**Priority:** HIGH
+[COST-7808](https://redhat.atlassian.net/browse/COST-7810)
+Rank: 11
+
+Ability to create a custom rate from an arbitrary metric dimension emitted by OSAC CloudEvents. Allows new dimensions to be metered without hardcoded support in RHCM.
+
+**Acceptance Criteria:**
+- RHCM can consume arbitrary CloudEvent dimensions as rate inputs
+- New dimensions can be configured with an ID, classification, and rate name
+- Custom dimension data is stored and available for cost calculation and reporting
+
+**Current State:**
+- No custom metric rate support exists in RHCM today
+- Requires investigation of CloudEvent schema extensibility
+
+**Open Questions:**
+- Who defines new dimensions to collect: OSAC or Cost team?
+- ID, classification, and rate naming scheme to be agreed
+
+**Related Ticket:** COST-3549
+
+**Scope:**
+- IN: Configurable ingestion of arbitrary CloudEvent dimensions as billable rate inputs
+- OUT: UI for custom metric management (API/config acceptable for PoC)
+
+---
+
+### REQ-2a: Cloud Events from OpenShift AI (MaaS) & Token Metering
+**Priority:** HIGH
+[COST-7797](https://redhat.atlassian.net/browse/COST-7797)
+Rank: 12
+
+Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEvents with token counts (input, output, inference) and request counts. Track token dimensions (input, output, cached, reasoning) and GPU compute metrics for MaaS workloads provisioned via OSAC. Define MaaS rate structure priced per million units. Cost must compute MaaS cost within 60 seconds of receiving data.
+
+**Acceptance Criteria:**
+- RHCM can receive and process CloudEvents from OpenShift AI / OSAC for MaaS workloads
+- Events ingested within 30 seconds of emission
+- JSON/CloudEvents format parsed and stored
+- MaaS cost computed within 60 seconds of event receipt
+- Validated with at least one MaaS workload type
+- Ingest `prompt_tokens`, `completion_tokens`, `cached_tokens` from vLLM / OSAC MaaS CloudEvents
+- Track hardware compute: GPU SKU, VRAM (GB-seconds), queue wait
+- Token data available for cost calculation and visible in dashboard
+- MaaS rate structure defined: tokens in/out, inference tokens, requests — priced per million units
+
+**Current State:**
+- OpenShift AI CloudEvents capability is upcoming (v5)
+- Spike in progress investigating metrics for MaaS chargeback
+- Hardware compute metrics covered
+- Token details partially available via vLLM usage API
+- Custom IPP plugins may be needed
+
+**Open Questions:**
+- Who collects RHOAI MaaS metrics — Cost or OSAC?
+- What fields will OSAC MaaS CloudEvents contain?
+- Transport for MaaS events: HTTP, Kafka, other?
+- Who defines the MaaS rate structure: Cost team, OSAC, or agreed jointly?
+
+**Related Ticket:** COST-7164
+
+**Scope:**
+- IN: Receive and process MaaS CloudEvents; token and request metering; MaaS rate definition; consumption-based cost calculation
+- OUT: Per-workload GPU-second metric scraping; real-time inference monitoring
+
+---
+
+### REQ-3b: Service Catalog Sync from OSAC
+**Priority:** MEDIUM
+[COST-7800](https://redhat.atlassian.net/browse/COST-7800)
+Rank: 13
+
+Read OSAC service catalog for pricing. Manual setup acceptable for PoC; API sync deferred to a later phase.
+
+**Acceptance Criteria:**
+- RHCM can read OSAC catalog items (instance types, storage tiers)
+- Price lists in RHCM correspond to OSAC catalog offerings
+- Cost calculations use catalog-based rates (capacity charging)
+
+**Current State:**
+- RHCM does not have a service catalog feature today
+- Existing per-cluster/per-VM cost models may partially work
+- Catalog lives in OSAC; RHCM is a downstream consumer
+- OSAC core team owns catalog
+
+**Scope:**
+- IN: Read OSAC catalog and apply capacity-based rates
+- OUT: Building a service catalog UI in RHCM; bilateral catalog sync
+
+---
+
+### REQ-5: Chargeback Reporting
+**Priority:** MEDIUM
+[COST-7801](https://redhat.atlassian.net/browse/COST-7801)
+Rank: 14
+
+Export chargeback reports covering both capacity-based (provisioned compute hours) and consumption-based (GPU hours, token consumption) dimensions per tenant/project.
+
+**Acceptance Criteria:**
+- Reports map provisioned compute hours and GPU hours to token consumption per tenant/project
+- Exportable in standard formats (CSV, JSON)
+- Accurate and consistent with the cost tracking dashboard
+
+**Current State:**
+- Core RHCM chargeback capability exists in-product
+
+**Scope:**
+- IN: Chargeback reports for all PoC workloads (capacity and MaaS)
+- OUT: Integration with external billing systems
+
+---
+
+### REQ-7: Audit Trail
+**Priority:** MEDIUM
+[COST-7802](https://redhat.atlassian.net/browse/COST-7802)
+Rank: 15
+
+Zero-leakage reconciliation, immutable audit logs, and dispute resolution support.
+
+**Acceptance Criteria:**
+- Billing ledgers match consumption logs with zero financial variance
+- Tamper-resistant audit trail for all admin changes
+- Human-readable error logging for billing dispute resolution
+
+**Current State:**
+- In-product; no gap identified
+- On-prem audit work tracked under POC-ENV (COST-7541, COST-7328)
+
+---
+
+### REQ-11: Cost Tiers
+**Priority:** LOW
+[COST-7808](https://redhat.atlassian.net/browse/COST-7808)
+Rank: 16
 
 Tiered pricing support for both capacity-based and MaaS consumption-based rates. Example: first 20 GiB free, next 100 GiB at $0.08/GiB-month, next 1000 GiB at $0.07/GiB-month.
 
@@ -433,8 +461,10 @@ Tiered pricing support for both capacity-based and MaaS consumption-based rates.
 
 ---
 
-### REQ-12 — Daily OpenShift Virtualization Costs
-**Priority:** TBD
+### REQ-12: Daily OpenShift Virtualization Costs
+**Priority:** LOW
+[COST-7808](https://redhat.atlassian.net/browse/COST-7808)
+Rank: 17
 
 Daily cost calculation for OpenShift Virtualization workloads provisioned through OSAC.
 
@@ -449,29 +479,31 @@ Daily cost calculation for OpenShift Virtualization workloads provisioned throug
 
 ---
 
-### REQ-13 — Custom Rate Dimensions (Custom Metrics)
+### REQ-8: Bare Metal Costing (OSAC Bare Metal Service)
 **Priority:** HIGH
+[COST-7801](https://redhat.atlassian.net/browse/COST-7801)
+Rank: 18
 
-Ability to create a custom rate from an arbitrary metric dimension emitted by OSAC CloudEvents. Allows new dimensions to be metered without hardcoded support in RHCM.
+Support bare metal nodes provisioned through OSAC (BMaaS), including potential standalone nodes outside OpenShift clusters. Consume bare metal service CloudEvents for capacity-based costing.
 
 **Acceptance Criteria:**
-- RHCM can consume arbitrary CloudEvent dimensions as rate inputs
-- New dimensions can be configured with an ID, classification, and rate name
-- Custom dimension data is stored and available for cost calculation and reporting
+- RHCM receives and processes bare metal service CloudEvents from OSAC
+- Costs calculated for bare metal nodes based on provisioned capacity
+- Standalone bare metal nodes (not attached to OpenShift) supported if required by AI Grid
 
 **Current State:**
-- No custom metric rate support exists in RHCM today
-- Requires investigation of CloudEvent schema extensibility
+- OSAC bare metal service is actively being built (confirmed Jun 24)
+- RHCM already supports OpenShift bare metal costing
+- Open question: do we need to support nodes outside OpenShift clusters?
+- Standalone bare metal requirements under investigation
 
 **Open Questions:**
-- Who defines new dimensions to collect: OSAC or Cost team?
-- ID, classification, and rate naming scheme to be agreed
-
-**Related Ticket:** COST-3549
+- OSAC needs to define the BMaaS CloudEvents schema first
+- Do we need to support nodes outside of an OCP cluster?
 
 **Scope:**
-- IN: Configurable ingestion of arbitrary CloudEvent dimensions as billable rate inputs
-- OUT: UI for custom metric management (API/config acceptable for PoC)
+- IN: Bare metal capacity-based costing via OSAC CloudEvents
+- OUT: Standalone bare metal support TBD pending requirements review
 
 ---
 
@@ -501,7 +533,7 @@ Ability to create a custom rate from an arbitrary metric dimension emitted by OS
 
 ## Future Work (Post-PoC)
 
-### REQ-6 — Platform Security & Access Control
+### REQ-6: Platform Security & Access Control
 **Priority:** STANDARD
 
 MFA, granular RBAC for billing admins, and short-lived auth tokens.
@@ -514,22 +546,6 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 **Current State:**
 - In-product; no gap identified
 - On-prem RBAC and security review work tracked under POC-ENV (COST-7570, COST-7670, COST-7544, COST-7547)
-
----
-
-### REQ-7 — Reconciliation, Auditing & Dispute Tracing
-**Priority:** STANDARD
-
-Zero-leakage reconciliation, immutable audit logs, and dispute resolution support.
-
-**Acceptance Criteria:**
-- Billing ledgers match consumption logs with zero financial variance
-- Tamper-resistant audit trail for all admin changes
-- Human-readable error logging for billing dispute resolution
-
-**Current State:**
-- In-product; no gap identified
-- On-prem audit work tracked under POC-ENV (COST-7541, COST-7328)
 
 ---
 

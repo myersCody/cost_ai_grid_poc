@@ -3,7 +3,7 @@
 > **Requirement:** Support bare metal nodes provisioned through OSAC (BMaaS).
 > Consume bare metal service CloudEvents for capacity-based costing.
 >
-> **Source:** [poc_requirements_overview.md#req-8](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-8--bare-metal-costing-osac-bare-metal-service)
+> **Source:** [poc_requirements_overview.md#req-8](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-8-bare-metal-costing-osac-bare-metal-service)
 
 ## OSAC State
 

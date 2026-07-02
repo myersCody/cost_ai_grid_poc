@@ -4,7 +4,7 @@
 > CloudEvents with token counts (in, out, inference) and request counts. Cost
 > must compute pricing within 60 seconds of receiving data.
 >
-> **Source:** [requirements brief, section 2](https://github.com/martinpovolny/cost_ai_grid_poc/blob/main/docs/requirements/ai_grid_poc_requirements_brief.md#2-maas-costing--must-have)
+> **Source:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a-cloud-events-from-openshift-ai-maas--token-metering)
 
 ## Key Difference from Req #1
 

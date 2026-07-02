@@ -4,7 +4,7 @@
 > Cost Management. Consume resource metrics via CloudEvents. Billing is
 > capacity-based — charge for what is provisioned, not what is used.
 >
-> **Source:** [requirements brief, section 1](https://github.com/martinpovolny/cost_ai_grid_poc/blob/main/docs/requirements/ai_grid_poc_requirements_brief.md#1-osac-integration-inventory--metrics--must-have)
+> **Source:** [poc_requirements_overview.md#req-1](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-1-osac-integration-via-region-management-cluster)
 
 ## Current State: inventory-watcher
 
