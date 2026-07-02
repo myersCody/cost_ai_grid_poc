@@ -1,13 +1,20 @@
 # Observability Plan — Cost Event Consumer
 
-> Aligned with Kubernetes/OpenShift best practices and RHT portfolio patterns.
-> Covers what exists, what's needed, and how to implement each area.
+> A Go service running in OpenShift, part of the Red Hat Cost Management
+> product family. This plan uses Go-native libraries and patterns,
+> fits the Kubernetes/OpenShift observability ecosystem, and aligns with
+> existing RHT services (Koku, chrome-service-backend) where appropriate.
 >
-> **RHT references used:**
-> - [Koku sentry.py](https://gitlab.cee.redhat.com/koku/koku/-/blob/main/koku/koku/sentry.py) — Sentry setup with traces sampler and before_send hook
-> - [Koku celery.py](https://gitlab.cee.redhat.com/koku/koku/-/blob/main/koku/koku/celery.py) — WorkerProbeServer with readiness check
-> - [Koku clowdapp.yaml](https://gitlab.cee.redhat.com/koku/koku/-/blob/main/deploy/clowdapp.yaml) — liveness/readiness probe config, Sentry env vars
-> - [chrome-service-backend main.go](https://github.com/RedHatInsights/chrome-service-backend/blob/main/main.go) — Go service with separate metrics port, promhttp, Recoverer middleware, RequestID
+> **Go ecosystem libraries:**
+> - `log/slog` — structured logging (stdlib, Go 1.21+)
+> - `github.com/prometheus/client_golang` — Prometheus metrics
+> - `github.com/getsentry/sentry-go` — crash reporting (Sentry/GlitchTip)
+> - `go.opentelemetry.io/otel` — distributed tracing (post-PoC)
+>
+> **RHT references (for ecosystem alignment, not code patterns):**
+> - [Koku sentry.py](https://gitlab.cee.redhat.com/koku/koku/-/blob/main/koku/koku/sentry.py) — Sentry config: enable toggle, sampling, blocklist
+> - [Koku clowdapp.yaml](https://gitlab.cee.redhat.com/koku/koku/-/blob/main/deploy/clowdapp.yaml) — probe config, Sentry env vars, ClowdApp patterns
+> - [chrome-service-backend](https://github.com/RedHatInsights/chrome-service-backend/blob/main/main.go) — Go service with separate metrics port, promhttp
 
 ## Current State
 

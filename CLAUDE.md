@@ -5,6 +5,36 @@
 Cost Management AI Grid PoC — integrates with OSAC fulfillment-service for
 capacity-based and consumption-based cost tracking.
 
+## Design Principles
+
+This is a **Go service running in OpenShift** as part of the **Red Hat
+Cost Management** product family. Design decisions should reflect that:
+
+- **Go ecosystem first.** Use Go-native libraries and patterns:
+  `log/slog` for structured logging, `net/http` for handlers,
+  `prometheus/client_golang` for metrics, `context` for cancellation.
+  Don't port Python/Java patterns when Go has idiomatic alternatives.
+
+- **Kubernetes-native.** Implement proper liveness/readiness/startup
+  probes, graceful shutdown with drain periods, and structured JSON
+  logging for log aggregation. Follow the
+  [observability plan](docs/observability.md) for specifics.
+
+- **OpenShift ecosystem fit.** Expose Prometheus metrics on a separate
+  port for ServiceMonitor scraping. Use Sentry/GlitchTip for crash
+  reporting (same SDK as Koku). Support ClowdApp deployment patterns
+  where applicable.
+
+- **Cost Management alignment.** Use Koku terminology and schemas where
+  applicable (see Naming Conventions below). The goal is eventual merge
+  or close alignment with Koku — avoid diverging on field names, cost
+  types, or report formats.
+
+- **Authoritative sources.** When consuming external formats (CloudEvents,
+  OSAC protos, IPP metering API), document the authoritative source URL
+  on the struct definition and write tests using exact payloads from that
+  source. See [CloudEvents catalog](docs/cloudevents-catalog.md).
+
 ## Naming Conventions
 
 When naming fields, tables, metrics, or API concepts, **check Koku first**.
