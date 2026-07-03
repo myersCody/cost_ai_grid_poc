@@ -115,3 +115,17 @@
     Insights RBAC (one role per OSAC project — Koku-compatible) or
     Keycloak (OSAC-native)? Depends on whether this PoC merges into
     Koku or becomes a standalone replacement.
+
+## MaaS Tenant Attribution (IPP Integration)
+
+19. **Tenant from subscription namespace** — The IPP CloudEvent has
+    `user`, `group`, `subscription` but no `tenant_id`. We plan to
+    derive tenant from the MaaSSubscription namespace (e.g.,
+    `tenant-acme/premium-sub` → `tenant-acme`). Is this the correct
+    mapping? See [research](../research/maas-tenant-attribution.md).
+
+20. **Add X-MaaS-Tenant upstream?** — Would it be feasible to add a
+    `X-MaaS-Tenant` header in the Authorino AuthPolicy (from the
+    subscription namespace) and a `tenant_id` field in the CloudEvent
+    data payload? This would give us clean attribution without
+    convention-based parsing.
