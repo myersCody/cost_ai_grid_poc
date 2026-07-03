@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/watcher"
 )
@@ -60,6 +61,10 @@ func (r *Reconciler) reconcileAll(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcileComputeInstances(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		metrics.ReconcileDuration.WithLabelValues("compute_instance").Observe(time.Since(start).Seconds())
+	}()
 	osacInstances, err := r.client.ListComputeInstances(ctx)
 	if err != nil {
 		r.logger.Error("failed to list OSAC compute instances", "error", err)
@@ -129,6 +134,9 @@ func (r *Reconciler) reconcileComputeInstances(ctx context.Context) {
 		}
 	}
 
+	metrics.ReconcileDriftCreated.WithLabelValues("compute_instance").Add(float64(created))
+	metrics.ReconcileDriftDeleted.WithLabelValues("compute_instance").Add(float64(deleted))
+	metrics.LiveComputeInstances.Set(float64(len(osacInstances)))
 	r.logger.Info("reconciled compute instances",
 		"osac_count", len(osacInstances),
 		"inventory_count", len(knownInstances),
@@ -138,6 +146,10 @@ func (r *Reconciler) reconcileComputeInstances(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcileClusters(ctx context.Context) {
+	start := time.Now()
+	defer func() {
+		metrics.ReconcileDuration.WithLabelValues("cluster").Observe(time.Since(start).Seconds())
+	}()
 	osacClusters, err := r.client.ListClusters(ctx)
 	if err != nil {
 		r.logger.Error("failed to list OSAC clusters", "error", err)
@@ -195,6 +207,9 @@ func (r *Reconciler) reconcileClusters(ctx context.Context) {
 		}
 	}
 
+	metrics.ReconcileDriftCreated.WithLabelValues("cluster").Add(float64(created))
+	metrics.ReconcileDriftDeleted.WithLabelValues("cluster").Add(float64(deleted))
+	metrics.LiveClusters.Set(float64(len(osacClusters)))
 	r.logger.Info("reconciled clusters",
 		"osac_count", len(osacClusters),
 		"inventory_count", len(knownClusters),

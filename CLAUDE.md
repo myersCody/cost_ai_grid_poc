@@ -157,6 +157,8 @@ inventory-watcher/
     inventory/models.go          All Go struct types
     ingest/handler.go            HTTP API (events, quotas, health)
     config/config.go             Environment variable config
+    metrics/metrics.go           Prometheus metric definitions
+    metrics/middleware.go        HTTP metrics + request logging middleware
 ```
 
 ## Spec References

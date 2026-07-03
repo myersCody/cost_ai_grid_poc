@@ -9,7 +9,8 @@
 
 | Method | Path | Description | Handler | Tests |
 |---|---|---|---|---|
-| GET | `/api/v1/health` | Health check | inline in `ServeMux` | `TestHealthEndpoint` |
+| GET | `/healthz` | Kubernetes liveness probe | `handleLiveness` | `TestLivenessProbe` |
+| GET | `/readyz` | Kubernetes readiness probe (pings DB) | `handleReadiness` | `TestReadinessProbe` |
 | POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS, IPP) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestVMHeartbeat`, `TestIngestClusterHeartbeat`, `TestIngestIPPAuthoritativeFormat`, `TestIngestVMaaSAuthoritativeFormat`, `TestIngestCaaSAuthoritativeFormat` |
 | GET | `/api/v1/quotas/{tenant_id}` | Quota status with alerts | `handleQuotaStatus` | `TestQuotaStatus`, `TestQuotaStatusMissingTenant`, `TestQuotaStatusWithConsumption` |
 | GET | `/api/v1/reports/costs` | Cost report (JSON/CSV, group by tenant/type/meter/resource) | `handleCostReport` | — |
@@ -23,14 +24,30 @@
 
 ---
 
-## GET /api/v1/health
+## GET /healthz — Liveness Probe
 
-Health check. Returns 200 if the service is running.
+Returns 200 if the process is alive. No dependency checks.
 
 **Response:** `200 OK`
 ```json
 {"status":"ok"}
 ```
+
+---
+
+## GET /readyz — Readiness Probe
+
+Returns 200 if the service can accept traffic. Pings the PostgreSQL
+connection pool with a 2-second timeout.
+
+**Responses:**
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200 OK` | `{"status":"ready"}` | Database reachable |
+| `503 Service Unavailable` | `{"status":"not_ready","error":"database unreachable"}` | Database ping failed |
+
+**Auth:** Exempt from JWT authentication (K8s probes don't carry tokens).
 
 ---
 
@@ -244,3 +261,17 @@ These are not HTTP endpoints but data flows consumed from OSAC:
 | OSAC REST Gateway | `GET /api/fulfillment/v1/projects` | List projects | [`ListProjects`](../inventory-watcher/internal/osac/client.go) |
 
 See [gRPC Messages Catalog](grpc-messages-catalog.md) for the full message definitions.
+
+---
+
+## Metrics Server (separate port)
+
+Prometheus metrics are served on a **separate port** (default `:9000`)
+without authentication, following the RHT pattern from Koku and
+chrome-service-backend.
+
+| Method | Path | Port | Description |
+|---|---|---|---|
+| GET | `/metrics` | `METRICS_PORT` (default 9000) | Prometheus text format |
+
+See [observability plan](observability.md) for the full metric list.

@@ -330,6 +330,7 @@ See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
 |---|---|
 | [gRPC Messages Catalog](grpc-messages-catalog.md) | OSAC proto messages we consume |
 | [API Reference](api-reference.md) | HTTP endpoints we expose |
+| [Observability Plan](observability.md) | Metrics, logging, probes, shutdown (P1+P2 done) |
 | [Rating Engine Options](research/rating-engine-options.md) | CloudKitty, GoRules, Drools evaluation |
 | [req1 Gap Analysis](req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
 | [req2 Gap Analysis](req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |

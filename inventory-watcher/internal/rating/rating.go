@@ -2,10 +2,12 @@ package rating
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 )
 
 // Rater periodically processes unrated metering entries, looks up applicable
@@ -36,6 +38,8 @@ func (r *Rater) Run(ctx context.Context) error {
 }
 
 func (r *Rater) sweep(ctx context.Context) {
+	start := time.Now()
+
 	entries, err := r.store.UnratedMeteringEntries(ctx, r.batch)
 	if err != nil {
 		r.logger.Error("failed to fetch unrated entries", "error", err)
@@ -74,10 +78,12 @@ func (r *Rater) sweep(ctx context.Context) {
 			r.logger.Error("failed to insert cost entry", "metering_id", me.ID, "error", err)
 			continue
 		}
+		metrics.CostEntriesCreated.WithLabelValues(me.ResourceType, rate.CostType).Inc()
 		rated++
 	}
 
 	r.logger.Info("rating sweep complete", "rated", rated, "skipped", skipped)
+	metrics.RatingSweepDuration.Observe(time.Since(start).Seconds())
 
 	r.evaluateThresholds(ctx)
 }
@@ -128,6 +134,7 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 						r.logger.Info("threshold alert fired",
 							"tenant", tenantID, "meter", q.MeterName,
 							"threshold", threshold, "consumed", consumed, "limit", q.LimitValue)
+						metrics.AlertsFiredTotal.WithLabelValues(fmt.Sprintf("%.0f", threshold)).Inc()
 						fired++
 					}
 				}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 )
 
 // Meter runs a periodic sweep of all billable resources and produces
@@ -43,11 +44,14 @@ func (m *Meter) Run(ctx context.Context) error {
 }
 
 func (m *Meter) sweep(ctx context.Context) {
-	now := time.Now().UTC()
+	start := time.Now()
+	now := start.UTC()
 
 	m.meterComputeInstances(ctx, now)
 	m.meterClusters(ctx, now)
 	m.meterBareMetalInstances(ctx, now)
+
+	metrics.MeteringSweepDuration.Observe(time.Since(start).Seconds())
 }
 
 func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
@@ -74,6 +78,8 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
 				m.logger.Error("failed to insert metering entry",
 					"resource", inst.InstanceID, "meter", entry.MeterName, "error", err)
+			} else {
+				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
 
@@ -148,6 +154,8 @@ func (m *Meter) meterClusters(ctx context.Context, now time.Time) {
 			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
 				m.logger.Error("failed to insert cluster metering entry",
 					"resource", cl.ClusterID, "meter", entry.MeterName, "error", err)
+			} else {
+				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
 
@@ -232,6 +240,8 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 		for _, entry := range entries {
 			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
 				m.logger.Error("failed to insert BM metering entry", "resource", inst.InstanceID, "error", err)
+			} else {
+				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
 
@@ -317,6 +327,8 @@ func (m *Meter) MeterMaaSEvent(ctx context.Context, usage MaaSUsage) {
 		if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
 			m.logger.Error("failed to insert MaaS metering entry",
 				"model", usage.ModelID, "meter", entry.MeterName, "error", err)
+		} else {
+			metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 		}
 	}
 

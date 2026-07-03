@@ -13,6 +13,7 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 )
 
 // CloudEvent is a generic CloudEvents 1.0 envelope. The Data field is
@@ -120,10 +121,6 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
 	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
-	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		writeJSON(w, map[string]string{"status": "ok"})
-	})
 	mux.HandleFunc("GET /healthz", h.handleLiveness)
 	mux.HandleFunc("GET /readyz", h.handleReadiness)
 	if h.cfg != nil && h.cfg.DebugDashboard {
@@ -180,6 +177,7 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inserted {
+		metrics.EventsProcessedTotal.WithLabelValues(ce.Type, "duplicate").Inc()
 		w.WriteHeader(http.StatusConflict)
 		writeJSON(w, map[string]string{"status": "duplicate"})
 		return
@@ -198,11 +196,13 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if processingErr != nil {
+		metrics.EventsProcessedTotal.WithLabelValues(ce.Type, "error").Inc()
 		h.logger.Error("event processing failed", "error", processingErr, "event_id", ce.ID, "type", ce.Type)
 		writeErrorJSON(w, "event stored but processing failed", http.StatusInternalServerError)
 		return
 	}
 
+	metrics.EventsProcessedTotal.WithLabelValues(ce.Type, "accepted").Inc()
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]string{"status": "accepted"})
 }
@@ -670,9 +670,15 @@ func (h *Handler) handleLiveness(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
-// handleReadiness implements Kubernetes readiness probe.
-// Returns 200 if the service is ready to accept traffic.
 func (h *Handler) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := h.store.Pool().Ping(ctx); err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, map[string]string{"status": "not_ready", "error": "database unreachable"})
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	writeJSON(w, map[string]string{"status": "ready"})
 }

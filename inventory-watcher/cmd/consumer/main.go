@@ -2,20 +2,26 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/osac-project/cost-event-consumer/internal/authn"
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/rating"
@@ -25,11 +31,18 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
-
 	cfg := config.Load()
+
+	logLevel := parseLogLevel(cfg.LogLevel)
+	var logHandler slog.Handler
+	opts := &slog.HandlerOptions{Level: logLevel}
+	if cfg.LogFormat == "json" {
+		logHandler = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		logHandler = slog.NewTextHandler(os.Stderr, opts)
+	}
+	logger := slog.New(logHandler)
+
 	if err := cfg.Validate(); err != nil {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(1)
@@ -91,11 +104,29 @@ func main() {
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error { return w.Run(ctx) })
-	g.Go(func() error { return r.Run(ctx) })
-	g.Go(func() error { return s.Run(ctx) })
-	g.Go(func() error { return m.Run(ctx) })
-	g.Go(func() error { return rt.Run(ctx) })
+	g.Go(safeGo(logger, "watcher", func() error { return w.Run(ctx) }))
+	g.Go(safeGo(logger, "reconciler", func() error { return r.Run(ctx) }))
+	g.Go(safeGo(logger, "summarizer", func() error { return s.Run(ctx) }))
+	g.Go(safeGo(logger, "metering", func() error { return m.Run(ctx) }))
+	g.Go(safeGo(logger, "rating", func() error { return rt.Run(ctx) }))
+
+	// Metrics server on a separate port (no auth).
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", promhttp.Handler())
+	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metricsMux}
+	g.Go(func() error {
+		logger.Info("metrics endpoint listening", "addr", ":"+cfg.MetricsPort)
+		if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return metricsSrv.Shutdown(shutdownCtx)
+	})
 
 	if cfg.IngestListenAddr != "" {
 		h := ingest.NewHandler(store, m, cfg, logger)
@@ -108,18 +139,24 @@ func main() {
 
 		srv := &http.Server{
 			Addr:           cfg.IngestListenAddr,
-			Handler:        auth.Wrap(h.ServeMux()),
+			Handler:        metrics.RequestLogger(logger, metrics.HTTPMiddleware(panicRecovery(logger, auth.Wrap(h.ServeMux())))),
 			ReadTimeout:    10 * time.Second,
 			WriteTimeout:   10 * time.Second,
 			MaxHeaderBytes: 1 << 20,
 		}
 		g.Go(func() error {
 			logger.Info("ingest endpoint listening", "addr", cfg.IngestListenAddr)
-			return srv.ListenAndServe()
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				return err
+			}
+			return nil
 		})
 		g.Go(func() error {
 			<-ctx.Done()
-			return srv.Close()
+			logger.Info("shutting down ingest server, draining in-flight requests")
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer shutdownCancel()
+			return srv.Shutdown(shutdownCtx)
 		})
 	}
 
@@ -129,4 +166,46 @@ func main() {
 	}
 
 	logger.Info("cost-event-consumer stopped")
+}
+
+func safeGo(logger *slog.Logger, name string, fn func() error) func() error {
+	return func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("goroutine panic", "component", name,
+					"error", r, "stack", string(debug.Stack()))
+				err = fmt.Errorf("goroutine %s panicked: %v", name, r)
+			}
+		}()
+		return fn()
+	}
+}
+
+func panicRecovery(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				logger.Error("http handler panic", "error", err,
+					"method", r.Method, "path", r.URL.Path,
+					"stack", string(debug.Stack()))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(`{"error":"internal server error"}`))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
