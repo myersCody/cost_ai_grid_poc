@@ -8,17 +8,17 @@
 
 | Priority | Total | Done | Partial | Not Started |
 |---|---|---|---|---|
-| CRITICAL | 5 | 4 | 0 | 1 |
+| CRITICAL | 5 | 4 | 1 | 0 |
 | HIGH | 8 | 6 | 1 | 1 |
 | MEDIUM | 2 | 1 | 1 | 0 |
 | Must Have | 1 | 1 | 0 | 0 |
-| **Total** | **16** | **12** | **2** | **2** |
+| **Total** | **16** | **12** | **3** | **1** |
 
 ## Full Requirements Status
 
 | Req | Priority | Title | Status | Blocker | Details |
 |---|---|---|---|---|---|
-| POC-ENV | CRITICAL | On-prem deployment | Not started | RHCM team scope | N/A — deployment, not consumer |
+| POC-ENV | CRITICAL | On-prem deployment | Partial | — | CRC deployment guide: [checklist](dev/crc-deployment-checklist.md), [full guide](dev/crc-full-deployment.md), [OSAC on CRC](dev/crc-osac-deployment.md) |
 | POC-ARCH | CRITICAL | Capacity-based charging | **Done** | — | Standalone Go component, heartbeat-driven |
 | REQ-1 | CRITICAL | OSAC integration | **Done** | — | [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md) |
 | REQ-1a | HIGH | Cluster lifecycle | **Done** | Verify "cluster orders" = Cluster | Tracking clusters with node sets |
@@ -51,11 +51,20 @@
 ### CRITICAL Requirements
 
 ### POC-ENV — On-Premise Deployment
-**Status:** Not started
+**Status:** Partial
 **Spec:** [csv_poc_requirements_summary.md#poc-env](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#poc-env--on-premise-deployment)
 
-Deployment concern — outside scope of our consumer component. Requires
-Helm chart / OLM work for RHCM on-prem.
+CRC deployment is documented and tested. Full RHCM on-prem (Helm/OLM)
+is a separate concern owned by the RHCM team.
+
+| Step | Status | Reference |
+|---|---|---|
+| CRC deployment checklist | Done | [crc-deployment-checklist.md](dev/crc-deployment-checklist.md) |
+| Full stack guide (OSAC + consumer + DB) | Done | [crc-full-deployment.md](dev/crc-full-deployment.md) |
+| OSAC on CRC (cert-manager, CNPG, OIDC) | Done | [crc-osac-deployment.md](dev/crc-osac-deployment.md) |
+| Dev setup guide | Done | [crc-dev-setup.md](dev/crc-dev-setup.md) |
+| Deployment plan (CRC → production path) | Done | [deployment-plan.md](deployment-plan.md) |
+| RHCM Helm chart / OLM | Not started | RHCM team scope |
 
 ---
 
