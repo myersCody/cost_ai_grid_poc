@@ -72,12 +72,24 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// ── Health endpoint ──
+// ── Health endpoints ──
 
-func TestHealthEndpoint(t *testing.T) {
-	resp, err := http.Get(testServer.URL + "/api/v1/health")
+func TestLivenessProbe(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/healthz")
 	if err != nil {
-		t.Fatalf("health request failed: %v", err)
+		t.Fatalf("liveness request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestReadinessProbe(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/readyz")
+	if err != nil {
+		t.Fatalf("readiness request failed: %v", err)
 	}
 	defer resp.Body.Close()
 

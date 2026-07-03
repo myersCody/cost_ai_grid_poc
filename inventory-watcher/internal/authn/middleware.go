@@ -92,7 +92,7 @@ func (m *Middleware) Wrap(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/health", "/healthz", "/readyz", "/metrics":
+		case "/healthz", "/readyz", "/metrics":
 			next.ServeHTTP(w, r)
 			return
 		}

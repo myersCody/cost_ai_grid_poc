@@ -121,10 +121,6 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
 	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
-	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		writeJSON(w, map[string]string{"status": "ok"})
-	})
 	mux.HandleFunc("GET /healthz", h.handleLiveness)
 	mux.HandleFunc("GET /readyz", h.handleReadiness)
 	if h.cfg != nil && h.cfg.DebugDashboard {
