@@ -410,3 +410,57 @@ pre-commit hooks. Tests exist but are not enforced.
 - **#10** JSON injection → `writeErrorJSON` helper with `json.NewEncoder`
 - **#11** Scanner buffer → 64KB → 1MB
 - **#12** N+1 query → batch instance type lookup via `ListAllInstanceTypes`
+
+---
+
+### Fix Verification (2026-07-03, against `main` branch)
+
+| # | Finding | Claimed | Verified | Residual |
+|---|---------|---------|----------|----------|
+| 1 | No auth on API endpoints | Fixed | **PARTIALLY FIXED** | Two gaps — see notes below |
+| 2 | Silent error swallowing | Fixed | **FIXED** | Minor: `MeterMaaSEvent` void return |
+| 3 | Missing OSAC pagination | Fixed | **FIXED** | Clean |
+| 5 | No HTTP server limits | Fixed | **FIXED** | Clean |
+| 6 | Division by zero in rating | Fixed | **FIXED** | Clean |
+| 7 | Missing input validation | Fixed | **FIXED** | Minor: `handleBalanceCheck` URL param unchecked |
+| 10 | JSON injection in errors | Fixed | **FIXED** | Clean |
+| 11 | Scanner buffer size | Fixed | **FIXED** | Clean |
+| 12 | N+1 query in summarizer | Fixed | **FIXED** | Minor: `ListAllInstanceTypes` error discarded |
+
+**Result:** 8 of 9 cleanly fixed. #1 is partially fixed with two residual issues.
+
+#### #1 — Residual A: Auth silently disabled when `AUTH_ISSUER_URL` unset
+
+`authn/middleware.go:44-47`: when `issuerURL` is empty, `New()` logs a WARN
+and `Wrap()` becomes a pass-through — all requests pass unauthenticated.
+`config.go:Validate()` does not require `AUTH_ISSUER_URL`. A deployment that
+forgets this env var silently runs wide open.
+
+#### #1 — Residual B: K8s probes blocked by auth
+
+`authn/middleware.go:94` only exempts `/api/v1/health` from JWT auth.
+`handler.go:127-128` registers `/healthz` and `/readyz` — these are NOT
+exempt. When auth is enabled, kubelet probes get 401, causing pod kills.
+
+**Note:** PR #9 (observability branch) fixes residual B by changing the
+exemption to `case "/healthz", "/readyz", "/metrics"`.
+
+#### #2 — Residual: `MeterMaaSEvent` void return
+
+`metering.go:307`: `MeterMaaSEvent` has no error return. Individual
+`InsertMeteringEntry` failures inside are logged but not propagated.
+`handleModelEvent` returns `nil` → client gets HTTP 202 even if metering
+entries were not created. The model upsert itself does fail properly, and
+the raw event is always stored.
+
+#### #7 — Residual: `handleBalanceCheck` URL param
+
+`handler.go:611`: extracts `customerID` from URL path without length check.
+Read-only GET with parameterized queries — no injection risk, just
+inconsistent with the validation on other endpoints.
+
+#### #12 — Residual: error discarded in summarizer
+
+`summarizer.go:53`: `allTypes, _ := s.store.ListAllInstanceTypes(ctx)`.
+If the query fails, type map is empty and instances needing enrichment
+silently get zero-value cores/memory.
