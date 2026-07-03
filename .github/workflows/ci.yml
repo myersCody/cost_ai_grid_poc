@@ -17,9 +17,9 @@ jobs:
       run:
         working-directory: inventory-watcher
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: inventory-watcher/go.mod
           cache-dependency-path: inventory-watcher/go.sum
@@ -42,9 +42,9 @@ jobs:
       run:
         working-directory: inventory-watcher
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: inventory-watcher/go.mod
           cache-dependency-path: inventory-watcher/go.sum
@@ -78,9 +78,9 @@ jobs:
           --health-retries=5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: inventory-watcher/go.mod
           cache-dependency-path: inventory-watcher/go.sum
@@ -94,11 +94,16 @@ jobs:
     name: Container Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
 
       - name: Build container image
-        run: |
-          docker build \
-            -f inventory-watcher/Containerfile \
-            -t cost-event-consumer:ci \
-            inventory-watcher/
+        uses: docker/build-push-action@v7
+        with:
+          context: inventory-watcher
+          file: inventory-watcher/Containerfile
+          push: false
+          tags: cost-event-consumer:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
