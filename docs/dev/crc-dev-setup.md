@@ -312,7 +312,7 @@ oc create secret generic cost-consumer-secrets \
 
 # Update consumer deployment with OSAC service URL
 oc set env deployment/cost-event-consumer \
-  OSAC_BASE_URL=http://fulfillment-rest-gateway.osac.svc:8000 \
+  OSAC_BASE_URL=http://osac-rest.osac.svc:8000 \
   -n cost-mgmt
 
 # Restart consumer to pick up changes
@@ -323,7 +323,7 @@ oc rollout restart deployment/cost-event-consumer -n cost-mgmt
 
 ```bash
 # Port-forward OSAC REST gateway
-oc port-forward -n osac svc/fulfillment-rest-gateway 8011:8000 &
+oc port-forward -n osac svc/osac-rest 8011:8000 &
 
 # Check OSAC API
 curl -s http://localhost:8011/api/fulfillment/v1/clusters \

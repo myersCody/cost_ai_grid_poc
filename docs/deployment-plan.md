@@ -163,7 +163,7 @@ spec:
               containerPort: 9000
           env:
             - name: OSAC_BASE_URL
-              value: "http://fulfillment-rest-gateway.osac.svc:8000"
+              value: "http://osac-rest.osac.svc:8000"
             - name: OSAC_TOKEN
               valueFrom:
                 secretKeyRef:
