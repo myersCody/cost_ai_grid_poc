@@ -1,0 +1,40 @@
+{
+  "custom_metrics": [
+    {
+      "event_type": "osac.gpu.lifecycle",
+      "resource_type": "gpu_instance",
+      "resource_id_field": "instance_id",
+      "tenant_id_field": "tenant_id",
+      "meters": [
+        {
+          "meter_name": "gpu_memory_gib_seconds",
+          "value_field": "gpu_memory_gib_seconds",
+          "unit": "gib_seconds"
+        },
+        {
+          "meter_name": "gpu_compute_seconds",
+          "value_field": "gpu_compute_seconds",
+          "unit": "seconds"
+        }
+      ]
+    },
+    {
+      "event_type": "custom.storage.usage",
+      "resource_type": "storage_volume",
+      "resource_id_field": "volume_id",
+      "tenant_id_field": "tenant_id",
+      "meters": [
+        {
+          "meter_name": "storage_gib_seconds",
+          "value_field": "storage_gib_seconds",
+          "unit": "gib_seconds"
+        },
+        {
+          "meter_name": "storage_iops",
+          "value_field": "iops_count",
+          "unit": "iops"
+        }
+      ]
+    }
+  ]
+}

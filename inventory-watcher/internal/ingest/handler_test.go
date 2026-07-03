@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
 	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
@@ -780,4 +782,155 @@ func TestBalanceCheckResponseFormat(t *testing.T) {
 	}
 	// has_access is boolean — just verify the field was decoded (Go defaults to false)
 	// The actual value depends on quota state, so we just check the struct is well-formed
+}
+
+// ── Custom metrics ──
+
+func writeTestConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "custom-metrics.json")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestIngestCustomMetricEvent(t *testing.T) {
+	configJSON := `{
+		"custom_metrics": [{
+			"event_type": "test.gpu.lifecycle",
+			"resource_type": "gpu_instance",
+			"resource_id_field": "instance_id",
+			"tenant_id_field": "tenant_id",
+			"meters": [
+				{"meter_name": "gpu_memory_gib_seconds", "value_field": "gpu_memory_gib_seconds", "unit": "gib_seconds"},
+				{"meter_name": "gpu_compute_seconds", "value_field": "gpu_compute_seconds", "unit": "seconds"}
+			]
+		}]
+	}`
+	cfgPath := writeTestConfig(t, configJSON)
+	registry, err := custommetrics.LoadFromFile(cfgPath, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := ingest.NewHandler(testStore, testMeter, nil, registry, testLogger)
+	srv := httptest.NewServer(handler.ServeMux())
+	defer srv.Close()
+
+	ts := time.Now().UnixNano()
+	eventID := fmt.Sprintf("test-custom-%d", ts)
+	resourceID := fmt.Sprintf("gpu-i-test-%d", ts)
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "test.gpu.lifecycle",
+		"source":      "test",
+		"id":          eventID,
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"data": map[string]interface{}{
+			"instance_id":            resourceID,
+			"tenant_id":             "tenant-acme",
+			"gpu_memory_gib_seconds": 245760.0,
+			"gpu_compute_seconds":    3600.0,
+			"duration_seconds":       3600,
+		},
+	}
+
+	body, _ := json.Marshal(event)
+	resp, err := http.Post(srv.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		var respBody map[string]string
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		t.Fatalf("expected 202, got %d: %v", resp.StatusCode, respBody)
+	}
+
+	ctx := context.Background()
+
+	var count int
+	err = testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM raw_events WHERE event_id = $1", eventID).Scan(&count)
+	if err != nil || count != 1 {
+		t.Errorf("raw event not stored: count=%d, err=%v", count, err)
+	}
+
+	err = testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM metering_entries WHERE resource_id = $1 AND resource_type = 'gpu_instance'", resourceID).Scan(&count)
+	if err != nil || count != 2 {
+		t.Errorf("expected 2 metering entries, got %d (err=%v)", count, err)
+	}
+
+	var meterName string
+	var value float64
+	err = testStore.Pool().QueryRow(ctx,
+		"SELECT meter_name, value FROM metering_entries WHERE resource_id = $1 AND meter_name = 'gpu_memory_gib_seconds'", resourceID).Scan(&meterName, &value)
+	if err != nil {
+		t.Fatalf("query metering entry: %v", err)
+	}
+	if value != 245760.0 {
+		t.Errorf("gpu_memory_gib_seconds value: got %f, want 245760.0", value)
+	}
+}
+
+func TestIngestCustomMetricEvent_MissingField(t *testing.T) {
+	configJSON := `{
+		"custom_metrics": [{
+			"event_type": "test.gpu.partial",
+			"resource_type": "gpu_instance",
+			"resource_id_field": "instance_id",
+			"tenant_id_field": "tenant_id",
+			"meters": [
+				{"meter_name": "gpu_memory_gib_seconds", "value_field": "gpu_memory_gib_seconds", "unit": "gib_seconds"},
+				{"meter_name": "gpu_compute_seconds", "value_field": "gpu_compute_seconds", "unit": "seconds"}
+			]
+		}]
+	}`
+	cfgPath := writeTestConfig(t, configJSON)
+	registry, err := custommetrics.LoadFromFile(cfgPath, testLogger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := ingest.NewHandler(testStore, testMeter, nil, registry, testLogger)
+	srv := httptest.NewServer(handler.ServeMux())
+	defer srv.Close()
+
+	ts := time.Now().UnixNano()
+	eventID := fmt.Sprintf("test-partial-%d", ts)
+	resourceID := fmt.Sprintf("gpu-i-partial-%d", ts)
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "test.gpu.partial",
+		"source":      "test",
+		"id":          eventID,
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"data": map[string]interface{}{
+			"instance_id":         resourceID,
+			"tenant_id":           "tenant-acme",
+			"gpu_compute_seconds": 1800.0,
+		},
+	}
+
+	body, _ := json.Marshal(event)
+	resp, err := http.Post(srv.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	}
+
+	ctx := context.Background()
+	var count int
+	err = testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM metering_entries WHERE resource_id = $1", resourceID).Scan(&count)
+	if err != nil || count != 1 {
+		t.Errorf("expected 1 metering entry (missing field skipped), got %d (err=%v)", count, err)
+	}
 }
