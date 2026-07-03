@@ -20,15 +20,15 @@
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Structured logging | Done | `log/slog` TextHandler, `LOG_LEVEL` env var |
-| Basic health | Minimal | `GET /api/v1/health` — no dependency checks |
-| Graceful shutdown | Done | signal.NotifyContext, errgroup, pool.Close() |
-| Debug dashboard | Done | `/debug/dashboard`, `/api/v1/debug/config` |
-| Prometheus metrics | Missing | No `/metrics` endpoint |
-| Kubernetes probes | Missing | No `/healthz`, `/readyz`, `/startupz` |
-| Crash reporting | Missing | No GlitchTip/Sentry integration |
-| Distributed tracing | Missing | No OpenTelemetry |
-| Request logging | Missing | No HTTP request/response middleware |
+| Structured logging | **Done** | `log/slog`, `LOG_LEVEL` wired, `LOG_FORMAT=json` for OpenShift |
+| Kubernetes probes | **Done** | `/healthz` (liveness), `/readyz` (DB ping), auth-exempt |
+| Graceful shutdown | **Done** | `srv.Shutdown()` with 30s drain, errgroup cancellation |
+| Panic recovery | **Done** | HTTP middleware + `defer/recover` on all goroutines |
+| Prometheus metrics | **Done** | Separate `:9000/metrics` port, pipeline counters/histograms/gauges |
+| Request logging | **Done** | Method, path, status, duration_ms, request_id on every request |
+| Debug dashboard | **Done** | `/debug/dashboard`, `/api/v1/debug/config` |
+| Crash reporting | Not needed | GlitchTip/Sentry deferred — not required for PoC |
+| Distributed tracing | Not needed | OpenTelemetry deferred — post-GA |
 
 ---
 
@@ -503,12 +503,12 @@ go func() {
 
 ## Implementation Priority
 
-| Phase | Items | Effort | When |
-|-------|-------|--------|------|
-| **P1 — PoC** | Kubernetes probes (healthz/readyz), JSON logging, panic recovery | Small | Now |
-| **P2 — Pre-production** | Prometheus metrics, request logging middleware, graceful shutdown | Medium | Before first cluster deployment |
-| **P3 — Production** | GlitchTip/Sentry, ServiceMonitor, alerting rules | Medium | Before GA |
-| **P4 — Post-GA** | OpenTelemetry tracing, log sampling, custom dashboards | Large | After stable operation |
+| Phase | Items | Effort | Status |
+|-------|-------|--------|--------|
+| **P1 — PoC** | Kubernetes probes (healthz/readyz), JSON logging, panic recovery | Small | **Done** |
+| **P2 — Pre-production** | Prometheus metrics, request logging middleware, graceful shutdown | Medium | **Done** |
+| **P3 — Production** | GlitchTip/Sentry, ServiceMonitor, alerting rules | Medium | Not needed for PoC |
+| **P4 — Post-GA** | OpenTelemetry tracing, log sampling, custom dashboards | Large | Not needed for PoC |
 
 ---
 
@@ -516,15 +516,13 @@ go func() {
 
 | Var | Default | Phase | Description |
 |-----|---------|-------|-------------|
-| `LOG_LEVEL` | `info` | Exists | debug, info, warn, error |
-| `LOG_FORMAT` | `text` | P1 | text or json |
-| `DEBUG_DASHBOARD` | `true` | Exists | Enable `/debug/dashboard` |
-| `METRICS_ENABLED` | `true` | P2 | Enable `/metrics` |
-| `SENTRY_DSN` | (empty) | P3 | GlitchTip/Sentry DSN |
-| `ENVIRONMENT` | `development` | P3 | Environment tag |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | (empty) | P4 | OTLP collector |
-| `SHUTDOWN_TIMEOUT` | `30s` | P2 | Drain timeout |
-| `SHUTDOWN_DRAIN_DELAY` | `5s` | P2 | Pre-shutdown delay |
+| `LOG_LEVEL` | `info` | **Done** | debug, info, warn, error |
+| `LOG_FORMAT` | `text` | **Done** | text or json |
+| `METRICS_PORT` | `9000` | **Done** | Separate port for Prometheus scraping |
+| `DEBUG_DASHBOARD` | `true` | **Done** | Enable `/debug/dashboard` |
+| `SENTRY_DSN` | (empty) | P3 | GlitchTip/Sentry DSN (not needed for PoC) |
+| `ENVIRONMENT` | `development` | P3 | Environment tag (not needed for PoC) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (empty) | P4 | OTLP collector (not needed for PoC) |
 
 ---
 
