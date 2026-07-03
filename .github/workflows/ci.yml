@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: inventory-watcher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: inventory-watcher/go.mod
+          cache-dependency-path: inventory-watcher/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: inventory-watcher
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: inventory-watcher
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: inventory-watcher/go.mod
+          cache-dependency-path: inventory-watcher/go.sum
+
+      - name: Build consumer
+        run: go build -o /dev/null ./cmd/consumer/
+
+      - name: Build maas-simulator
+        run: go build -o /dev/null ./cmd/maas-simulator/
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: inventory-watcher
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DB: costdb_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd="pg_isready -U user -d costdb_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: inventory-watcher/go.mod
+          cache-dependency-path: inventory-watcher/go.sum
+
+      - name: Run tests
+        env:
+          TEST_DB_URL: postgres://user:pass@localhost:5434/costdb_test
+        run: go test -race -count=1 -timeout 120s ./...
+
+  container-build:
+    name: Container Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build container image
+        run: |
+          docker build \
+            -f inventory-watcher/Containerfile \
+            -t cost-event-consumer:ci \
+            inventory-watcher/
