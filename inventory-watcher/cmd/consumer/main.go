@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -102,11 +104,11 @@ func main() {
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error { return w.Run(ctx) })
-	g.Go(func() error { return r.Run(ctx) })
-	g.Go(func() error { return s.Run(ctx) })
-	g.Go(func() error { return m.Run(ctx) })
-	g.Go(func() error { return rt.Run(ctx) })
+	g.Go(safeGo(logger, "watcher", func() error { return w.Run(ctx) }))
+	g.Go(safeGo(logger, "reconciler", func() error { return r.Run(ctx) }))
+	g.Go(safeGo(logger, "summarizer", func() error { return s.Run(ctx) }))
+	g.Go(safeGo(logger, "metering", func() error { return m.Run(ctx) }))
+	g.Go(safeGo(logger, "rating", func() error { return rt.Run(ctx) }))
 
 	// Metrics server on a separate port (no auth).
 	metricsMux := http.NewServeMux()
@@ -135,18 +137,24 @@ func main() {
 
 		srv := &http.Server{
 			Addr:           cfg.IngestListenAddr,
-			Handler:        metrics.HTTPMiddleware(auth.Wrap(h.ServeMux())),
+			Handler:        panicRecovery(logger, metrics.HTTPMiddleware(auth.Wrap(h.ServeMux()))),
 			ReadTimeout:    10 * time.Second,
 			WriteTimeout:   10 * time.Second,
 			MaxHeaderBytes: 1 << 20,
 		}
 		g.Go(func() error {
 			logger.Info("ingest endpoint listening", "addr", cfg.IngestListenAddr)
-			return srv.ListenAndServe()
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				return err
+			}
+			return nil
 		})
 		g.Go(func() error {
 			<-ctx.Done()
-			return srv.Close()
+			logger.Info("shutting down ingest server, draining in-flight requests")
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer shutdownCancel()
+			return srv.Shutdown(shutdownCtx)
 		})
 	}
 
@@ -156,6 +164,32 @@ func main() {
 	}
 
 	logger.Info("cost-event-consumer stopped")
+}
+
+func safeGo(logger *slog.Logger, name string, fn func() error) func() error {
+	return func() error {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("goroutine panic", "component", name,
+					"error", r, "stack", string(debug.Stack()))
+			}
+		}()
+		return fn()
+	}
+}
+
+func panicRecovery(logger *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if err := recover(); err != nil {
+				logger.Error("http handler panic", "error", err,
+					"method", r.Method, "path", r.URL.Path,
+					"stack", string(debug.Stack()))
+				http.Error(w, fmt.Sprintf(`{"error":"internal server error"}`), http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func parseLogLevel(s string) slog.Level {
