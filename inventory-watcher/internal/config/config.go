@@ -14,10 +14,11 @@ type Config struct {
 	ReconcileInterval  time.Duration
 	SummarizeInterval  time.Duration
 	LogLevel           string
-	LogFormat          string
-	IngestListenAddr   string
-	MetricsPort        string
-	AuthIssuerURL      string
+	LogFormat               string
+	IngestListenAddr        string
+	MetricsPort             string
+	CustomMetricsConfigPath string
+	AuthIssuerURL           string
 	DebugDashboard     bool
 }
 
@@ -30,10 +31,11 @@ type DiagnosticInfo struct {
 	MeteringInterval  string `json:"metering_interval"`
 	RatingInterval    string `json:"rating_interval"`
 	LogLevel          string `json:"log_level"`
-	LogFormat         string `json:"log_format"`
-	IngestListenAddr  string `json:"ingest_listen_addr"`
-	MetricsPort       string `json:"metrics_port"`
-	AuthIssuerURL     string `json:"auth_issuer_url"`
+	LogFormat               string `json:"log_format"`
+	IngestListenAddr        string `json:"ingest_listen_addr"`
+	MetricsPort             string `json:"metrics_port"`
+	CustomMetricsConfigPath string `json:"custom_metrics_config_path"`
+	AuthIssuerURL           string `json:"auth_issuer_url"`
 	DebugDashboard    bool   `json:"debug_dashboard"`
 	OSACTokenSet      bool   `json:"osac_token_set"`
 	OSACCACertSet     bool   `json:"osac_ca_cert_set"`
@@ -53,10 +55,11 @@ func (c *Config) Diagnostics() DiagnosticInfo {
 		MeteringInterval:  "60s",
 		RatingInterval:    "30s",
 		LogLevel:          c.LogLevel,
-		LogFormat:         c.LogFormat,
-		IngestListenAddr:  c.IngestListenAddr,
-		MetricsPort:       c.MetricsPort,
-		AuthIssuerURL:     c.AuthIssuerURL,
+		LogFormat:               c.LogFormat,
+		IngestListenAddr:        c.IngestListenAddr,
+		MetricsPort:             c.MetricsPort,
+		CustomMetricsConfigPath: c.CustomMetricsConfigPath,
+		AuthIssuerURL:           c.AuthIssuerURL,
 		DebugDashboard:    c.DebugDashboard,
 		OSACTokenSet:      c.OSACToken != "",
 		OSACCACertSet:     c.OSACCACert != "",
@@ -106,10 +109,11 @@ func Load() *Config {
 		ReconcileInterval: durationOrDefault("RECONCILE_INTERVAL", 1*time.Hour),
 		SummarizeInterval: durationOrDefault("SUMMARIZE_INTERVAL", 1*time.Hour),
 		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
-		LogFormat:         envOrDefault("LOG_FORMAT", "text"),
-		IngestListenAddr:  os.Getenv("INGEST_LISTEN_ADDR"),
-		MetricsPort:       envOrDefault("METRICS_PORT", "9000"),
-		AuthIssuerURL:    os.Getenv("AUTH_ISSUER_URL"),
+		LogFormat:               envOrDefault("LOG_FORMAT", "text"),
+		IngestListenAddr:        os.Getenv("INGEST_LISTEN_ADDR"),
+		MetricsPort:             envOrDefault("METRICS_PORT", "9000"),
+		CustomMetricsConfigPath: os.Getenv("CUSTOM_METRICS_CONFIG"),
+		AuthIssuerURL:           os.Getenv("AUTH_ISSUER_URL"),
 		DebugDashboard:   envOrDefault("DEBUG_DASHBOARD", "true") != "false",
 	}
 }

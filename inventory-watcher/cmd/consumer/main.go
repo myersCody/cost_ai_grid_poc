@@ -19,6 +19,7 @@ import (
 
 	"github.com/osac-project/cost-event-consumer/internal/authn"
 	"github.com/osac-project/cost-event-consumer/internal/config"
+	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
 	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
@@ -128,8 +129,18 @@ func main() {
 		return metricsSrv.Shutdown(shutdownCtx)
 	})
 
+	var cmRegistry *custommetrics.Registry
+	if cfg.CustomMetricsConfigPath != "" {
+		var cmErr error
+		cmRegistry, cmErr = custommetrics.LoadFromFile(cfg.CustomMetricsConfigPath, logger)
+		if cmErr != nil {
+			logger.Error("failed to load custom metrics config", "path", cfg.CustomMetricsConfigPath, "error", cmErr)
+			os.Exit(1)
+		}
+	}
+
 	if cfg.IngestListenAddr != "" {
-		h := ingest.NewHandler(store, m, cfg, logger)
+		h := ingest.NewHandler(store, m, cfg, cmRegistry, logger)
 
 		auth, err := authn.New(cfg.AuthIssuerURL, cfg.OSACCACert, logger)
 		if err != nil {

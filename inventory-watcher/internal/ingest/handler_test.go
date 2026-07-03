@@ -53,7 +53,7 @@ func TestMain(m *testing.M) {
 	}
 
 	testMeter = metering.New(testStore, 60*time.Second, testLogger)
-	handler := ingest.NewHandler(testStore, testMeter, nil, testLogger)
+	handler := ingest.NewHandler(testStore, testMeter, nil, nil, testLogger)
 	testServer = httptest.NewServer(handler.ServeMux())
 
 	if err := rating.SeedDefaultRates(ctx, testStore, testLogger); err != nil {

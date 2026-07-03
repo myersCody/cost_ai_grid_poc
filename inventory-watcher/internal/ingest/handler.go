@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/config"
+	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
@@ -103,14 +104,15 @@ const (
 )
 
 type Handler struct {
-	store  *inventory.Store
-	meter  *metering.Meter
-	cfg    *config.Config
-	logger *slog.Logger
+	store         *inventory.Store
+	meter         *metering.Meter
+	cfg           *config.Config
+	customMetrics *custommetrics.Registry
+	logger        *slog.Logger
 }
 
-func NewHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Config, logger *slog.Logger) *Handler {
-	return &Handler{store: store, meter: meter, cfg: cfg, logger: logger}
+func NewHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Config, customMetrics *custommetrics.Registry, logger *slog.Logger) *Handler {
+	return &Handler{store: store, meter: meter, cfg: cfg, customMetrics: customMetrics, logger: logger}
 }
 
 func (h *Handler) ServeMux() *http.ServeMux {
@@ -151,6 +153,12 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	resourceType, resourceID, tenantID := classifyEvent(ce)
+	if (resourceID == "" || tenantID == "") && h.customMetrics != nil && h.customMetrics.HasEventType(ce.Type) {
+		var dataMap map[string]interface{}
+		if err := json.Unmarshal(ce.Data, &dataMap); err == nil {
+			resourceType, resourceID, tenantID = h.customMetrics.ClassifyEvent(ce.Type, dataMap)
+		}
+	}
 	if resourceID == "" || tenantID == "" {
 		writeErrorJSON(w, "event data must include resource_id and tenant_id", http.StatusBadRequest)
 		return
@@ -192,7 +200,11 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 	case EventTypeModel, EventTypeInferenceTokens:
 		processingErr = h.handleModelEvent(ctx, ce)
 	default:
-		h.logger.Warn("unknown CloudEvent type", "type", ce.Type)
+		if h.customMetrics != nil && h.customMetrics.HasEventType(ce.Type) {
+			processingErr = h.customMetrics.ProcessEvent(ctx, h.store, ce.Type, ce.Data, ce.Time, h.logger)
+		} else {
+			h.logger.Warn("unknown CloudEvent type", "type", ce.Type)
+		}
 	}
 
 	if processingErr != nil {
