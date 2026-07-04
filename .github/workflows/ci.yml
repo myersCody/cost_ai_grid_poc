@@ -92,6 +92,7 @@ jobs:
         uses: gwatts/go-coverage-action@v2
         with:
           coverage-filename: inventory-watcher/coverage.out
+          working-directory: inventory-watcher
           fail-coverage: never
 
   links:
