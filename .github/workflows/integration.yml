@@ -146,9 +146,17 @@ jobs:
         run: |
           echo "=== Consumer logs ==="
           kubectl logs -n cost-mgmt deployment/cost-event-consumer --tail=50 || true
-          echo "=== OSAC gRPC logs ==="
-          kubectl logs -n osac deployment/osac-grpc --tail=30 || true
+          echo "=== OSAC gRPC logs (current) ==="
+          kubectl logs -n osac deployment/osac-grpc --tail=50 || true
+          echo "=== OSAC gRPC logs (previous) ==="
+          kubectl logs -n osac deployment/osac-grpc --previous --tail=50 || true
           echo "=== OSAC REST logs ==="
           kubectl logs -n osac deployment/osac-rest --tail=30 || true
-          echo "=== All pods ==="
-          kubectl get pods -A
+          echo "=== OSAC OIDC logs ==="
+          kubectl logs -n osac deployment/osac-oidc --tail=30 || true
+          echo "=== OSAC DB logs ==="
+          kubectl logs -n osac -l app=osac-db --tail=20 || true
+          echo "=== Pod status ==="
+          kubectl get pods -A -o wide
+          echo "=== Events ==="
+          kubectl get events -n osac --sort-by='.lastTimestamp' | tail -20 || true

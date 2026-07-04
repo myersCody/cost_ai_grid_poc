@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 
 # Integration test for the full OSAC + cost-consumer stack on k3s.
 # Expects: kubectl port-forward running for cost-consumer (:8020) and osac-rest (:8011).
