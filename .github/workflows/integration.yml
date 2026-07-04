@@ -116,19 +116,20 @@ jobs:
       - name: Deploy OSAC
         run: bash integration-test/deploy-osac.sh
 
-      - name: Ensure clean OSAC DB for migration
+      - name: Ensure clean OSAC DB and restart gRPC
         run: |
           echo "Waiting for OSAC DB pod to be truly ready..."
-          sleep 10
+          sleep 15
           kubectl wait --for=condition=ready pod -l app=osac-db -n osac --timeout=120s
           echo "Resetting schema to prevent dirty migration..."
           kubectl exec -n osac statefulset/osac-db -- \
             psql -U osacuser -d osacdb -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" || true
-          echo "Schema reset done, gRPC migration will run clean"
+          echo "Restarting gRPC to pick up clean DB..."
+          kubectl rollout restart deployment/osac-grpc -n osac
+          sleep 10
 
       - name: Wait for OSAC services
         run: |
-          sleep 10
           kubectl wait --for=condition=available deployment/osac-oidc -n osac --timeout=180s
           kubectl wait --for=condition=available deployment/osac-grpc -n osac --timeout=180s
           kubectl wait --for=condition=available deployment/osac-rest -n osac --timeout=180s
