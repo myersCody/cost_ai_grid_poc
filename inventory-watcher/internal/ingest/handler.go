@@ -259,10 +259,8 @@ func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent)
 		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_memory_gib_seconds", Value: float64(data.MemoryGiBSeconds), Unit: "gib_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
 	}
 
-	for _, entry := range entries {
-		if err := h.store.InsertMeteringEntry(ctx, entry); err != nil {
-			return err
-		}
+	if err := h.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+		return err
 	}
 
 	if err := h.store.UpdateComputeInstanceLastMetered(ctx, data.InstanceID, ce.Time); err != nil {
@@ -295,10 +293,8 @@ func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
 		entries = append(entries, inventory.MeteringEntry{ResourceType: "cluster", ResourceID: data.ClusterID, TenantID: data.TenantID, MeterName: "cluster_worker_node_seconds", Value: float64(data.WorkerNodeSeconds), Unit: "node_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time})
 	}
 
-	for _, entry := range entries {
-		if err := h.store.InsertMeteringEntry(ctx, entry); err != nil {
-			return err
-		}
+	if err := h.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+		return err
 	}
 
 	if err := h.store.UpdateClusterLastMetered(ctx, data.ClusterID, ce.Time); err != nil {

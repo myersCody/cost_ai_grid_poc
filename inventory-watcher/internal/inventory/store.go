@@ -306,6 +306,33 @@ func (s *Store) InsertMeteringEntry(ctx context.Context, entry MeteringEntry) er
 	return nil
 }
 
+func (s *Store) InsertMeteringEntryBatch(ctx context.Context, entries []MeteringEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if len(entries) == 1 {
+		return s.InsertMeteringEntry(ctx, entries[0])
+	}
+
+	query := "INSERT INTO metering_entries (raw_event_id, resource_type, resource_id, tenant_id, meter_name, value, unit, period_start, period_end) VALUES "
+	args := make([]interface{}, 0, len(entries)*9)
+	for i, e := range entries {
+		if i > 0 {
+			query += ", "
+		}
+		base := i * 9
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
+		args = append(args, e.RawEventID, e.ResourceType, e.ResourceID,
+			e.TenantID, e.MeterName, e.Value, e.Unit, e.PeriodStart, e.PeriodEnd)
+	}
+	_, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("batch insert %d metering entries: %w", len(entries), err)
+	}
+	return nil
+}
+
 // BillableComputeInstances returns alive compute instances in billable states.
 func (s *Store) BillableComputeInstances(ctx context.Context) ([]ComputeInstanceRecord, error) {
 	rows, err := s.pool.Query(ctx, `
