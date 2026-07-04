@@ -25,7 +25,10 @@ func (s *Store) Pool() *pgxpool.Pool {
 
 // RunMigrations creates the inventory tables if they don't exist.
 func (s *Store) RunMigrations(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, schema)
+	if _, err := s.pool.Exec(ctx, schema); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, schemaEvolutions)
 	return err
 }
 
@@ -253,6 +256,15 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts (tenant_id, period);
+`
+
+const schemaEvolutions = `
+-- Columns added after initial release. ADD COLUMN IF NOT EXISTS is
+-- idempotent — safe to run on both fresh and existing databases.
+ALTER TABLE rates ADD COLUMN IF NOT EXISTS koku_metric TEXT NOT NULL DEFAULT '';
+ALTER TABLE rates ADD COLUMN IF NOT EXISTS cost_type TEXT NOT NULL DEFAULT 'Infrastructure';
+ALTER TABLE rates ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE rates ADD COLUMN IF NOT EXISTS effective_to TIMESTAMPTZ;
 `
 
 // InsertRawEvent stores an event immutably. Returns false if the event was
