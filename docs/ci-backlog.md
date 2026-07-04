@@ -24,12 +24,18 @@ shipped in the initial version.
 
 ## Medium-term
 
+- [ ] **Unpin fulfillment-service in integration test** — currently pinned to
+  `b0c0208c` because HEAD has a migration that crashes on fresh DBs
+  (go-migrate dirty version 69). See `docs/dev/troubleshooting.md`. Need to
+  either wait for OSAC to fix migration 69+, or test with their latest
+  tagged release once they cut one.
 - [ ] **`govulncheck`** — add `golang/govulncheck-action@v1` to scan
   dependencies for known CVEs. Free and fast.
 - [ ] **Test result reporting** — switch to `gotestsum --junitfile results.xml`
   and upload as a GitHub Actions artifact for better failure diagnosis.
-- [ ] **Integration test job** — run `snippets/test-inventory-watcher.sh`
-  (full pipeline test, ~90s with metering) against a real DB + mock OSAC.
+- [ ] **Integration test job** — ~~run `snippets/test-inventory-watcher.sh`
+  (full pipeline test, ~90s with metering) against a real DB + mock OSAC.~~
+  Done — `integration-test/` with full k3s stack.
 
 ## Longer-term
 

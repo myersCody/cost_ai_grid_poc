@@ -53,7 +53,9 @@ jobs:
 
       - name: Clone and build fulfillment-service
         run: |
-          git clone --depth 1 https://github.com/osac-project/fulfillment-service.git /tmp/fulfillment-service
+          # Pin to known-working commit (migration 69+ on HEAD crashes — see docs/dev/troubleshooting.md)
+          git clone https://github.com/osac-project/fulfillment-service.git /tmp/fulfillment-service
+          cd /tmp/fulfillment-service && git checkout b0c0208c
           cd /tmp/fulfillment-service
           GOTOOLCHAIN=auto go build -o /tmp/fulfillment-service-bin ./cmd/fulfillment-service
           echo "Built fulfillment-service"
