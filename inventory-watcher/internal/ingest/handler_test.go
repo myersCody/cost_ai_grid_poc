@@ -735,12 +735,13 @@ func TestIngestIPPAuthoritativeFormat(t *testing.T) {
 		t.Errorf("expected model_name = %s, got %s", modelID, inventoryModel)
 	}
 
-	// Verify tenant was derived from subject (user field)
+	// Verify tenant attribution fallback chain: subscription namespace > group > user
+	// This test has no "/" in subscription ("default-sub"), so group ("maas-users") is used.
 	var tenant string
 	testStore.Pool().QueryRow(ctx,
 		"SELECT tenant FROM inventory_model WHERE model_id = $1", modelID).Scan(&tenant)
-	if tenant != "test-user@example.com" {
-		t.Errorf("expected tenant = test-user@example.com (from IPP subject), got %s", tenant)
+	if tenant != "maas-users" {
+		t.Errorf("expected tenant = maas-users (from IPP group field), got %s", tenant)
 	}
 }
 

@@ -124,11 +124,15 @@
 
 ## MaaS Tenant Attribution (IPP Integration)
 
-19. **Tenant from subscription namespace** — The IPP CloudEvent has
-    `user`, `group`, `subscription` but no `tenant_id`. We plan to
-    derive tenant from the MaaSSubscription namespace (e.g.,
-    `tenant-acme/premium-sub` → `tenant-acme`). Is this the correct
-    mapping? See [research](../research/maas-tenant-attribution.md).
+19. **How to derive tenant from IPP CloudEvent?** — The IPP CloudEvent
+    ([plugin.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/plugin.go))
+    carries `user`, `group`, `subscription` but no `tenant_id`. The
+    MaaSSubscription CR is namespaced
+    ([e2e report](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/test/e2e/reports/3.4/external-model-e2e-report.md))
+    but may live in a shared MaaS namespace, not per-tenant. Which of
+    these fields maps to the OSAC tenant? Or do we need an explicit
+    `tenant_id` added to the event?
+    See [research](../research/maas-tenant-attribution.md).
 
 20. **Add X-MaaS-Tenant upstream?** — Would it be feasible to add a
     `X-MaaS-Tenant` header in the Authorino AuthPolicy (from the

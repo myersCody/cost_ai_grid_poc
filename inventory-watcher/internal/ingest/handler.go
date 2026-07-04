@@ -328,7 +328,25 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 	if data.Model != "" && data.ModelID == "" {
 		data.ModelID = data.Model
 	}
-	if data.User != "" && data.TenantID == "" {
+	// Tenant attribution from IPP CloudEvent identity fields.
+	// The IPP event has no tenant_id. We try in order:
+	// 1. subscription namespace (if format is "{namespace}/{name}")
+	// 2. group (K8s group membership from Authorino)
+	// 3. user (username from Authorino)
+	// NOTE: It is unclear whether the subscription field carries the namespace
+	// prefix. The MaaSSubscription CR is namespaced but may live in a shared
+	// MaaS namespace, not a per-tenant namespace. This mapping needs
+	// confirmation from the OSAC/RHOAI team.
+	// Source: docs/research/maas-tenant-attribution.md
+	if data.TenantID == "" && data.Subscription != "" {
+		if idx := strings.Index(data.Subscription, "/"); idx > 0 {
+			data.TenantID = data.Subscription[:idx]
+		}
+	}
+	if data.TenantID == "" && data.Group != "" {
+		data.TenantID = data.Group
+	}
+	if data.TenantID == "" && data.User != "" {
 		data.TenantID = data.User
 	}
 	if data.DurationMs > 0 && data.DurationSeconds == 0 {

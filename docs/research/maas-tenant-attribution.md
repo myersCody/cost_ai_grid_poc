@@ -10,21 +10,30 @@
 Can IPP CloudEvents come directly to our cost pipeline, or do they need
 to go through OSAC first for enrichment?
 
-**Answer from the source code:**
-- **Tenant attribution: YES, direct routing works.** The `subscription`
-  field carries `{namespace}/{name}` where the namespace is the OSAC
-  tenant. We can parse it ourselves — no enrichment needed.
-- **Project attribution: NO, not enough data.** There is no `project_id`
-  in the event. If we need project-level cost breakdown, events need
-  enrichment from OSAC (e.g., Keycloak user → project lookup) or the IPP
-  needs to add the field upstream.
-- **Cleanest long-term path:** Ask IPP to inject `X-MaaS-Tenant` (and
-  optionally `X-MaaS-Project`) headers via the Authorino AuthPolicy.
-  The data is already available at auth time — it just isn't surfaced.
+**Answer: UNCERTAIN — needs confirmation from OSAC/RHOAI team.**
 
-This means: **for the PoC, direct routing with subscription parsing is
-sufficient.** For production with project-level attribution, we need
-either upstream enrichment or a lookup table.
+The IPP CloudEvent carries `user`, `group`, and `subscription` but no
+`tenant_id` or `project_id`. We initially assumed the subscription field
+would carry `{namespace}/{name}` where the namespace is the OSAC tenant.
+
+**However,** the [MaaSSubscription e2e report](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/test/e2e/reports/3.4/external-model-e2e-report.md)
+shows that MaaSSubscription CRs live in a shared MaaS deployment
+namespace, not in per-tenant namespaces. The subscription value in the
+CloudEvent may be just a name (e.g., `external-models-subscription`),
+not a `{tenant-namespace}/{name}` pair.
+
+**Current fallback chain in our code** (best-effort, needs validation):
+1. If `subscription` contains `/` → extract prefix as tenant (may not be correct)
+2. If `group` is set → use as tenant (K8s group from Authorino)
+3. Fall back to `user` (username from Authorino)
+
+**What we need** (in order of preference):
+1. **Explicit `X-MaaS-Tenant` header** injected by the Authorino
+   AuthPolicy and surfaced in the CloudEvent `data.tenant_id` field.
+   The auth layer already knows the tenant — it just doesn't expose it.
+2. **Confirmation** that subscription namespace = tenant (if the
+   deployment model puts subscriptions in per-tenant namespaces)
+3. **Lookup table** mapping subscription → tenant (if neither above works)
 
 ## The Problem
 
@@ -149,27 +158,24 @@ The `subscription` field is the strongest link to OSAC tenant attribution
 because **MaaSSubscription CRs are namespace-scoped**. The namespace
 is the tenant boundary.
 
-### MaaSSubscription Format
+### MaaSSubscription Format — UNCERTAIN
 
-The subscription field value follows the pattern:
+We initially assumed the subscription field would follow:
 ```
-{namespace}/{subscriptionName}
-```
-
-For rate limiting, the full format is:
-```
-{subscriptionNamespace}/{subscriptionName}@{modelNamespace}/{modelName}
+{tenantNamespace}/{subscriptionName}
 ```
 
-Where `{subscriptionNamespace}` is the OSAC tenant's namespace.
-
-### Example
-
+However, the [MaaSSubscription e2e report](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/test/e2e/reports/3.4/external-model-e2e-report.md)
+shows the CR living in a shared MaaS namespace with a plain name:
+```yaml
+kind: MaaSSubscription
+metadata:
+  name: external-models-subscription
+  namespace: <maas-namespace>   # shared, NOT per-tenant
 ```
-subscription: "tenant-acme/premium-plan"
-→ tenant = "tenant-acme"  (namespace part)
-→ project = could be derived from subscription name or group
-```
+
+The subscription value in the CloudEvent may be just the name, not a
+`{namespace}/{name}` pair. **Needs confirmation.**
 
 ## Current State in Our Code
 
