@@ -1,0 +1,156 @@
+name: Integration Test (k3s)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'inventory-watcher/**'
+      - 'deploy/**'
+      - 'integration-test/**'
+      - '.github/workflows/integration.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'inventory-watcher/**'
+      - 'deploy/**'
+      - 'integration-test/**'
+      - '.github/workflows/integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Full Stack (k3s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.x'
+          cache: false
+
+      - name: Install k3s
+        run: |
+          curl -sfL https://get.k3s.io | sh -
+          echo "Waiting for k3s..."
+          for i in $(seq 1 60); do
+            if sudo k3s kubectl get nodes 2>/dev/null | grep -q ' Ready'; then
+              echo "k3s ready"
+              break
+            fi
+            sleep 2
+          done
+          mkdir -p ~/.kube
+          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+          sudo chown $USER ~/.kube/config
+
+      - name: Install Python deps
+        run: pip install PyJWT cryptography
+
+      - name: Clone and build fulfillment-service
+        run: |
+          git clone --depth 1 https://github.com/osac-project/fulfillment-service.git /tmp/fulfillment-service
+          cd /tmp/fulfillment-service
+          GOTOOLCHAIN=auto go build -o /tmp/fulfillment-service-bin ./cmd/fulfillment-service
+          echo "Built fulfillment-service"
+
+      - name: Generate TLS certs
+        run: |
+          cd /tmp/fulfillment-service
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout server.key -out server.crt \
+            -days 1 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,DNS:osac-grpc,DNS:osac-rest,DNS:osac-oidc,DNS:osac-grpc.osac.svc,DNS:osac-rest.osac.svc,DNS:osac-oidc.osac.svc,DNS:osac-grpc.osac.svc.cluster.local,DNS:osac-rest.osac.svc.cluster.local,DNS:osac-oidc.osac.svc.cluster.local,IP:127.0.0.1" 2>/dev/null
+
+      - name: Generate auth token
+        run: |
+          cd /tmp/fulfillment-service
+          python3 -c "
+          import json, hashlib, base64, datetime
+          from cryptography.hazmat.primitives import serialization
+          import jwt
+          with open('server.key', 'rb') as f:
+              private_key = serialization.load_pem_private_key(f.read(), password=None)
+          pub = private_key.public_key().public_numbers()
+          def b64url(n):
+              length = (n.bit_length() + 7) // 8
+              return base64.urlsafe_b64encode(n.to_bytes(length, 'big')).rstrip(b'=').decode()
+          jwk_data = {'e': b64url(pub.e), 'kty': 'RSA', 'n': b64url(pub.n)}
+          thumbprint = json.dumps(jwk_data, separators=(',', ':'), sort_keys=True)
+          kid = base64.urlsafe_b64encode(hashlib.sha256(thumbprint.encode()).digest()).rstrip(b'=').decode()
+          now = datetime.datetime.now(datetime.timezone.utc)
+          token = jwt.encode({
+              'iss': 'https://osac-oidc:8013',
+              'sub': 'admin',
+              'preferred_username': 'admin',
+              'groups': ['admins'],
+              'iat': now,
+              'exp': now + datetime.timedelta(hours=1),
+          }, private_key, algorithm='RS256', headers={'kid': kid})
+          print(token)
+          " > /tmp/osac_token.txt
+
+      - name: Build consumer image and import to k3s
+        run: |
+          cd inventory-watcher
+          docker build -t cost-event-consumer:ci -f Containerfile .
+          docker save cost-event-consumer:ci | sudo k3s ctr images import -
+          echo "Consumer image imported into k3s"
+
+      - name: Build OSAC image and import to k3s
+        run: |
+          cat > /tmp/Containerfile.osac <<'EOF'
+          FROM registry.access.redhat.com/ubi9-minimal:latest
+          COPY fulfillment-service-bin /usr/local/bin/fulfillment-service
+          USER 1001
+          ENTRYPOINT ["fulfillment-service"]
+          EOF
+          docker build -t osac-fulfillment-service:ci -f /tmp/Containerfile.osac /tmp/
+          docker save osac-fulfillment-service:ci | sudo k3s ctr images import -
+
+      - name: Deploy OSAC
+        run: bash integration-test/deploy-osac.sh
+
+      - name: Deploy cost-consumer
+        run: bash integration-test/deploy-consumer.sh
+
+      - name: Wait for pods
+        run: |
+          echo "--- OSAC pods ---"
+          kubectl wait --for=condition=ready pod -l app=osac-db -n osac --timeout=180s
+          kubectl wait --for=condition=available deployment/osac-oidc -n osac --timeout=180s
+          kubectl wait --for=condition=available deployment/osac-grpc -n osac --timeout=180s
+          kubectl wait --for=condition=available deployment/osac-rest -n osac --timeout=180s
+          echo "--- Cost pods ---"
+          kubectl wait --for=condition=ready pod -l app=cost-db -n cost-mgmt --timeout=180s
+          kubectl wait --for=condition=available deployment/cost-event-consumer -n cost-mgmt --timeout=180s
+          echo "--- All pods ---"
+          kubectl get pods -A
+
+      - name: Start port forwards
+        run: |
+          kubectl port-forward -n cost-mgmt svc/cost-event-consumer 8020:8020 &
+          kubectl port-forward -n cost-mgmt svc/cost-event-consumer 9000:9000 &
+          kubectl port-forward -n osac svc/osac-rest 8011:8011 &
+          sleep 5
+          curl -sf http://localhost:8020/healthz
+
+      - name: Run integration tests
+        run: bash integration-test/test.sh
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== Consumer logs ==="
+          kubectl logs -n cost-mgmt deployment/cost-event-consumer --tail=50 || true
+          echo "=== OSAC gRPC logs ==="
+          kubectl logs -n osac deployment/osac-grpc --tail=30 || true
+          echo "=== OSAC REST logs ==="
+          kubectl logs -n osac deployment/osac-rest --tail=30 || true
+          echo "=== All pods ==="
+          kubectl get pods -A
