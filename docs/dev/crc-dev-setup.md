@@ -14,7 +14,7 @@ Run the cost-event-consumer in CRC (CodeReady Containers) for OpenShift developm
 crc start
 eval $(crc oc-env)
 oc login -u kubeadmin
-# Or use wrapper: bash oc.sh whoami
+# Or use wrapper: bash deploy/k8s/oc.sh whoami
 
 # Build and push image
 

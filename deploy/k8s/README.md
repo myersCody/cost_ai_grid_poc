@@ -16,23 +16,23 @@ docker push quay.io/martin_povolny/cost-event-consumer:latest
 
 # 2. Deploy to CRC
 cd ../deploy/k8s
-bash ../../oc.sh apply -f namespace.yaml
-bash ../../oc.sh create secret generic cost-db-credentials \
+bash ./oc.sh apply -f namespace.yaml
+bash ./oc.sh create secret generic cost-db-credentials \
   --namespace=cost-mgmt \
   --from-literal=user=costuser \
   --from-literal=password=costpass \
   --from-literal=connection-url="postgres://costuser:costpass@cost-db:5432/costdb?sslmode=disable"
-bash ../../oc.sh create secret generic cost-consumer-secrets \
+bash ./oc.sh create secret generic cost-consumer-secrets \
   --namespace=cost-mgmt \
   --from-literal=osac-token="dummy-token-for-now"
-bash ../../oc.sh apply -f postgres.yaml
-bash ../../oc.sh apply -f consumer.yaml
+bash ./oc.sh apply -f postgres.yaml
+bash ./oc.sh apply -f consumer.yaml
 
 # 3. Wait for pods
-bash ../../oc.sh get pods -n cost-mgmt -w
+bash ./oc.sh get pods -n cost-mgmt -w
 
 # 4. Access dashboard
-bash ../../oc.sh port-forward -n cost-mgmt svc/cost-event-consumer 8020:8020
+bash ./oc.sh port-forward -n cost-mgmt svc/cost-event-consumer 8020:8020
 # Open http://localhost:8020/debug/dashboard
 ```
 
