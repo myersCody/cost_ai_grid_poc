@@ -6,43 +6,42 @@
 
 ## Summary
 
-| Priority | Total | Done | Partial | Not Started |
+| Priority | Total | Done | Partial | TBD |
 |---|---|---|---|---|
 | CRITICAL | 5 | 4 | 1 | 0 |
 | HIGH | 8 | 7 | 1 | 0 |
-| MEDIUM | 2 | 1 | 1 | 0 |
-| Must Have | 1 | 1 | 0 | 0 |
-| **Total** | **16** | **13** | **3** | **0** |
+| MEDIUM | 3 | 1 | 2 | 0 |
+| LOW | 2 | 1 | 0 | 1 |
+| **Total** | **18** | **13** | **4** | **1** |
 
 ## Full Requirements Status
 
-| Req | Priority | Title | Status | Blocker | Details |
-|---|---|---|---|---|---|
-| POC-ENV | CRITICAL | On-prem deployment | Partial | — | CRC deployment guide: [checklist](dev/crc-deployment-checklist.md), [full guide](dev/crc-full-deployment.md), [OSAC on CRC](dev/crc-osac-deployment.md) |
-| POC-ARCH | CRITICAL | Capacity-based charging | **Done** | — | Standalone Go component, heartbeat-driven |
-| REQ-1 | CRITICAL | OSAC integration | **Done** | — | [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md) |
-| REQ-1a | HIGH | Cluster lifecycle | **Done** | Verify "cluster orders" = Cluster | Tracking clusters with node sets |
-| REQ-1b | CRITICAL | Heartbeat ingestion | **Done** | — | Local 60s sweep = heartbeat equivalent ([ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md)) |
-| REQ-2 | CRITICAL | Real-time cost calc | **Done** | — | <1ms/event, cost within 30s |
-| REQ-2a | HIGH | MaaS CloudEvents | **Done** (mock) | OSAC Model entity | [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
-| REQ-3 | HIGH | Granular cost tracking | **Done** | — | Report API: `GET /api/v1/reports/costs` (JSON + CSV) |
-| REQ-3a | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open | [Open questions](#req-3a--tenantproject-attribution); [roadmap RBAC note](roadmap.md#osac-projects--rbac-from-pau) |
-| REQ-3b | MEDIUM | Service catalog sync | **Done** | — | Instance types + catalog items synced via reconciler |
-| REQ-4 | HIGH | Token metering | **Done** (mock) | OSAC MaaS schema | [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
-| REQ-5 | MEDIUM | Chargeback reporting | Partial | — | Report API done (JSON + CSV); no scheduled export yet |
-| REQ-8 | HIGH | Bare metal costing | **Done** | Watch `oneof` gap — uses reconciler | [req8 gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
-| REQ-9 | HIGH | Quota/budget status API | **Done** | — | `GET /api/v1/quotas/{tenant_id}` |
-| REQ-10 | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred | [req10 analysis](requirements/req10-threshold-notifications-analysis.md) |
-| REQ-11 | MUST HAVE | Cost tiers | **Done** | — | Tiered pricing in rate engine |
-| REQ-12 | TBD | Daily OCP Virt costs | TBD | PM definition | Not scoped |
-| REQ-13 | HIGH | Custom rate dimensions | **Done** | — | [Design](research/req13-custom-metrics-design.md); config-driven extraction |
+| Rank | Req | JIRA | Priority | Title | Status | Notes |
+|---|---|---|---|---|---|---|
+| 1 | POC-ENV | — | CRITICAL | On-prem deployment | Partial | [CRC guides](dev/crc-full-deployment.md) |
+| 2 | POC-ARCH | [COST-7792](https://redhat.atlassian.net/browse/COST-7792) | CRITICAL | Capacity-based charging | **Done** | Standalone Go component |
+| 3 | REQ-1 | [COST-7793](https://redhat.atlassian.net/browse/COST-7793) | CRITICAL | OSAC integration | **Done** | [gap analysis](requirements/req1-osac-integration-gap-analysis.md) |
+| 4 | REQ-1b | [COST-7795](https://redhat.atlassian.net/browse/COST-7795) | CRITICAL | Heartbeat ingestion | **Done** | Local 60s sweep ([ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md)) |
+| 5 | REQ-2 | [COST-7796](https://redhat.atlassian.net/browse/COST-7796) | CRITICAL | Real-time cost calc | **Done** | <1ms/event, cost within 30s |
+| 6 | REQ-1a | [COST-7794](https://redhat.atlassian.net/browse/COST-7794) | HIGH | Cluster lifecycle | **Done** | Verify "cluster orders" = Cluster |
+| 7 | REQ-3a | [COST-7799](https://redhat.atlassian.net/browse/COST-7799) | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open |
+| 8 | REQ-3 | [COST-7798](https://redhat.atlassian.net/browse/COST-7798) | HIGH | Granular cost tracking | **Done** | Report API (JSON + CSV) |
+| 9 | REQ-9 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | HIGH | Quota/budget status API | **Done** | `GET /api/v1/quotas/{tenant_id}` |
+| 10 | REQ-10 | [COST-7807](https://redhat.atlassian.net/browse/COST-7807) | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred |
+| 11 | REQ-13 | [COST-7810](https://redhat.atlassian.net/browse/COST-7810) | HIGH | Custom rate dimensions | **Done** | [Design](research/req13-custom-metrics-design.md) |
+| 12 | REQ-2a | [COST-7797](https://redhat.atlassian.net/browse/COST-7797) | HIGH | MaaS CloudEvents + tokens | **Done** (mock) | [gap analysis](requirements/req2-maas-costing-gap-analysis.md) |
+| 13 | REQ-3b | [COST-7800](https://redhat.atlassian.net/browse/COST-7800) | MEDIUM | Service catalog sync | **Done** | Catalog items synced via reconciler |
+| 14 | REQ-5 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | MEDIUM | Chargeback reporting | Partial | Report API done; scheduled export TBD |
+| 15 | REQ-7 | [COST-7802](https://redhat.atlassian.net/browse/COST-7802) | MEDIUM | Audit trail | Partial | `raw_events` = immutable audit log |
+| 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Done** | Tiered pricing in rate engine |
+| 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | TBD | PM definition pending |
+| 18 | REQ-8 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
 
 **Post-PoC:**
 
-| Req | Priority | Title | Status | Notes |
+| Req | JIRA | Title | Status | Notes |
 |---|---|---|---|---|
-| REQ-6 | STANDARD | Security & access control | N/A | In-product |
-| REQ-7 | STANDARD | Reconciliation & auditing | Partial | `raw_events` = immutable audit trail |
+| REQ-6 | — | Security & access control | N/A | In-product |
 
 ---
 
