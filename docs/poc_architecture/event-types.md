@@ -11,7 +11,7 @@ The OSAC fulfillment service emits CloudEvents for resource lifecycle changes, c
 
 The OSAC team built a separate [periodic metering collector](https://github.com/masayag/osac-metering-discover-poc) that emits the same CloudEvent types on a timer, pre-populated with `duration_seconds` and metering quantities. These are referred to in the requirements as "heartbeat events".
 
-The Cost Management PoC currently runs a 60-second sweep to stand in for that collector. See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
+The Cost Management PoC currently runs a 60-second sweep to stand in for that collector. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
 
 
 ### Event Types
@@ -62,7 +62,7 @@ The table below tracks the open items Cost Management needs from OSAC before the
 | R-2 | **MaaS billable states** — define the `MODEL_STATE_*` state machine and which states are billable (analogous to `CLUSTER_STATE_READY` / `COMPUTE_INSTANCE_STATE_RUNNING`) | REQ-2a, MaaS metering | Not defined | OSAC |
 | R-3 | **BMaaS CloudEvent schema** — confirm field names, types, and any GPU/disk/network additions beyond the placeholder in §4 | REQ-8, BMaaS metering | Placeholder only (see §4) | OSAC |
 | R-4 | **BMaaS billable states** — define the `BARE_METAL_STATE_*` state machine and which states are billable | REQ-8, BMaaS metering | Not defined | OSAC |
-| R-5 | **Heartbeat collector delivery** — connect the OSAC metering collector to Cost Management over HTTP or Kafka; agree on emission interval (requirements: 10–30s; existing collector: 60s). **Not a PoC blocker** — the local sweep covers this for the demo. Required for production (Phase 4). See [ADR-003](../../decisions/003-heartbeat-emitter-vs-sweep.md). | REQ-1b, POC-ARCH Phase 4 | **Not a PoC blocker.** Collector exists; production delivery TBD | OSAC |
+| R-5 | **Heartbeat collector delivery** — connect the OSAC metering collector to Cost Management over HTTP or Kafka; agree on emission interval (requirements: 10–30s; existing collector: 60s). **Not a PoC blocker** — the local sweep covers this for the demo. Required for production (Phase 4). See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md). | REQ-1b, POC-ARCH Phase 4 | **Not a PoC blocker.** Collector exists; production delivery TBD | OSAC |
 | R-6 | **MaaS event source** — confirm whether OSAC or OpenShift AI 5 emits MaaS CloudEvents, and whether Cost consumes them directly or via OSAC | REQ-2a | Open question | OSAC + Cost |
 
 ---
@@ -342,7 +342,7 @@ For REST polling (Option B) or inventory sync, the OSAC REST gateway exposes:
 | `DELETE` | `/api/fulfillment/v1/clusters/{id}` | Delete cluster |
 | `GET` | `/api/fulfillment/v1/cluster_orders` | List cluster orders |
 
-All endpoints require a `Authorization: Bearer <token>` header. See [fullfillment_service_setup.md](fullfillment_service_setup.md) for how to mint a local token.
+All endpoints require a `Authorization: Bearer <token>` header. See [local dev setup](../dev/local-dev-setup.md) for how to mint a local token.
 
 ### Cluster Response Shape (example)
 
@@ -388,5 +388,5 @@ The existing collector scripts (`collect-caas.sh`, `collect.sh`) can be used as 
 - [CloudEvents Specification v1.0](https://cloudevents.io/)
 - [OSAC CaaS Metering README](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README-caas.md)
 - [OSAC VMaaS Metering README](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README.md)
-- [ADR-003: Heartbeat Events vs. Local Sweep](../../decisions/003-heartbeat-emitter-vs-sweep.md) — what heartbeat events are, how the PoC works around them, and what OSAC must deliver for production
+- [ADR-003: Heartbeat Events vs. Local Sweep](../decisions/003-heartbeat-emitter-vs-sweep.md) — what heartbeat events are, how the PoC works around them, and what OSAC must deliver for production
 - [docs/poc_architecture/architecture.md](architecture.md)

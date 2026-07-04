@@ -182,4 +182,4 @@ message Metadata {
 
 | Resource | Status | Our handling |
 |---|---|---|
-| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](req2-maas-costing-gap-analysis.md) |
+| Model (MaaS) | No proto, no API, no Watch stream events | Mock via HTTP ingest endpoint; see [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md) |

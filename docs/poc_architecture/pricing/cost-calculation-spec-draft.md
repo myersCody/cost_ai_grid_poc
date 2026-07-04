@@ -2,7 +2,7 @@
 
 > **Status:** PoC draft  
 > **Requirements:** REQ-3b, REQ-4, COST-6951, COST-7164  
-> **Related:** [metering-spec-draft.md](../metering/metering-spec-draft.md) · [cost_model_metric_feasibility.md](../metering/cost_model_metric_feasibility.md) · [cost-reports-feasibility.md](../metering/cost-reports-feasibility.md) · [event-types.md](../event-types.md)
+> **Related:** [metering-spec-draft.md](../metering/metering-spec-draft.md) · [cost_model_metric_feasibility.md](../metering/cost_model_metric_feasibility.md) · [cost-reports-feasibility.md](../reporting/cost-reports-feasibility.md) · [event-types.md](../event-types.md)
 
 ---
 
@@ -176,7 +176,7 @@ The full meter → Koku cost model metric mapping is in [cost_model_metric_feasi
 
 ## 8. Report Outputs
 
-Report shapes and Koku response format compatibility are documented in [cost-reports-feasibility.md](../metering/cost-reports-feasibility.md). PoC priority:
+Report shapes and Koku response format compatibility are documented in [cost-reports-feasibility.md](../reporting/cost-reports-feasibility.md). PoC priority:
 
 | Phase | Report | Key metrics |
 |---|---|---|
@@ -229,7 +229,7 @@ Cost calculation runs as an independent 30s sweep (Rater worker): it processes a
 - [Metering spec](../metering/metering-spec-draft.md) — quantity measurement (the input to this spec)
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
 - [Cost model metric feasibility](../metering/cost_model_metric_feasibility.md)
-- [Cost reports feasibility](../metering/cost-reports-feasibility.md)
+- [Cost reports feasibility](../reporting/cost-reports-feasibility.md)
 - [POC requirements overview](../../requirements/poc_requirements_overview.md)
 - [Koku cost model constants](https://github.com/project-koku/koku/blob/main/koku/api/metrics/constants.py)
 - COST-6951 — Cost tiers

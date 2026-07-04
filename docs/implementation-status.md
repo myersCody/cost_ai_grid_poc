@@ -78,7 +78,7 @@ is a separate concern owned by the RHCM team.
 | No dependency on workload cluster metrics | Done | All data from OSAC management layer |
 | Demo-ready: show cost within SLA | Done | <1ms per event; cost entries within 30s |
 
-**Related docs:** [req1 gap analysis](req1-osac-integration-gap-analysis.md)
+**Related docs:** [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md)
 
 ---
 
@@ -93,7 +93,7 @@ is a separate concern owned by the RHCM team.
 | Tenant lifecycle synced | Done | Watch stream + reconciler |
 | Workload info includes tenant/project/resource IDs | Done | All inventory records have tenant, project fields |
 
-**Related docs:** [req1 gap analysis](req1-osac-integration-gap-analysis.md), [gRPC messages catalog](grpc-messages-catalog.md)
+**Related docs:** [req1 gap analysis](requirements/req1-osac-integration-gap-analysis.md), [gRPC messages catalog](grpc-messages-catalog.md)
 
 ---
 
@@ -193,7 +193,7 @@ BareMetalInstance proto — they're on the catalog item/template. Currently
 metering uptime only. CPU/memory metering requires catalog item → template
 resolution (see [OSAC open questions](requirements/osac-open-questions.md#bare-metal-req-8)).
 
-**Related docs:** [req8 gap analysis](req8-bare-metal-gap-analysis.md)
+**Related docs:** [req8 gap analysis](requirements/req8-bare-metal-gap-analysis.md)
 
 ---
 
@@ -233,7 +233,7 @@ webhook/event to OSAC. Needs transport agreement (webhook vs CloudEvent).
 | MaaS cost computed within 60s | Done | Rating sweep every 30s |
 
 Blocked on real OSAC Model entity and MaaS CloudEvents schema.
-See [req2 gap analysis](req2-maas-costing-gap-analysis.md).
+See [req2 gap analysis](requirements/req2-maas-costing-gap-analysis.md).
 
 ---
 
@@ -337,11 +337,11 @@ See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
 | [API Reference](api-reference.md) | HTTP endpoints we expose |
 | [Observability Plan](observability.md) | Metrics, logging, probes, shutdown (P1+P2 done) |
 | [Rating Engine Options](research/rating-engine-options.md) | CloudKitty, GoRules, Drools evaluation |
-| [req1 Gap Analysis](req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
-| [req2 Gap Analysis](req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |
-| [req8 Gap Analysis](req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
-| [req10 Analysis](req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
-| [Requirements Comparison](requirements-comparison.md) | Updated spec vs original brief |
+| [req1 Gap Analysis](requirements/req1-osac-integration-gap-analysis.md) | OSAC integration implementation details |
+| [req2 Gap Analysis](requirements/req2-maas-costing-gap-analysis.md) | MaaS costing implementation details |
+| [req8 Gap Analysis](requirements/req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
+| [req10 Analysis](requirements/req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
+| [Requirements Comparison](requirements/requirements-comparison.md) | Updated spec vs original brief |
 | [Demo Scenario 1](demos/demo-scenario-1.md) | Infrastructure metering demo |
 | [Demo Scenario 2](demos/demo-scenario-2-maas.md) | MaaS metering + cost demo |
-| [Local Dev Setup](local-dev-setup.md) | How to run everything |
+| [Local Dev Setup](dev/local-dev-setup.md) | How to run everything |

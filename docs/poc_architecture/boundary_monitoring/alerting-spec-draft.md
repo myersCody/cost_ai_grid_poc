@@ -2,7 +2,7 @@
 
 > **Status:** Draft — **deferred** until architecture option is chosen
 > **Parent:** [alerting-osac-integration.md](alerting-osac-integration.md) — options, ownership, constraints
-> **Related:** [data-model.md](../data-model.md), [event-types.md](../event-types.md)
+> **Related:** [data-model.md](../../data-model.md), [event-types.md](../event-types.md)
 
 Do not treat this as agreed contract. Wire formats, paths, and schema details here are starting points for implementation once Option 1 (or another route) is confirmed.
 
@@ -78,7 +78,7 @@ stateDiagram-v2
 | `resolved` | POST CloudEvent `state: resolved` | Clear warnings; relax OPA |
 | `acknowledged` | Stop retries | — |
 
-Local state: `alerts` table — see [data-model.md](../data-model.md). Optional `alert_rules` for per-quota thresholds.
+Local state: `alerts` table — see [data-model.md](../../data-model.md). Optional `alert_rules` for per-quota thresholds.
 
 ---
 
@@ -200,7 +200,7 @@ Auth: Bearer JWT; OSAC service account needs `cost:quota:read`.
 
 ## Schema extensions
 
-See [data-model.md](../data-model.md). Additions:
+See [data-model.md](../../data-model.md). Additions:
 
 **`quotas` cache:** `external_id`, `synced_at`, `deleted_at` — populated only by OSAC sync job.
 
@@ -271,6 +271,6 @@ Minimum demo: mock limit API + P0–P4 on `vm_cpu_core_seconds`.
 ## References
 
 - [alerting-osac-integration.md](alerting-osac-integration.md) — options & ownership
-- [data-model.md](../data-model.md)
+- [data-model.md](../../data-model.md)
 - [event-types.md](../event-types.md)
 - OSAC fulfillment-service — `database_notifier.go`, `events_server.go`, `authz.rego`, `event_type.proto`
