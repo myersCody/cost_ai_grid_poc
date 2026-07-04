@@ -320,10 +320,25 @@ still seeded as defaults. Future: auto-create rates from catalog item pricing.
 
 ### REQ-5 — Chargeback Reporting
 **Status:** Partial
-**Spec:** [csv_poc_requirements_summary.md#req-5](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/csv_poc_requirements_summary.md#req-5--chargeback-reporting)
+**Spec:** [poc_requirements_overview.md#req-5](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-5-chargeback-reporting)
 
-Cost data exists and is queryable. No export mechanism or formatted reports.
-See [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries.
+| Acceptance Criterion | Status | Implementation |
+|---|---|---|
+| Reports map compute hours + tokens per tenant | Done | `GET /api/v1/reports/costs?group_by=tenant` covers both capacity and consumption cost types |
+| Reports per project | Gap | No `project_id` column on `cost_entries`, no `group_by=project` (same schema gap as REQ-3) |
+| Exportable CSV | Done | `?format=csv` — sets `Content-Type: text/csv` and `Content-Disposition: attachment` |
+| Exportable JSON | Done | Default format with `meta`/`data` structure and Infrastructure/Supplementary split |
+| Consistent with dashboard | Done | Debug dashboard uses same `/api/v1/reports/costs` endpoint |
+| Scheduled/periodic export | Gap | On-demand API only — no cron, no automated report generation |
+
+**Gaps:**
+- **Project dimension:** same as REQ-3 — `cost_entries` has no `project_id`, report can't group by project
+- **Scheduled export:** no automated report delivery (e.g., daily CSV to S3 or email). API exists but nothing triggers it periodically
+- **No test coverage** for `handleCostReport` — untested in `handler_test.go`
+
+**What works:** The report API is functional for on-demand use. Groups by 4 dimensions, filters by tenant/resource_type/period, exports CSV and JSON with Koku-compatible cost type split.
+
+See also: [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queries, [Bruno collection](../../bruno-collection/) for interactive testing.
 
 ---
 
