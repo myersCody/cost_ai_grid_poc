@@ -98,7 +98,11 @@ jobs:
           echo "IPP image imported"
 
       - name: Deploy cost-consumer
-        run: bash integration-test/deploy-consumer.sh
+        run: |
+          bash integration-test/deploy-consumer.sh
+          # No OSAC in this test — disable watcher and reconciler to avoid noise.
+          kubectl set env deployment/cost-event-consumer -n cost-mgmt \
+              DISABLE_COMPONENTS=watcher,reconciler
 
       - name: Wait for cost-consumer
         run: |

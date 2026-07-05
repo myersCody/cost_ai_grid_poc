@@ -82,17 +82,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	osacClient, err := osac.NewClient(cfg.OSACBaseURL, cfg.OSACToken, cfg.OSACCACert, logger)
-	if err != nil {
-		logger.Error("failed to create OSAC client", "error", err)
-		os.Exit(1)
-	}
-
 	m := metering.New(store, 60*time.Second, logger)
-	w := watcher.New(osacClient, store, m, logger)
-	r := reconciler.New(osacClient, store, w, cfg.ReconcileInterval, logger)
 	s := summarizer.New(store, cfg.SummarizeInterval, logger)
 	rt := rating.New(store, 30*time.Second, logger)
+
+	var w *watcher.Watcher
+	var r *reconciler.Reconciler
+
+	osacNeeded := !cfg.ComponentDisabled("watcher") || !cfg.ComponentDisabled("reconciler")
+	if osacNeeded {
+		osacClient, err := osac.NewClient(cfg.OSACBaseURL, cfg.OSACToken, cfg.OSACCACert, logger)
+		if err != nil {
+			logger.Error("failed to create OSAC client", "error", err)
+			os.Exit(1)
+		}
+		w = watcher.New(osacClient, store, m, logger)
+		r = reconciler.New(osacClient, store, w, cfg.ReconcileInterval, logger)
+	}
 
 	logger.Info("starting cost-event-consumer",
 		"osac_url", cfg.OSACBaseURL,
@@ -101,15 +107,28 @@ func main() {
 		"metering_interval", "60s",
 		"rating_interval", "30s",
 		"ingest_addr", cfg.IngestListenAddr,
+		"disabled_components", cfg.DisabledComponents,
 	)
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	g.Go(safeGo(logger, "watcher", func() error { return w.Run(ctx) }))
-	g.Go(safeGo(logger, "reconciler", func() error { return r.Run(ctx) }))
-	g.Go(safeGo(logger, "summarizer", func() error { return s.Run(ctx) }))
-	g.Go(safeGo(logger, "metering", func() error { return m.Run(ctx) }))
-	g.Go(safeGo(logger, "rating", func() error { return rt.Run(ctx) }))
+	startComponent := func(name string, fn func() error) {
+		if cfg.ComponentDisabled(name) {
+			logger.Info("component disabled, skipping", "component", name)
+			return
+		}
+		g.Go(safeGo(logger, name, fn))
+	}
+
+	if w != nil {
+		startComponent("watcher", func() error { return w.Run(ctx) })
+	}
+	if r != nil {
+		startComponent("reconciler", func() error { return r.Run(ctx) })
+	}
+	startComponent("summarizer", func() error { return s.Run(ctx) })
+	startComponent("metering", func() error { return m.Run(ctx) })
+	startComponent("rating", func() error { return rt.Run(ctx) })
 
 	// Metrics server on a separate port (no auth).
 	metricsMux := http.NewServeMux()
@@ -141,7 +160,9 @@ func main() {
 
 	if cfg.IngestListenAddr != "" {
 		h := ingest.NewHandler(store, m, cfg, cmRegistry, logger)
-		h.SetReconciler(r)
+		if r != nil {
+			h.SetReconciler(r)
+		}
 
 		auth, err := authn.New(cfg.AuthIssuerURL, cfg.OSACCACert, logger)
 		if err != nil {

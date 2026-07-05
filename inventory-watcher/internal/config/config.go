@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 	CustomMetricsConfigPath string
 	AuthIssuerURL           string
 	DebugDashboard     bool
+	DisabledComponents map[string]bool
 }
 
 // DiagnosticInfo returns config values safe to expose via the debug API (no secrets).
@@ -102,25 +104,45 @@ func findCredEnd(url string) int {
 
 func Load() *Config {
 	return &Config{
-		OSACBaseURL:       envOrDefault("OSAC_BASE_URL", "http://localhost:8011"),
-		OSACToken:         os.Getenv("OSAC_TOKEN"),
-		OSACCACert:        envOrDefault("OSAC_CA_CERT", ""),
-		InventoryDBURL:    envOrDefault("INVENTORY_DB_URL", "postgres://user:pass@localhost:5434/costdb"),
-		ReconcileInterval: durationOrDefault("RECONCILE_INTERVAL", 1*time.Hour),
-		SummarizeInterval: durationOrDefault("SUMMARIZE_INTERVAL", 1*time.Hour),
-		LogLevel:          envOrDefault("LOG_LEVEL", "info"),
-		LogFormat:               envOrDefault("LOG_FORMAT", "text"),
-		IngestListenAddr:        os.Getenv("INGEST_LISTEN_ADDR"),
-		MetricsPort:             envOrDefault("METRICS_PORT", "9000"),
+		OSACBaseURL:        envOrDefault("OSAC_BASE_URL", "http://localhost:8011"),
+		OSACToken:          os.Getenv("OSAC_TOKEN"),
+		OSACCACert:         envOrDefault("OSAC_CA_CERT", ""),
+		InventoryDBURL:     envOrDefault("INVENTORY_DB_URL", "postgres://user:pass@localhost:5434/costdb"),
+		ReconcileInterval:  durationOrDefault("RECONCILE_INTERVAL", 1*time.Hour),
+		SummarizeInterval:  durationOrDefault("SUMMARIZE_INTERVAL", 1*time.Hour),
+		LogLevel:           envOrDefault("LOG_LEVEL", "info"),
+		LogFormat:          envOrDefault("LOG_FORMAT", "text"),
+		IngestListenAddr:   os.Getenv("INGEST_LISTEN_ADDR"),
+		MetricsPort:        envOrDefault("METRICS_PORT", "9000"),
 		CustomMetricsConfigPath: os.Getenv("CUSTOM_METRICS_CONFIG"),
-		AuthIssuerURL:           os.Getenv("AUTH_ISSUER_URL"),
-		DebugDashboard:   envOrDefault("DEBUG_DASHBOARD", "true") != "false",
+		AuthIssuerURL:      os.Getenv("AUTH_ISSUER_URL"),
+		DebugDashboard:     envOrDefault("DEBUG_DASHBOARD", "true") != "false",
+		DisabledComponents: parseDisabledComponents(os.Getenv("DISABLE_COMPONENTS")),
 	}
 }
 
+func (c *Config) ComponentDisabled(name string) bool {
+	return c.DisabledComponents[name]
+}
+
+func parseDisabledComponents(s string) map[string]bool {
+	m := make(map[string]bool)
+	if s == "" {
+		return m
+	}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			m[part] = true
+		}
+	}
+	return m
+}
+
 func (c *Config) Validate() error {
-	if c.OSACBaseURL == "" {
-		return fmt.Errorf("OSAC_BASE_URL is required")
+	osacNeeded := !c.ComponentDisabled("watcher") || !c.ComponentDisabled("reconciler")
+	if osacNeeded && c.OSACBaseURL == "" {
+		return fmt.Errorf("OSAC_BASE_URL is required (or disable watcher+reconciler via DISABLE_COMPONENTS)")
 	}
 	if c.InventoryDBURL == "" {
 		return fmt.Errorf("INVENTORY_DB_URL is required")
