@@ -25,6 +25,11 @@ func (m *mockStore) InsertMeteringEntry(_ context.Context, entry inventory.Meter
 	return nil
 }
 
+func (m *mockStore) InsertMeteringEntryBatch(_ context.Context, entries []inventory.MeteringEntry) error {
+	m.entries = append(m.entries, entries...)
+	return nil
+}
+
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "custom-metrics.json")

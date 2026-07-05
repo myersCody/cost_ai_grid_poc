@@ -85,7 +85,10 @@ alembic.ini.local
 # Binaries
 inventory-watcher/inventory-watcher
 inventory-watcher/consumer
+inventory-watcher/maas-simulator
 *.exe
+*.test
+*.prof
 
 # Tokens / secrets
 /tmp/osac_token.txt

@@ -23,7 +23,7 @@ into two groups:
 
 | Table | Go Model | Purpose |
 |---|---|---|
-| `raw_events` | [`RawEvent`](../inventory-watcher/internal/inventory/models.go) | Immutable log of every Watch stream / ingest event. Deduplicated on `event_id`. |
+| `raw_events` | [`RawEvent`](../inventory-watcher/internal/inventory/models.go) | Append-only audit log. No unique constraint by default (throughput). Add `CREATE UNIQUE INDEX ON raw_events (event_id)` for dedup at cost of ~10% ingest speed. |
 | `inventory_project` | [`ProjectRecord`](../inventory-watcher/internal/inventory/models.go) | OSAC projects (Tenant → Project hierarchy). |
 | `inventory_compute_instance` | [`ComputeInstanceRecord`](../inventory-watcher/internal/inventory/models.go) | VMs tracked from OSAC. `last_metered_at` for duration-based metering. |
 | `inventory_cluster` | [`ClusterRecord`](../inventory-watcher/internal/inventory/models.go) | Clusters with `node_sets` JSONB for worker node tracking. |

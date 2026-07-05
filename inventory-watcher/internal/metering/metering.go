@@ -74,11 +74,11 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 		}
 
 		entries := computeInstanceMeters(inst, durationSeconds, periodStart, now)
-		for _, entry := range entries {
-			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
-				m.logger.Error("failed to insert metering entry",
-					"resource", inst.InstanceID, "meter", entry.MeterName, "error", err)
-			} else {
+		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+			m.logger.Error("failed to insert metering entries",
+				"resource", inst.InstanceID, "error", err)
+		} else {
+			for _, entry := range entries {
 				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
@@ -120,11 +120,9 @@ func (m *Meter) MeterComputeInstanceFinal(ctx context.Context, instanceID string
 	}
 
 	entries := computeInstanceMeters(*inst, durationSeconds, periodStart, deletedAt)
-	for _, entry := range entries {
-		if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
-			m.logger.Error("failed to insert final metering entry",
-				"resource", instanceID, "meter", entry.MeterName, "error", err)
-		}
+	if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+		m.logger.Error("failed to insert final metering entries",
+			"resource", instanceID, "error", err)
 	}
 
 	m.logger.Debug("final metering for deleted instance", "id", instanceID, "duration_seconds", durationSeconds)
@@ -150,11 +148,11 @@ func (m *Meter) meterClusters(ctx context.Context, now time.Time) {
 		}
 
 		entries := clusterMeters(cl, durationSeconds, periodStart, now)
-		for _, entry := range entries {
-			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
-				m.logger.Error("failed to insert cluster metering entry",
-					"resource", cl.ClusterID, "meter", entry.MeterName, "error", err)
-			} else {
+		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+			m.logger.Error("failed to insert cluster metering entries",
+				"resource", cl.ClusterID, "error", err)
+		} else {
+			for _, entry := range entries {
 				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
@@ -237,10 +235,10 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 			{ResourceType: "bare_metal", ResourceID: inst.InstanceID, TenantID: inst.Tenant, MeterName: "bm_uptime_seconds", Value: durationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: now},
 		}
 
-		for _, entry := range entries {
-			if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
-				m.logger.Error("failed to insert BM metering entry", "resource", inst.InstanceID, "error", err)
-			} else {
+		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+			m.logger.Error("failed to insert BM metering entries", "resource", inst.InstanceID, "error", err)
+		} else {
+			for _, entry := range entries {
 				metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 			}
 		}
@@ -323,11 +321,11 @@ func (m *Meter) MeterMaaSEvent(ctx context.Context, usage MaaSUsage) {
 	periodEnd := usage.EventTime
 
 	entries := maasMeters(usage, periodStart, periodEnd)
-	for _, entry := range entries {
-		if err := m.store.InsertMeteringEntry(ctx, entry); err != nil {
-			m.logger.Error("failed to insert MaaS metering entry",
-				"model", usage.ModelID, "meter", entry.MeterName, "error", err)
-		} else {
+	if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+		m.logger.Error("failed to insert MaaS metering entries",
+			"model", usage.ModelID, "error", err)
+	} else {
+		for _, entry := range entries {
 			metrics.MeteringEntriesCreated.WithLabelValues(entry.ResourceType, entry.MeterName).Inc()
 		}
 	}

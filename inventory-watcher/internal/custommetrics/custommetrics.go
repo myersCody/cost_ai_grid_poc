@@ -46,6 +46,7 @@ type Registry struct {
 
 type MeteringStore interface {
 	InsertMeteringEntry(ctx context.Context, entry inventory.MeteringEntry) error
+	InsertMeteringEntryBatch(ctx context.Context, entries []inventory.MeteringEntry) error
 }
 
 func LoadFromFile(path string, logger *slog.Logger) (*Registry, error) {
@@ -172,7 +173,7 @@ func (r *Registry) ProcessEvent(ctx context.Context, store MeteringStore, eventT
 		}
 	}
 
-	inserted := 0
+	var entries []inventory.MeteringEntry
 	for _, m := range def.Meters {
 		raw, ok := extractField(data, m.ValueField)
 		if !ok {
@@ -190,7 +191,7 @@ func (r *Registry) ProcessEvent(ctx context.Context, store MeteringStore, eventT
 			continue
 		}
 
-		if err := store.InsertMeteringEntry(ctx, inventory.MeteringEntry{
+		entries = append(entries, inventory.MeteringEntry{
 			ResourceType: def.ResourceType,
 			ResourceID:   resourceID,
 			TenantID:     tenantID,
@@ -199,14 +200,15 @@ func (r *Registry) ProcessEvent(ctx context.Context, store MeteringStore, eventT
 			Unit:         m.Unit,
 			PeriodStart:  periodStart,
 			PeriodEnd:    periodEnd,
-		}); err != nil {
-			return fmt.Errorf("inserting custom metering entry %s: %w", m.MeterName, err)
-		}
-		inserted++
+		})
+	}
+
+	if err := store.InsertMeteringEntryBatch(ctx, entries); err != nil {
+		return fmt.Errorf("inserting custom metering entries: %w", err)
 	}
 
 	logger.Debug("processed custom metric event",
-		"event_type", eventType, "resource_id", resourceID, "meters_inserted", inserted)
+		"event_type", eventType, "resource_id", resourceID, "meters_inserted", len(entries))
 	return nil
 }
 
