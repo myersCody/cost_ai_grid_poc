@@ -27,7 +27,7 @@ style: |
   blockquote { border-left: 4px solid #2c6fad; color: #444; }
   .done { color: #16a34a; font-weight: bold; }
   .partial { color: #d97706; font-weight: bold; }
-  .metric { font-family: monospace; background: #e0f2fe; padding: 2px 8px; border-radius: 4px; }
+  img { border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 ---
 
 <!-- _class: lead -->
@@ -35,7 +35,14 @@ style: |
 # Cost Event Consumer
 ## Demo 4 — Observability, Custom Metrics & Tooling
 
-Martin Povolny — 2026-07-03
+Martin Povolny — July 2026
+
+<!--
+Narration: Welcome. This is our fourth demo — covering everything we built
+since the live dashboard demo on July 1. Focus areas: custom metric
+extraction (REQ-13), observability stack, CI pipeline, integration testing,
+and tooling.
+-->
 
 ---
 
@@ -45,12 +52,18 @@ Martin Povolny — 2026-07-03
 |---|---|
 | **REQ-13** Custom metric extraction | <span class="done">Done</span> — config-driven, zero code changes |
 | **Observability** P1+P2 | <span class="done">Done</span> — Prometheus, probes, logging, shutdown |
-| **CI pipeline** | <span class="done">Done</span> — 4 jobs: lint, build, test, container |
-| **CRC deployment** | <span class="partial">Partial</span> — consumer running, OSAC pending |
-| **Adversarial review** | v3 — 41 findings, 19 fixed |
-| **Tooling** | Bruno collection + Grafana stack |
+| **CI pipeline** | <span class="done">Done</span> — 6 jobs incl. k3s integration test |
+| **Integration test** | <span class="done">Done</span> — full OSAC + cost stack on k3s in CI |
+| **Adversarial review** | v3 — 41 findings, 22 fixed |
+| **Tooling** | Bruno collection + Grafana dashboard |
 
-**Score: 13 done / 3 partial / 0 not started** (of 16 requirements)
+**Score: 13 done / 4 partial / 1 TBD** (of 18 requirements)
+
+<!--
+Narration: Since demo 3 we shipped custom metrics, full observability,
+a CI pipeline with integration testing, and developer tooling. 13 of 18
+requirements are done.
+-->
 
 ---
 
@@ -63,6 +76,13 @@ OSAC will emit new CloudEvent types over time:
 Without REQ-13: **every new metric = code change + PR + deploy**
 
 With REQ-13: **drop a JSON config, restart**
+
+<!--
+Narration: This is the most important functional feature we added.
+OSAC is evolving — new resource types, new metrics. Without REQ-13,
+every new dimension means a code change. With it, an operator drops
+a JSON config file and the system meters it automatically.
+-->
 
 ---
 
@@ -89,11 +109,16 @@ With REQ-13: **drop a JSON config, restart**
 
 Rating, reporting, quotas — all work automatically.
 
+<!--
+Narration: The config maps an event type to a resource type and lists
+which fields to extract as meters. The rating engine, report API, and
+quota system all work on free-text meter names — so custom metrics flow
+through the entire pipeline with zero code changes.
+-->
+
 ---
 
 ## REQ-13: Live Demo
-
-<!-- Screenshot: Bruno firing a custom GPU CloudEvent -->
 
 1. Show config file → `CUSTOM_METRICS_CONFIG=deploy/custom-metrics-example.json`
 2. Open **Bruno** → click "Custom GPU Metric" → Send
@@ -101,28 +126,74 @@ Rating, reporting, quotas — all work automatically.
 4. Wait 30s → cost entries created with dollar amounts
 5. **No code was changed. No recompile. No redeploy.**
 
----
-
-## REQ-13: What Flows Through
-
-```
-CloudEvent (osac.gpu.lifecycle)
-  → handleEvent default branch
-    → custommetrics.ProcessEvent
-      → extractField("instance_id") → resource ID
-      → extractField("gpu_memory_gib_seconds") → metering entry
-      → extractField("gpu_compute_seconds") → metering entry
-        → rating sweep (30s) → cost entries
-          → report API → JSON/CSV
-```
-
-Same pipeline as VMs and MaaS — zero special handling.
+<!--
+Narration: [Live demo] Open Bruno, show the CloudEvent catalog. Click
+"Custom GPU Metric" — this fires an event type that has no hardcoded
+handler. The custom metrics config extracts gpu_memory_gib_seconds and
+gpu_compute_seconds automatically. Check the pipeline summary — meters
+created. Wait for the rating sweep — costs in dollars.
+-->
 
 ---
 
-## Observability: Prometheus Metrics
+## Built-in Debug Dashboard
 
-Separate `:9000` port (no auth), following RHT pattern.
+![bg right:55% fit](screenshots/cost-debug-dash-1.png)
+
+- Real-time cost summary
+- **$94.62** total across 4 tenants
+- Infrastructure vs Supplementary split
+- Group by tenant, resource type, meter, resource
+- 74,992 metering entries → 74,959 cost entries
+
+<!--
+Narration: The built-in dashboard shows the pipeline in action. $94.62
+in total cost, split across 4 tenants. The "shared" tenant has both
+infrastructure ($7.39 from VMs) and supplementary ($70.45 from MaaS
+tokens). Each tenant's cost is isolated.
+-->
+
+---
+
+## Debug Dashboard: Environment
+
+![bg right:55% fit](screenshots/cost-debug-dash-2.png)
+
+- OSAC connection status
+- Database connection (credentials masked)
+- Processing intervals: reconcile 1h, metering 60s, rating 30s
+- Service settings: auth, log level, ports
+
+<!--
+Narration: The Environment tab shows operational config. OSAC connection
+URL, database (credentials masked), processing intervals, auth status.
+This is served from the binary itself — no separate tool needed.
+-->
+
+---
+
+## Observability: Grafana Dashboard
+
+![bg right:55% fit](screenshots/grafana-dash-3.png)
+
+`docker compose up -d` → `http://localhost:3000`
+
+- 17 live VMs from OSAC
+- Event throughput + HTTP request rate
+- Metering and cost entry creation rates
+- Sweep duration p99
+- Auto-provisioned, auto-refreshing
+
+<!--
+Narration: The Grafana dashboard scrapes our Prometheus metrics on port
+9000. You can see 17 live VMs, metering entries being created for both
+compute instances and MaaS tokens, cost entries flowing from the rating
+sweep. This starts with docker compose up — dashboard is pre-provisioned.
+-->
+
+---
+
+## Observability: Metrics Detail
 
 | Metric | Type | What |
 |---|---|---|
@@ -132,110 +203,84 @@ Separate `:9000` port (no auth), following RHT pattern.
 | `metering_sweep_duration_seconds` | Histogram | 60s sweep latency |
 | `rating_sweep_duration_seconds` | Histogram | 30s sweep latency |
 | `live_compute_instances` | Gauge | Active VMs |
-| `live_clusters` | Gauge | Active clusters |
 | `http_requests_total` | Counter | API traffic |
-| `http_request_duration_seconds` | Histogram | API latency |
+
+Separate `:9000` port (no auth) — RHT pattern from Koku.
+
+<!--
+Narration: All metrics use the cost_consumer_ namespace. Counters for
+events, metering entries, cost entries. Histograms for sweep duration.
+Gauges for live resources. Served on a separate port without auth so
+Prometheus can scrape without a JWT.
+-->
 
 ---
 
-## Observability: Grafana Dashboard
+## Observability: Logging & Probes
 
-<!-- Screenshot: Grafana dashboard with live data -->
-
-`docker compose up -d` → `http://localhost:3000`
-
-Pre-built dashboard with 10 panels:
-- Event throughput, HTTP request rate
-- Live resource gauges (VMs, clusters, models)
-- Sweep duration percentiles (p99)
-- Cost + metering entry creation rates
-- Reconcile drift, alerts fired
-- Go runtime (goroutines, RSS)
-
----
-
-## Observability: Structured Logging
-
+**Structured JSON logging** for OpenShift log aggregation:
 ```json
 {"time":"...","level":"INFO","msg":"http request",
  "method":"POST","path":"/api/v1/events",
  "status":202,"duration_ms":3,"request_id":"a1b2c3d4"}
 ```
 
-- `LOG_FORMAT=json` for OpenShift log aggregation
-- `LOG_LEVEL` controls verbosity (was hardcoded to debug)
-- Probe requests logged at DEBUG (no noise)
-- Request ID on every request for correlation
+**Kubernetes probes** (auth-exempt):
+- `/healthz` → liveness (always 200)
+- `/readyz` → readiness (pings DB, returns 503 if down)
+
+**Graceful shutdown** with 30s drain + panic recovery on all goroutines.
+
+<!--
+Narration: LOG_FORMAT=json for production. Every request gets a request
+ID. Probe endpoints are exempt from JWT auth so Kubernetes can reach
+them. Graceful shutdown drains in-flight requests. If a goroutine panics,
+the error propagates to the errgroup and the pod restarts.
+-->
 
 ---
 
-## Observability: K8s Probes & Shutdown
+## CI Pipeline + Integration Test
 
-| Endpoint | What | Auth |
-|---|---|---|
-| `/healthz` | Liveness — process alive | Exempt |
-| `/readyz` | Readiness — pings PostgreSQL | Exempt |
+![bg right:55% fit](screenshots/integration-test-osac-in-k3s.png)
 
-- `/readyz` returns **503** when DB is unreachable
-- Graceful shutdown: `srv.Shutdown()` with 30s drain
-- Panic recovery on all goroutines + HTTP handlers
-- Dead goroutine → error propagated → pod restarts
+**CI (every PR):** lint, build, test, links, container
 
----
+**Integration test (k3s):**
+- Deploys full OSAC + cost stack
+- Creates resources in OSAC
+- Sends CloudEvents
+- Waits for metering + rating sweeps
+- Verifies: probes, metrics, cost entries, quota API
+- **12/12 ALL PASSED** in 6 minutes
 
-## CI Pipeline
-
-<!-- Screenshot: GitHub Actions green wall -->
-
-4 parallel jobs on every PR and push to main:
-
-| Job | What |
-|---|---|
-| **Lint** | `go vet ./...` |
-| **Build** | Both binaries (consumer + simulator) |
-| **Test** | `go test -race` with PostgreSQL service |
-| **Container** | UBI10 image via Buildx |
-
-All green. Tests run against a real database.
-
----
-
-## CRC / OpenShift Deployment
-
-<!-- Screenshot: oc get pods -n cost-mgmt -->
-
-- Multi-stage UBI10 container (164 MB)
-- K8s manifests: namespace, PostgreSQL, consumer Deployment
-- Health probes configured and passing
-- JSON structured logging flowing
-- **Next:** Deploy OSAC fulfillment-service alongside
+<!--
+Narration: Every PR runs 6 CI jobs. The integration test deploys the
+full stack — OSAC gRPC, REST gateway, OIDC mock, two PostgreSQL
+instances, and our consumer — on k3s in GitHub Actions. Then it runs
+12 end-to-end checks. All green.
+-->
 
 ---
 
 ## Bruno: Clickable CloudEvent Catalog
 
-<!-- Screenshot: Bruno with collection open -->
+![bg right:55% fit](screenshots/bruno-cost.png)
 
-Committed to the repo — no cloud sync, no accounts.
+Committed to git — no cloud, no accounts.
 
-<div class="columns">
+- 6 CloudEvent types (VM, Cluster, MaaS, IPP, GPU, Storage)
+- Cost report with editable query params
+- Quota status, balance check, reconcile trigger
+- Docs tab with valid parameter values
+- Response: $10.21 cost for tenant-acme
 
-**CloudEvents**
-- VM Create
-- Cluster Create
-- MaaS Token Usage
-- IPP Inference Tokens
-- Custom GPU Metric
-- Custom Storage Metric
-
-**Queries & Probes**
-- Cost Report (JSON / CSV)
-- Quota Status
-- Balance Check (IPP)
-- Pipeline Summary
-- Liveness / Readiness / Metrics
-
-</div>
+<!--
+Narration: Bruno is a local HTTP client like Postman but file-based —
+the collection is committed to git. Each request has documentation with
+valid parameter values. Click to fire, see the response. Great for demos
+and for developers exploring the API.
+-->
 
 ---
 
@@ -250,6 +295,13 @@ Committed to the repo — no cloud sync, no accounts.
 Key fixes: JWT auth, input validation, panic recovery,
 NaN/Inf rejection, cardinality protection, graceful shutdown.
 
+<!--
+Narration: We run adversarial reviews on every major PR. 41 findings
+total, 22 fixed, 8 accepted as known PoC limitations. The review
+catches real issues — the safeGo panic bug would have caused silent
+data loss in production.
+-->
+
 ---
 
 ## What's Next
@@ -257,10 +309,16 @@ NaN/Inf rejection, cardinality protection, graceful shutdown.
 | Item | Status | Next step |
 |---|---|---|
 | REQ-5 Chargeback export | Partial | Scheduled export (API done) |
-| REQ-1a Cluster orders | Partial | Verify with OSAC team |
+| REQ-7 Audit trail | Partial | Document raw_events coverage |
 | POC-ENV | Partial | Deploy OSAC on CRC |
 | Noy's dogfood | Blocked | Get access, test real IPP events |
-| Observability PR #9 | Ready | Merge into upstream |
+| Demo 4 | In progress | Screenshots, dry run |
+
+<!--
+Narration: Remaining work is mostly closing partial requirements and
+connecting to real OSAC environments. The core pipeline is complete
+and tested end-to-end.
+-->
 
 ---
 

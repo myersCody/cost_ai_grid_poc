@@ -117,6 +117,7 @@ type MeteringEntry struct {
 	ResourceType string    `json:"resource_type"`
 	ResourceID   string    `json:"resource_id"`
 	TenantID     string    `json:"tenant_id"`
+	ProjectID    string    `json:"project_id"`
 	MeterName    string    `json:"meter_name"`
 	Value        float64   `json:"value"`
 	Unit         string    `json:"unit"`
@@ -149,6 +150,7 @@ type CostEntry struct {
 	MeteringEntryID int64     `json:"metering_entry_id"`
 	RateID          int64     `json:"rate_id"`
 	TenantID        string    `json:"tenant_id"`
+	ProjectID       string    `json:"project_id"`
 	ResourceType    string    `json:"resource_type"`
 	ResourceID      string    `json:"resource_id"`
 	MeterName       string    `json:"meter_name"`

@@ -47,6 +47,7 @@ type Registry struct {
 type MeteringStore interface {
 	InsertMeteringEntry(ctx context.Context, entry inventory.MeteringEntry) error
 	InsertMeteringEntryBatch(ctx context.Context, entries []inventory.MeteringEntry) error
+	DefaultProjectForTenant(ctx context.Context, tenantID string) string
 }
 
 func LoadFromFile(path string, logger *slog.Logger) (*Registry, error) {
@@ -165,6 +166,8 @@ func (r *Registry) ProcessEvent(ctx context.Context, store MeteringStore, eventT
 		tenantID = toString(v)
 	}
 
+	projectID := store.DefaultProjectForTenant(ctx, tenantID)
+
 	periodEnd := eventTime
 	periodStart := periodEnd
 	if v, ok := extractField(data, "duration_seconds"); ok {
@@ -195,6 +198,7 @@ func (r *Registry) ProcessEvent(ctx context.Context, store MeteringStore, eventT
 			ResourceType: def.ResourceType,
 			ResourceID:   resourceID,
 			TenantID:     tenantID,
+			ProjectID:    projectID,
 			MeterName:    m.MeterName,
 			Value:        value,
 			Unit:         m.Unit,

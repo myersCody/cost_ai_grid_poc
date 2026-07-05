@@ -43,6 +43,13 @@ func (m *Meter) Run(ctx context.Context) error {
 	}
 }
 
+func (m *Meter) resolveProject(ctx context.Context, project, tenantID string) string {
+	if project != "" {
+		return project
+	}
+	return m.store.DefaultProjectForTenant(ctx, tenantID)
+}
+
 func (m *Meter) sweep(ctx context.Context) {
 	start := time.Now()
 	now := start.UTC()
@@ -73,7 +80,8 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 			continue
 		}
 
-		entries := computeInstanceMeters(inst, durationSeconds, periodStart, now)
+		projectID := m.resolveProject(ctx, inst.Project, inst.Tenant)
+		entries := computeInstanceMeters(inst, projectID, durationSeconds, periodStart, now)
 		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
 			m.logger.Error("failed to insert metering entries",
 				"resource", inst.InstanceID, "error", err)
@@ -119,7 +127,8 @@ func (m *Meter) MeterComputeInstanceFinal(ctx context.Context, instanceID string
 		return
 	}
 
-	entries := computeInstanceMeters(*inst, durationSeconds, periodStart, deletedAt)
+	projectID := m.resolveProject(ctx, inst.Project, inst.Tenant)
+	entries := computeInstanceMeters(*inst, projectID, durationSeconds, periodStart, deletedAt)
 	if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
 		m.logger.Error("failed to insert final metering entries",
 			"resource", instanceID, "error", err)
@@ -147,7 +156,8 @@ func (m *Meter) meterClusters(ctx context.Context, now time.Time) {
 			continue
 		}
 
-		entries := clusterMeters(cl, durationSeconds, periodStart, now)
+		projectID := m.resolveProject(ctx, "", cl.Tenant)
+		entries := clusterMeters(cl, projectID, durationSeconds, periodStart, now)
 		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
 			m.logger.Error("failed to insert cluster metering entries",
 				"resource", cl.ClusterID, "error", err)
@@ -169,12 +179,13 @@ func (m *Meter) meterClusters(ctx context.Context, now time.Time) {
 	}
 }
 
-func clusterMeters(cl inventory.ClusterRecord, durationSeconds float64, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
+func clusterMeters(cl inventory.ClusterRecord, projectID string, durationSeconds float64, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
 	entries := []inventory.MeteringEntry{
 		{
 			ResourceType: "cluster",
 			ResourceID:   cl.ClusterID,
 			TenantID:     cl.Tenant,
+			ProjectID:    projectID,
 			MeterName:    "cluster_uptime_seconds",
 			Value:        durationSeconds,
 			Unit:         "seconds",
@@ -201,6 +212,7 @@ func clusterMeters(cl inventory.ClusterRecord, durationSeconds float64, periodSt
 			ResourceType: "cluster",
 			ResourceID:   cl.ClusterID,
 			TenantID:     cl.Tenant,
+			ProjectID:    projectID,
 			MeterName:    "cluster_worker_node_seconds",
 			Value:        totalWorkerNodeSeconds,
 			Unit:         "node_seconds",
@@ -231,8 +243,9 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 			continue
 		}
 
+		projectID := m.resolveProject(ctx, "", inst.Tenant)
 		entries := []inventory.MeteringEntry{
-			{ResourceType: "bare_metal", ResourceID: inst.InstanceID, TenantID: inst.Tenant, MeterName: "bm_uptime_seconds", Value: durationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: now},
+			{ResourceType: "bare_metal", ResourceID: inst.InstanceID, TenantID: inst.Tenant, ProjectID: projectID, MeterName: "bm_uptime_seconds", Value: durationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: now},
 		}
 
 		if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
@@ -277,10 +290,12 @@ func (m *Meter) MeterBareMetalInstanceFinal(ctx context.Context, instanceID stri
 		return
 	}
 
+	projectID := m.resolveProject(ctx, "", inst.Tenant)
 	entry := inventory.MeteringEntry{
 		ResourceType: "bare_metal",
 		ResourceID:   inst.InstanceID,
 		TenantID:     inst.Tenant,
+		ProjectID:    projectID,
 		MeterName:    "bm_uptime_seconds",
 		Value:        durationSeconds,
 		Unit:         "seconds",
@@ -320,7 +335,8 @@ func (m *Meter) MeterMaaSEvent(ctx context.Context, usage MaaSUsage) {
 	periodStart := usage.EventTime.Add(-time.Duration(usage.DurationSeconds) * time.Second)
 	periodEnd := usage.EventTime
 
-	entries := maasMeters(usage, periodStart, periodEnd)
+	projectID := m.resolveProject(ctx, "", usage.TenantID)
+	entries := maasMeters(usage, projectID, periodStart, periodEnd)
 	if err := m.store.InsertMeteringEntryBatch(ctx, entries); err != nil {
 		m.logger.Error("failed to insert MaaS metering entries",
 			"model", usage.ModelID, "error", err)
@@ -334,7 +350,7 @@ func (m *Meter) MeterMaaSEvent(ctx context.Context, usage MaaSUsage) {
 		"tokens_in", usage.TokensIn, "tokens_out", usage.TokensOut, "requests", usage.Requests)
 }
 
-func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
+func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
 	var entries []inventory.MeteringEntry
 
 	if usage.TokensIn > 0 {
@@ -342,6 +358,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			ResourceType: "model",
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
+			ProjectID:    projectID,
 			MeterName:    "maas_tokens_in",
 			Value:        float64(usage.TokensIn),
 			Unit:         "tokens",
@@ -355,6 +372,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			ResourceType: "model",
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
+			ProjectID:    projectID,
 			MeterName:    "maas_tokens_out",
 			Value:        float64(usage.TokensOut),
 			Unit:         "tokens",
@@ -368,6 +386,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			ResourceType: "model",
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
+			ProjectID:    projectID,
 			MeterName:    "maas_tokens_cached",
 			Value:        float64(usage.CachedInputTokens),
 			Unit:         "tokens",
@@ -381,6 +400,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			ResourceType: "model",
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
+			ProjectID:    projectID,
 			MeterName:    "maas_tokens_reasoning",
 			Value:        float64(usage.ReasoningTokens),
 			Unit:         "tokens",
@@ -394,6 +414,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 			ResourceType: "model",
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
+			ProjectID:    projectID,
 			MeterName:    "maas_requests",
 			Value:        float64(usage.Requests),
 			Unit:         "requests",
@@ -405,7 +426,7 @@ func maasMeters(usage MaaSUsage, periodStart, periodEnd time.Time) []inventory.M
 	return entries
 }
 
-func computeInstanceMeters(inst inventory.ComputeInstanceRecord, durationSeconds float64, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
+func computeInstanceMeters(inst inventory.ComputeInstanceRecord, projectID string, durationSeconds float64, periodStart, periodEnd time.Time) []inventory.MeteringEntry {
 	cores := inst.Cores
 	memGiB := inst.MemoryGiB
 
@@ -414,6 +435,7 @@ func computeInstanceMeters(inst inventory.ComputeInstanceRecord, durationSeconds
 			ResourceType: "compute_instance",
 			ResourceID:   inst.InstanceID,
 			TenantID:     inst.Tenant,
+			ProjectID:    projectID,
 			MeterName:    "vm_uptime_seconds",
 			Value:        durationSeconds,
 			Unit:         "seconds",
@@ -424,6 +446,7 @@ func computeInstanceMeters(inst inventory.ComputeInstanceRecord, durationSeconds
 			ResourceType: "compute_instance",
 			ResourceID:   inst.InstanceID,
 			TenantID:     inst.Tenant,
+			ProjectID:    projectID,
 			MeterName:    "vm_cpu_core_seconds",
 			Value:        float64(cores) * durationSeconds,
 			Unit:         "core_seconds",
@@ -434,6 +457,7 @@ func computeInstanceMeters(inst inventory.ComputeInstanceRecord, durationSeconds
 			ResourceType: "compute_instance",
 			ResourceID:   inst.InstanceID,
 			TenantID:     inst.Tenant,
+			ProjectID:    projectID,
 			MeterName:    "vm_memory_gib_seconds",
 			Value:        float64(memGiB) * durationSeconds,
 			Unit:         "gib_seconds",

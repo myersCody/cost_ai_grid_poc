@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Store struct {
-	pool   *pgxpool.Pool
-	logger *slog.Logger
+	pool           *pgxpool.Pool
+	logger         *slog.Logger
+	projectCache   sync.Map
 }
 
 func NewStore(pool *pgxpool.Pool, logger *slog.Logger) *Store {
@@ -21,6 +23,24 @@ func NewStore(pool *pgxpool.Pool, logger *slog.Logger) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool
+}
+
+func (s *Store) DefaultProjectForTenant(ctx context.Context, tenantID string) string {
+	if tenantID == "" {
+		return "default"
+	}
+	if cached, ok := s.projectCache.Load(tenantID); ok {
+		return cached.(string)
+	}
+	var projectID string
+	err := s.pool.QueryRow(ctx,
+		"SELECT project_id FROM inventory_project WHERE tenant = $1 LIMIT 1",
+		tenantID).Scan(&projectID)
+	if err != nil || projectID == "" {
+		projectID = "default"
+	}
+	s.projectCache.Store(tenantID, projectID)
+	return projectID
 }
 
 // RunMigrations creates the inventory tables if they don't exist.
@@ -261,6 +281,12 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_alerts_tenant ON alerts (tenant_id, period);
+
+-- project dimension on metering and cost entries
+ALTER TABLE metering_entries ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE cost_entries ADD COLUMN IF NOT EXISTS project_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_me_project ON metering_entries (project_id);
+CREATE INDEX IF NOT EXISTS idx_ce_project ON cost_entries (project_id);
 `
 
 const schemaEvolutions = `
@@ -303,10 +329,10 @@ func (s *Store) InsertRawEvent(ctx context.Context, ev RawEvent) (bool, error) {
 func (s *Store) InsertMeteringEntry(ctx context.Context, entry MeteringEntry) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO metering_entries
-			(raw_event_id, resource_type, resource_id, tenant_id, meter_name, value, unit, period_start, period_end)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(raw_event_id, resource_type, resource_id, tenant_id, project_id, meter_name, value, unit, period_start, period_end)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, entry.RawEventID, entry.ResourceType, entry.ResourceID, entry.TenantID,
-		entry.MeterName, entry.Value, entry.Unit, entry.PeriodStart, entry.PeriodEnd)
+		entry.ProjectID, entry.MeterName, entry.Value, entry.Unit, entry.PeriodStart, entry.PeriodEnd)
 
 	if err != nil {
 		return fmt.Errorf("insert metering entry %s/%s: %w", entry.ResourceID, entry.MeterName, err)
@@ -983,7 +1009,7 @@ func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName 
 func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]MeteringEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT me.id, me.raw_event_id, me.resource_type, me.resource_id, me.tenant_id,
-		       me.meter_name, me.value, me.unit, me.period_start, me.period_end
+		       me.project_id, me.meter_name, me.value, me.unit, me.period_start, me.period_end
 		FROM metering_entries me
 		LEFT JOIN cost_entries ce ON ce.metering_entry_id = me.id
 		WHERE ce.id IS NULL
@@ -999,7 +1025,7 @@ func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]Meteri
 	for rows.Next() {
 		var r MeteringEntry
 		if err := rows.Scan(&r.ID, &r.RawEventID, &r.ResourceType, &r.ResourceID,
-			&r.TenantID, &r.MeterName, &r.Value, &r.Unit, &r.PeriodStart, &r.PeriodEnd); err != nil {
+			&r.TenantID, &r.ProjectID, &r.MeterName, &r.Value, &r.Unit, &r.PeriodStart, &r.PeriodEnd); err != nil {
 			return nil, err
 		}
 		results = append(results, r)
@@ -1011,10 +1037,10 @@ func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]Meteri
 func (s *Store) InsertCostEntry(ctx context.Context, entry CostEntry) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO cost_entries
-			(metering_entry_id, rate_id, tenant_id, resource_type, resource_id, meter_name,
+			(metering_entry_id, rate_id, tenant_id, project_id, resource_type, resource_id, meter_name,
 			 metered_value, cost_amount, currency, period_start, period_end)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	`, entry.MeteringEntryID, entry.RateID, entry.TenantID, entry.ResourceType,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`, entry.MeteringEntryID, entry.RateID, entry.TenantID, entry.ProjectID, entry.ResourceType,
 		entry.ResourceID, entry.MeterName, entry.MeteredValue, entry.CostAmount,
 		entry.Currency, entry.PeriodStart, entry.PeriodEnd)
 
@@ -1210,6 +1236,8 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 		groupCol = "ce.meter_name"
 	case "resource":
 		groupCol = "ce.resource_id"
+	case "project":
+		groupCol = "ce.project_id"
 	default:
 		groupCol = "ce.tenant_id"
 	}

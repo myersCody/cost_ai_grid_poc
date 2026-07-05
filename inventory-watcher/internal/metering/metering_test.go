@@ -20,7 +20,7 @@ func TestComputeInstanceMeters(t *testing.T) {
 		Cores:      4,
 		MemoryGiB:  16,
 	}
-	entries := computeInstanceMeters(inst, 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
 
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
@@ -66,7 +66,7 @@ func TestComputeInstanceMeters_ZeroCores(t *testing.T) {
 		Cores:      0,
 		MemoryGiB:  8,
 	}
-	entries := computeInstanceMeters(inst, 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
 	if entries[1].Value != 0 {
 		t.Errorf("cpu_core_seconds should be 0 with 0 cores, got %v", entries[1].Value)
 	}
@@ -87,7 +87,7 @@ func TestClusterMeters_WithNodeSets(t *testing.T) {
 		Tenant:       "tenant-b",
 		NodeSetsJSON: nsJSON,
 	}
-	entries := clusterMeters(cl, 60.0, t0, t1)
+	entries := clusterMeters(cl, "default", 60.0, t0, t1)
 
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries (uptime + worker_node), got %d", len(entries))
@@ -109,7 +109,7 @@ func TestClusterMeters_NoNodeSets(t *testing.T) {
 		Tenant:       "tenant-c",
 		NodeSetsJSON: nil,
 	}
-	entries := clusterMeters(cl, 60.0, t0, t1)
+	entries := clusterMeters(cl, "default", 60.0, t0, t1)
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (uptime only), got %d", len(entries))
@@ -125,7 +125,7 @@ func TestClusterMeters_EmptyNodeSets(t *testing.T) {
 		Tenant:       "tenant-d",
 		NodeSetsJSON: json.RawMessage(`{}`),
 	}
-	entries := clusterMeters(cl, 60.0, t0, t1)
+	entries := clusterMeters(cl, "default", 60.0, t0, t1)
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (no worker nodes), got %d", len(entries))
 	}
@@ -141,7 +141,7 @@ func TestMaaSMeters_AllDimensions(t *testing.T) {
 		ReasoningTokens:   100,
 		Requests:          1,
 	}
-	entries := maasMeters(usage, t0, t1)
+	entries := maasMeters(usage, "default", t0, t1)
 
 	if len(entries) != 5 {
 		t.Fatalf("expected 5 entries, got %d", len(entries))
@@ -176,7 +176,7 @@ func TestMaaSMeters_ZeroDimensionsSkipped(t *testing.T) {
 		TokensIn: 500,
 		// all others zero
 	}
-	entries := maasMeters(usage, t0, t1)
+	entries := maasMeters(usage, "default", t0, t1)
 
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 entry (only tokens_in > 0), got %d", len(entries))
@@ -188,7 +188,7 @@ func TestMaaSMeters_ZeroDimensionsSkipped(t *testing.T) {
 
 func TestMaaSMeters_AllZero(t *testing.T) {
 	usage := MaaSUsage{ModelID: "model-3", TenantID: "tenant-g"}
-	entries := maasMeters(usage, t0, t1)
+	entries := maasMeters(usage, "default", t0, t1)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries for all-zero usage, got %d", len(entries))
 	}
@@ -201,7 +201,7 @@ func TestMaaSMeters_Units(t *testing.T) {
 		TokensIn: 1,
 		Requests: 1,
 	}
-	entries := maasMeters(usage, t0, t1)
+	entries := maasMeters(usage, "default", t0, t1)
 	for _, e := range entries {
 		switch e.MeterName {
 		case "maas_tokens_in":
@@ -218,7 +218,7 @@ func TestMaaSMeters_Units(t *testing.T) {
 
 func TestComputeInstanceMeters_PeriodPropagation(t *testing.T) {
 	inst := inventory.ComputeInstanceRecord{InstanceID: "vm", Tenant: "t", Cores: 1, MemoryGiB: 1}
-	entries := computeInstanceMeters(inst, 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
 	for i, e := range entries {
 		if !e.PeriodStart.Equal(t0) || !e.PeriodEnd.Equal(t1) {
 			t.Errorf("[%d] period: got %v-%v, want %v-%v", i, e.PeriodStart, e.PeriodEnd, t0, t1)

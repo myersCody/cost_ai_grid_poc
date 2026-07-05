@@ -30,6 +30,10 @@ func (m *mockStore) InsertMeteringEntryBatch(_ context.Context, entries []invent
 	return nil
 }
 
+func (m *mockStore) DefaultProjectForTenant(_ context.Context, _ string) string {
+	return "default"
+}
+
 func writeConfig(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "custom-metrics.json")
