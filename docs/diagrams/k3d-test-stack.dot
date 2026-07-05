@@ -1,0 +1,102 @@
+// k3d Test Stack — IPP End-to-End Test Architecture
+// All components deployed on local k3d for IPP integration testing
+
+digraph k3d_test_stack {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=14
+        label="IPP End-to-End Test Architecture (k3d)"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+        nodesep=0.6
+        ranksep=0.7
+        compound=true
+    ]
+    node [fontname="Helvetica" fontsize=10]
+    edge [fontname="Helvetica" fontsize=9 color="#555555"]
+
+    // ── External ──
+    hey [label="hey / wrk\n(load tester)\n850 req/s" shape=box style="filled,rounded" fillcolor="#E1F5FE" color="#0277BD"]
+    grafana_ui [label="Grafana\nlocalhost:3000" shape=box style="filled,rounded" fillcolor="#E1F5FE" color="#0277BD"]
+
+    // ── k3d cluster ──
+    subgraph cluster_k3d {
+        label="k3d cluster (k3s v1.35.5)"
+        style=filled
+        fillcolor="#FAFAFA"
+        color="#9E9E9E"
+        fontcolor="#616161"
+        fontsize=12
+
+        // ── ai-gateway namespace ──
+        subgraph cluster_ai_gw {
+            label="namespace: ai-gateway (Istio injection enabled)"
+            style=filled
+            fillcolor="#FFF3E0"
+            color="#E65100"
+            fontcolor="#E65100"
+            fontsize=11
+
+            istio_gw [label="Istio Gateway\n(Envoy proxy)\nport 80\n+ EnvoyFilter ext_proc" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+            ipp [label="IPP Payload Processor\n(PR #320 build)\ngRPC :9004\nexternal-metering plugin" shape=box style="filled,rounded" fillcolor="#C8E6C9" color="#2E7D32"]
+            katan [label="llm-katan\n(echo mode)\nport 8000\n+ Istio sidecar" shape=box style="filled,rounded" fillcolor="#F3E5F5" color="#7B1FA2"]
+        }
+
+        // ── cost-mgmt namespace ──
+        subgraph cluster_cost {
+            label="namespace: cost-mgmt"
+            style=filled
+            fillcolor="#E8F5E9"
+            color="#2E7D32"
+            fontcolor="#2E7D32"
+            fontsize=11
+
+            consumer [label="cost-event-consumer\nport 8020 (API)\nport 9000 (metrics)" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32"]
+            pg [label="PostgreSQL 16\nraw_events\nmetering_entries\ncost_entries" shape=cylinder style=filled fillcolor="#C8E6C9" color="#2E7D32"]
+        }
+
+        // ── istio-system ──
+        subgraph cluster_istio {
+            label="namespace: istio-system"
+            style=filled
+            fillcolor="#E3F2FD"
+            color="#1565C0"
+            fontcolor="#1565C0"
+            fontsize=11
+
+            istiod [label="istiod\n(Istio 1.29.2)\nENABLE_GATEWAY_API_\nINFERENCE_EXTENSION" shape=box style="filled,rounded" fillcolor="#BBDEFB" color="#1565C0"]
+        }
+
+        // ── monitoring ──
+        subgraph cluster_mon {
+            label="namespace: monitoring"
+            style=filled
+            fillcolor="#FFF9C4"
+            color="#F57F17"
+            fontcolor="#F57F17"
+            fontsize=11
+
+            prometheus [label="Prometheus\nscrape: 5s\ncost-consumer:9000" shape=box style="filled,rounded" fillcolor="#FFECB3" color="#F57F17"]
+            grafana [label="Grafana\nport 3000\ndatasource: Prometheus" shape=box style="filled,rounded" fillcolor="#FFECB3" color="#F57F17"]
+        }
+    }
+
+    // ── Request flow ──
+    hey -> istio_gw [label="POST /v1/chat/completions\n+ X-MaaS-* headers" color="#0277BD" fontcolor="#0277BD"]
+    istio_gw -> ipp [label="ext_proc\ngRPC" color="#E65100" fontcolor="#E65100" style=dashed]
+    ipp -> consumer [label="① checkBalance\nGET /customers/..." color="#2E7D32" fontcolor="#2E7D32" style=dashed]
+    istio_gw -> katan [label="forward\nrequest" color="#7B1FA2" fontcolor="#7B1FA2"]
+    katan -> istio_gw [label="response\n+ usage" color="#7B1FA2" fontcolor="#7B1FA2" constraint=false]
+    ipp -> consumer [label="② reportUsage\nPOST /api/v1/events\n(CloudEvent)" color="#2E7D32" fontcolor="#2E7D32" style=dashed]
+    consumer -> pg [label="store" color="#2E7D32" fontcolor="#2E7D32"]
+
+    // ── Monitoring ──
+    prometheus -> consumer [label="scrape\n/metrics" color="#F57F17" fontcolor="#F57F17" style=dotted]
+    grafana_ui -> grafana [label="port-forward\n:3000" color="#F57F17" fontcolor="#F57F17" style=dotted]
+    grafana -> prometheus [color="#F57F17" style=dotted]
+
+    // ── Istio control ──
+    istiod -> istio_gw [label="xDS config\n+ EnvoyFilter" color="#1565C0" fontcolor="#1565C0" style=dotted]
+}
