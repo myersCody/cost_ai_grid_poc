@@ -1,5 +1,9 @@
 # IPP End-to-End Stress Test Report — 2026-07-05
 
+## Test Architecture
+
+![k3d Test Stack](../diagrams/k3d-test-stack.svg)
+
 ## Setup
 
 Full IPP gateway stack on local k3d (see [k3d-ipp-deployment.md](k3d-ipp-deployment.md)):

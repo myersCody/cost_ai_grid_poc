@@ -131,8 +131,8 @@ func TestIngestMaaSEvent(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	// Verify raw event stored
@@ -173,8 +173,8 @@ func TestIngestMaaSEventDuplicate(t *testing.T) {
 	// First request
 	resp1, _ := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
 	resp1.Body.Close()
-	if resp1.StatusCode != http.StatusAccepted {
-		t.Errorf("first request: expected 202, got %d", resp1.StatusCode)
+	if resp1.StatusCode != http.StatusNoContent {
+		t.Errorf("first request: expected 204, got %d", resp1.StatusCode)
 	}
 
 	// Second request with same event_id — raw_events has no unique
@@ -183,8 +183,8 @@ func TestIngestMaaSEventDuplicate(t *testing.T) {
 	// If a unique index on event_id is added, this would return 409.
 	resp2, _ := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusAccepted {
-		t.Errorf("second request: expected 202 (no dedup by default), got %d", resp2.StatusCode)
+	if resp2.StatusCode != http.StatusNoContent {
+		t.Errorf("second request: expected 204 (no dedup by default), got %d", resp2.StatusCode)
 	}
 }
 
@@ -209,8 +209,8 @@ func TestIngestMaaSEventNonBillable(t *testing.T) {
 	resp.Body.Close()
 
 	// Event accepted (stored in raw_events) but no metering
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	var count int
@@ -255,8 +255,8 @@ func TestIngestVMHeartbeat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	ctx := context.Background()
@@ -346,8 +346,8 @@ func TestIngestClusterHeartbeat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	ctx := context.Background()
@@ -509,8 +509,8 @@ func TestIngestVMaaSAuthoritativeFormat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	ctx := context.Background()
@@ -595,8 +595,8 @@ func TestIngestCaaSAuthoritativeFormat(t *testing.T) {
 		t.Fatalf("control plane request failed: %v", err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("control plane: expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("control plane: expected 204, got %d", resp.StatusCode)
 	}
 
 	// Worker node event
@@ -625,8 +625,8 @@ func TestIngestCaaSAuthoritativeFormat(t *testing.T) {
 		t.Fatalf("worker request failed: %v", err)
 	}
 	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusAccepted {
-		t.Errorf("worker: expected 202, got %d", resp2.StatusCode)
+	if resp2.StatusCode != http.StatusNoContent {
+		t.Errorf("worker: expected 204, got %d", resp2.StatusCode)
 	}
 
 	ctx := context.Background()
@@ -689,8 +689,8 @@ func TestIngestIPPAuthoritativeFormat(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
 	}
 
 	ctx := context.Background()
@@ -788,6 +788,39 @@ func TestBalanceCheckResponseFormat(t *testing.T) {
 	// The actual value depends on quota state, so we just check the struct is well-formed
 }
 
+// TestEventIngestResponseCode verifies the event ingest endpoint returns
+// a status code that the IPP external-metering client accepts (200 or 204).
+// The IPP client's reportUsage function only considers 200 and 204 as success.
+// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
+// Source: https://github.com/noyitz/metering-simulator/blob/main/openapi.yaml (204 for event accepted)
+func TestEventIngestResponseCode(t *testing.T) {
+	eventID := fmt.Sprintf("test-ipp-compat-%d", time.Now().UnixNano())
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "inference.tokens.used",
+		"source":      "maas-gateway",
+		"id":          eventID,
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"subject":     "test-user",
+		"data": map[string]interface{}{
+			"user": "test-user", "model": "test-model",
+			"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+		},
+	}
+
+	body, _ := json.Marshal(event)
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// IPP client accepts 200 and 204 only. We return 204 (matching metering-simulator OpenAPI spec).
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		t.Errorf("IPP compatibility: expected 200 or 204, got %d (IPP client will log an error for any other code)", resp.StatusCode)
+	}
+}
+
 // ── Custom metrics ──
 
 func writeTestConfig(t *testing.T, content string) string {
@@ -847,10 +880,10 @@ func TestIngestCustomMetricEvent(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode != http.StatusNoContent {
 		var respBody map[string]string
 		json.NewDecoder(resp.Body).Decode(&respBody)
-		t.Fatalf("expected 202, got %d: %v", resp.StatusCode, respBody)
+		t.Fatalf("expected 204, got %d: %v", resp.StatusCode, respBody)
 	}
 
 	ctx := context.Background()
@@ -926,8 +959,8 @@ func TestIngestCustomMetricEvent_MissingField(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
 	}
 
 	ctx := context.Background()

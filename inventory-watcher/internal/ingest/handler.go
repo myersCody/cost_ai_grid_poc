@@ -225,8 +225,10 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics.EventsProcessedTotal.WithLabelValues(ce.Type, "accepted").Inc()
-	w.WriteHeader(http.StatusAccepted)
-	writeJSON(w, map[string]string{"status": "accepted"})
+	// IPP external-metering client accepts 200 and 204 (not 202).
+	// Metering-simulator OpenAPI spec uses 204 for event accepted.
+	// Source: docs/specs/maas-metering-openapi.yaml
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent) error {
