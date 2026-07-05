@@ -78,6 +78,40 @@ Zero errors in both configurations.
 - Port-forward adds ~1ms overhead vs in-cluster
 - PostgreSQL is ephemeral (no persistent volume)
 
+## Performance Optimization Opportunities
+
+### In-Memory Balance Cache
+
+The balance check queries PostgreSQL on every request (0.36ms avg).
+Since we're the only writer to the database, we can maintain an
+in-memory running total per tenant and skip the DB query entirely.
+
+**Approach:**
+- Use [gocache](https://github.com/eko/gocache) with Ristretto
+  (in-memory) backend — swappable to Redis when scaling to multiple pods
+- Cache key: `balance:{tenant_id}:{meter_name}`
+- Invalidate on metering entry insert (which we control)
+- TTL: 5-10 seconds as safety net
+- Expected improvement: balance check from 0.36ms to <0.01ms
+
+**Estimated throughput gain:** 15-30% (balance check is ~30% of
+per-request CPU time at high concurrency)
+
+### Batch Inserts
+
+Currently we insert `raw_events` and `metering_entries` one row at a
+time. Batching via multi-row `INSERT` or `COPY` would reduce PG
+round-trips. Each event produces 1 raw_event + 2-5 metering entries =
+3-6 individual inserts.
+
+**Estimated throughput gain:** 20-40% for the ingest path
+
+### Connection Pool Tuning
+
+Default pgx pool size may be undersized for high concurrency. Profiling
+the pool utilization under load would identify if connections are the
+bottleneck at >50 concurrent requests.
+
 ## Fixes Applied During Testing
 
 ### 202 → 204 Response Code

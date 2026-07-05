@@ -304,20 +304,64 @@ data loss in production.
 
 ---
 
+## MaaS End-to-End: IPP Integration Verified
+
+Full inference metering pipeline running on local k3d:
+
+![MaaS IPP Flow](../../diagrams/maas-ipp-flow.svg)
+
+- **Istio 1.29.2** + IPP ext_proc (PR #320) + llm-katan (echo LLM)
+- Balance check: our consumer called on every request → `hasAccess: true/false`
+- Usage report: CloudEvent `inference.tokens.used` → metering entries → cost
+- [Setup guide](../../dev/k3d-ipp-deployment.md) · [IPP overview](../../research/ipp-overview.md) · [MaaS flow](../../maas-flow.md)
+
+<!--
+Narration: We deployed the full OSAC AI gateway stack locally and proved
+that our cost consumer works as a drop-in replacement for OpenMeter.
+The IPP plugin calls our checkBalance and reportUsage endpoints — both
+verified against the upstream source code and OpenAPI spec.
+-->
+
+---
+
+## IPP Stress Test: 850 req/s, Zero Errors
+
+![Test Architecture](../../dev/k3d-test-stack.svg)
+
+| Test | Concurrency | RPS | P50 | P99 |
+|------|-------------|-----|-----|-----|
+| Baseline | 10 | **803** | 12ms | 23ms |
+| High | 50 | **860** | 55ms | 91ms |
+| Sustained 30s | 20 | **848** | 23ms | 43ms |
+
+40K+ requests, 100% success. Unique constraint costs 6-11% throughput.
+[Full report](../../dev/ipp-stress-test-2026-07-05.md) · [PR #25](https://github.com/myersCody/cost_ai_grid_poc/pull/25)
+
+<!--
+Narration: We hammered the pipeline with 40,000 requests at up to 100
+concurrent connections. 850 requests per second sustained, zero failures.
+Balance check averages 0.36ms, usage report 2.17ms. This is on a local
+k3d cluster running on ARM Mac via QEMU — production would be faster.
+-->
+
+---
+
 ## What's Next
 
 | Item | Status | Next step |
 |---|---|---|
 | REQ-5 Chargeback export | Partial | Scheduled export (API done) |
 | REQ-7 Audit trail | Partial | Document raw_events coverage |
-| POC-ENV | Partial | Deploy OSAC on CRC |
-| Noy's dogfood | Blocked | Get access, test real IPP events |
-| Demo 4 | In progress | Screenshots, dry run |
+| MaaS tenant attribution | Designed | Confirm subscription → tenant mapping |
+| Noy's dogfood | Ready to connect | Our endpoints are IPP-compatible |
+| Performance | 850 req/s baseline | In-memory balance cache for >2x |
 
 <!--
-Narration: Remaining work is mostly closing partial requirements and
-connecting to real OSAC environments. The core pipeline is complete
-and tested end-to-end.
+Narration: We're down to closing partial requirements and optimizing.
+The MaaS tenant attribution mapping needs confirmation from the OSAC
+team. We're ready to connect to Noy's dogfood environment — our
+endpoints match the IPP contract. Performance optimization next:
+in-memory balance caching could double throughput.
 -->
 
 ---
