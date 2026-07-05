@@ -163,10 +163,10 @@ Zero errors in both configurations — all requests succeed regardless.
 - Port-forward adds ~1ms overhead vs in-cluster
 - PostgreSQL is ephemeral (no persistent volume) — production perf would differ
 
-## Known Issue
+## Fixed: 202 → 204 Response Code
 
-The IPP logs `"failed to report usage to metering system: usage report
-returned status 202"` for each event. The IPP client expects 200 or 204
-but we return 202 (Accepted). The event IS received and processed —
-this is a cosmetic error that should be fixed by returning 200 instead
-of 202 from our handler. Does not affect functionality.
+The IPP client expects 200 or 204 for usage reports. We previously
+returned 202, causing IPP to log `"failed to report usage"` despite
+events being processed correctly. Fixed to return 204 (matching the
+metering-simulator OpenAPI spec). Regression test added:
+`TestEventIngestResponseCode`.
