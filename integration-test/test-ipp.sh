@@ -59,7 +59,7 @@ check "metrics endpoint" curl -sf "$METRICS/metrics"
 echo ""
 echo "--- Gateway readiness ---"
 check "gateway programmed" kubectl wait --for=condition=Programmed gateway/ai-gateway -n ai-gateway --timeout=10s
-check "IPP pod running" kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=payload-processing -n ai-gateway --timeout=10s
+check "IPP pod running" kubectl wait --for=condition=available deployment/payload-processing -n ai-gateway --timeout=10s
 check "llm-katan running" kubectl wait --for=condition=ready pod -l app=llm-katan -n ai-gateway --timeout=10s
 
 # ── 3. Direct balance check ──
