@@ -99,6 +99,9 @@ jobs:
 
       - name: Deploy cost-consumer
         run: |
+          # deploy-consumer.sh expects this file for the OSAC secret.
+          # No OSAC in the IPP test — create a dummy token.
+          echo "unused" > /tmp/osac_token.txt
           bash integration-test/deploy-consumer.sh
           # No OSAC in this test — disable watcher and reconciler to avoid noise.
           kubectl set env deployment/cost-event-consumer -n cost-mgmt \
