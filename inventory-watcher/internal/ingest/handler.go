@@ -16,6 +16,7 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
+	"github.com/osac-project/cost-event-consumer/internal/rating"
 )
 
 // CloudEvent is a generic CloudEvents 1.0 envelope. The Data field is
@@ -453,7 +454,6 @@ type quotaStatusResponse struct {
 	Quotas   []inventory.QuotaStatus `json:"quotas"`
 }
 
-var thresholdLevels = []float64{50, 70, 90, 100}
 
 func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 	tenantID := r.PathValue("tenant_id")
@@ -498,8 +498,8 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			pct = (consumed / q.LimitValue) * 100
 		}
 
-		thresholds := make(map[string]bool, len(thresholdLevels))
-		for _, t := range thresholdLevels {
+		thresholds := make(map[string]bool, len(rating.ThresholdLevels))
+		for _, t := range rating.ThresholdLevels {
 			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
 		}
 
@@ -632,6 +632,7 @@ func (h *Handler) handlePipelineSummary(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, "summary query failed", http.StatusInternalServerError)
 		return
 	}
+	metrics.LiveModels.Set(float64(summary.LiveModels))
 	writeJSON(w, summary)
 }
 

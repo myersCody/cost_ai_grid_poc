@@ -51,6 +51,7 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) {
 	r.logger.Info("starting reconciliation")
 
 	r.reconcileProjects(ctx)
+	r.reconcileTenants(ctx)
 	r.reconcileComputeInstances(ctx)
 	r.reconcileClusters(ctx)
 	r.reconcileInstanceTypes(ctx)
@@ -242,6 +243,31 @@ func (r *Reconciler) reconcileProjects(ctx context.Context) {
 	}
 
 	r.logger.Info("reconciled projects", "count", len(osacProjects))
+}
+
+func (r *Reconciler) reconcileTenants(ctx context.Context) {
+	osacTenants, err := r.client.ListTenants(ctx)
+	if err != nil {
+		r.logger.Error("failed to list OSAC tenants", "error", err)
+		return
+	}
+
+	for _, t := range osacTenants {
+		createdAt := time.Now()
+		if t.Metadata.CreationTimestamp != nil {
+			createdAt = *t.Metadata.CreationTimestamp
+		}
+
+		if err := r.store.UpsertTenant(ctx, inventory.TenantRecord{
+			TenantID:  t.ID,
+			Name:      t.Metadata.Name,
+			CreatedAt: createdAt,
+		}); err != nil {
+			r.logger.Error("failed to upsert tenant", "id", t.ID, "error", err)
+		}
+	}
+
+	r.logger.Info("reconciled tenants", "count", len(osacTenants))
 }
 
 func (r *Reconciler) reconcileBareMetalInstances(ctx context.Context) {

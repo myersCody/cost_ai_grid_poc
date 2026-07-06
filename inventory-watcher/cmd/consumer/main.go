@@ -82,9 +82,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := metering.New(store, 60*time.Second, logger)
+	m := metering.New(store, cfg.MeteringInterval, logger)
 	s := summarizer.New(store, cfg.SummarizeInterval, logger)
-	rt := rating.New(store, 30*time.Second, logger)
+	rt := rating.New(store, cfg.RatingInterval, logger)
 
 	var w *watcher.Watcher
 	var r *reconciler.Reconciler
@@ -104,8 +104,8 @@ func main() {
 		"osac_url", cfg.OSACBaseURL,
 		"reconcile_interval", cfg.ReconcileInterval,
 		"summarize_interval", cfg.SummarizeInterval,
-		"metering_interval", "60s",
-		"rating_interval", "30s",
+		"metering_interval", cfg.MeteringInterval,
+		"rating_interval", cfg.RatingInterval,
 		"ingest_addr", cfg.IngestListenAddr,
 		"disabled_components", cfg.DisabledComponents,
 	)

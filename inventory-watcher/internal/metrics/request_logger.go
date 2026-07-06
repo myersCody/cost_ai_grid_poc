@@ -35,6 +35,8 @@ func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 
 func generateID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return "0000000000000000"
+	}
 	return hex.EncodeToString(b)
 }

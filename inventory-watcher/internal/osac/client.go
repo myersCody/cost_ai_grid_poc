@@ -141,6 +141,11 @@ func (c *Client) ListProjects(ctx context.Context) ([]Project, error) {
 	return listAll[Project](ctx, c, "/api/fulfillment/v1/projects")
 }
 
+// ListTenants returns all tenants from OSAC.
+func (c *Client) ListTenants(ctx context.Context) ([]Tenant, error) {
+	return listAll[Tenant](ctx, c, "/api/fulfillment/v1/tenants")
+}
+
 // ListBareMetalInstances returns all bare metal instances from OSAC.
 func (c *Client) ListBareMetalInstances(ctx context.Context) ([]BareMetalInstance, error) {
 	return listAll[BareMetalInstance](ctx, c, "/api/fulfillment/v1/baremetal_instances")

@@ -14,6 +14,8 @@ type Config struct {
 	InventoryDBURL     string
 	ReconcileInterval  time.Duration
 	SummarizeInterval  time.Duration
+	MeteringInterval   time.Duration
+	RatingInterval     time.Duration
 	LogLevel           string
 	LogFormat               string
 	IngestListenAddr        string
@@ -54,8 +56,8 @@ func (c *Config) Diagnostics() DiagnosticInfo {
 		InventoryDBHost:   maskDBURL(c.InventoryDBURL),
 		ReconcileInterval: c.ReconcileInterval.String(),
 		SummarizeInterval: c.SummarizeInterval.String(),
-		MeteringInterval:  "60s",
-		RatingInterval:    "30s",
+		MeteringInterval:  c.MeteringInterval.String(),
+		RatingInterval:    c.RatingInterval.String(),
 		LogLevel:          c.LogLevel,
 		LogFormat:               c.LogFormat,
 		IngestListenAddr:        c.IngestListenAddr,
@@ -110,6 +112,8 @@ func Load() *Config {
 		InventoryDBURL:     envOrDefault("INVENTORY_DB_URL", "postgres://user:pass@localhost:5434/costdb"),
 		ReconcileInterval:  durationOrDefault("RECONCILE_INTERVAL", 1*time.Hour),
 		SummarizeInterval:  durationOrDefault("SUMMARIZE_INTERVAL", 1*time.Hour),
+		MeteringInterval:   durationOrDefault("METERING_INTERVAL", 60*time.Second),
+		RatingInterval:     durationOrDefault("RATING_INTERVAL", 30*time.Second),
 		LogLevel:           envOrDefault("LOG_LEVEL", "info"),
 		LogFormat:          envOrDefault("LOG_FORMAT", "text"),
 		IngestListenAddr:   os.Getenv("INGEST_LISTEN_ADDR"),

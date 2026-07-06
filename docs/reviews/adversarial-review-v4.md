@@ -89,62 +89,62 @@ validation — exactly the kind of thing that bites in production.
 | 14 | Unbounded slice allocation | Low | v1 | Open |
 | 15 | No request IDs/tracing | Low | v1 | Fixed |
 | 16 | UTC timezone assumption | Info | v1 | Accepted |
-| 17 | No CI pipeline | Info | v1 | **Fixed** |
+| 17 | No CI pipeline | Info | v1 | Fixed |
 | 18 | `safeGo` silently kills goroutine | High | v2 | Fixed |
 | 19 | Unbounded `tenant_id` metric label | High | v2 | Fixed |
 | 20 | Middleware ordering hides panics | High | v2 | Fixed |
 | 21 | Metrics server hard close | Medium | v2 | Fixed |
 | 22 | `/metrics` auth exemption | Medium | v2 | Fixed |
 | 23 | `normalizePath` fragility | Medium | v2 | Partially fixed |
-| 24 | `rand.Read` error ignored | Low | v2 | Open |
+| 24 | `rand.Read` error ignored | Low | v2 | **Fixed** — error checked, falls back to zero ID |
 | 25 | Request ID not in context | Low | v2 | Open |
-| 26 | No middleware tests | Low | v2 | Open |
+| 26 | No middleware tests | Low | v2 | **Fixed** — `internal/metrics/middleware_test.go` exists with `normalizePath` tests |
 | 27 | Stale resource gauges | Low | v2 | Accepted (PoC) |
 | 28 | 404 path cardinality attack | Medium | v2 | Fixed |
 | 29 | Probe log noise | Low | v2 | Fixed |
-| 30 | `LiveModels` gauge never set | Low | v2 | Open |
+| 30 | `LiveModels` gauge never set | Low | v2 | **Fixed** — set from `PipelineSummary` in summary handler |
 | 31 | No sweep error metrics | Low | v2 | Open |
 | 32 | Panic response Content-Type | Info | v2 | Fixed |
 | 33 | Import grouping | Info | v2 | Fixed |
-| 34 | `toFloat64` partial string parse | Medium | v3 | **Fixed** (commit a713817) |
-| 35 | Negative meter values accepted | Medium | v3 | **Fixed** (commit a713817) |
+| 34 | `toFloat64` partial string parse | Medium | v3 | Fixed (commit a713817) |
+| 35 | Negative meter values accepted | Medium | v3 | Fixed (commit a713817) |
 | 36 | Config-driven metric cardinality | Medium | v3 | Accepted (PoC) |
 | 37 | Double JSON unmarshal | Low | v3 | Accepted (PoC) |
 | 38 | Classify fallback overwrites | Low | v3 | Accepted (PoC) |
 | 39 | No config hot-reload | Low | v3 | Accepted (PoC) |
 | 40 | Shadow warning unclear | Low | v3 | Open |
 | 41 | `data.` prefix stripping | Info | v3 | Accepted |
-| **42** | **`InsertMeteringEntryBatch` drops `project_id`** | **Critical** | v4 | **Open** |
-| **43** | **Stored XSS in debug dashboard** | **High** | v4 | **Open** |
-| **44** | **Unbounded concurrent reconciliation** | **High** | v4 | **Open** |
-| **45** | **No event dedup after unique index removal** | **High** | v4 | **Open** |
-| **46** | **Negative DurationSeconds not validated** | **High** | v4 | **Open** |
-| **47** | **Cross-tenant data access in quota/balance endpoints** | **High** | v4 | **Deferred** (needs RBAC/authz model — [open question #18](../requirements/osac-open-questions.md)) |
-| **48** | **Watch stream has no read timeout** | **High** | v4 | **Open** |
-| **49** | **`/readyz` does not reflect component health** | **High** | v4 | **Open** |
-| **50** | **Rating sweep N+1 queries** | **High** | v4 | **Open** |
-| **51** | **`UnratedMeteringEntries` LEFT JOIN anti-pattern** | **High** | v4 | **Open** |
-| **52** | **No tests for watcher/reconciler/authn/store** | **High** | v4 | **Open** |
-| **53** | **CSV injection in cost report export** | **Medium** | v4 | **Open** |
-| **54** | **Wildcard CORS on sensitive endpoints** | **Medium** | v4 | **Accepted (PoC)** — useful for port-forward/dev testing |
-| **55** | **No rate limiting on event ingestion** | **Medium** | v4 | **Open** |
-| **56** | **Debug dashboard enabled by default** | **Medium** | v4 | **Deferred** (post-PoC) |
-| **57** | **Non-transactional metering + last_metered_at update** | **Medium** | v4 | **Open** |
-| **58** | **Silent NodeSets JSON parse failure** | **Medium** | v4 | **Fixed** |
-| **59** | **`projectCache` never invalidates** | **Medium** | v4 | **Fixed** |
-| **60** | **OSAC `listAll` pagination unbounded** | **Medium** | v4 | **Open** |
-| **61** | **Store is a God object (1300+ lines, 50 methods)** | **Medium** | v4 | **Accepted (PoC)** |
-| **62** | **Handler mixes routing, processing, and business logic** | **Medium** | v4 | **Accepted (PoC)** |
-| **63** | **Missing ADRs for auth model and tenant attribution** | **Medium** | v4 | **Open** |
-| **64** | **CI lacks golangci-lint / staticcheck** | **Medium** | v4 | **Open** |
-| **65** | **Watcher backoff never resets after successful connection** | **Medium** | v4 | **Fixed** |
-| **66** | **Hardcoded metering and rating intervals** | **Low** | v4 | **Open** |
-| **67** | **Duplicated `thresholdLevels` variable** | **Low** | v4 | **Open** |
-| **68** | **Rating sweep silently skips unrated entries forever** | **Low** | v4 | **Open** |
-| **69** | **Swallowed `json.Marshal` errors in watcher** | **Low** | v4 | **Open** |
-| **70** | **Containerfile Go version mismatch** | **Low** | v4 | **Open** |
-| **71** | **DurationMs truncation loses sub-second precision** | **Low** | v4 | **Open** |
-| **72** | **Inconsistent JSON response patterns** | **Low** | v4 | **Accepted (PoC)** |
+| 42 | `InsertMeteringEntryBatch` drops `project_id` | Critical | v4 | **Fixed** — batch insert now includes all 10 columns including `project_id` |
+| 43 | Stored XSS in debug dashboard | High | v4 | **Fixed** — `esc()` function added; `row.group` and config values all escaped via `esc()`/`cfgRow()` |
+| 44 | Unbounded concurrent reconciliation | High | v4 | **Fixed** — `atomic.Bool` guard + 429 response if already running |
+| 45 | No event dedup after unique index removal | High | v4 | **Accepted (PoC)** — dedup at metering/cost level by design; raw_events is append-only audit log; re-adding unique index is documented as opt-in |
+| 46 | Negative DurationSeconds not validated | High | v4 | **Fixed** — `handler.go:246` rejects `duration_seconds <= 0` with error |
+| 47 | Cross-tenant data access in quota/balance endpoints | High | v4 | Deferred (needs RBAC/authz model — [open question #18](../requirements/osac-open-questions.md)) |
+| 48 | Watch stream has no read timeout | High | v4 | **Accepted (PoC)** — streaming connection intentionally has no timeout; context cancellation handles shutdown; watcher reconnects with backoff on disconnect |
+| 49 | `/readyz` does not reflect component health | High | v4 | **Fixed** — pings database with 2s timeout, returns 503 "database unreachable" on failure |
+| 50 | Rating sweep N+1 queries | High | v4 | **Fixed** — `AllActiveRates` batch-loads all rates once, `buildRateIndex` + `matchRate` does in-memory lookup per entry |
+| 51 | `UnratedMeteringEntries` LEFT JOIN anti-pattern | High | v4 | **Fixed** — `rated_at` column + partial index `idx_me_unrated ON metering_entries (id) WHERE rated_at IS NULL`; query is `WHERE rated_at IS NULL` |
+| 52 | No tests for watcher/reconciler/authn/store | High | v4 | Open |
+| 53 | CSV injection in cost report export | Medium | v4 | Open — `row.Group` written directly to CSV without escaping |
+| 54 | Wildcard CORS on sensitive endpoints | Medium | v4 | Accepted (PoC) — useful for port-forward/dev testing |
+| 55 | No rate limiting on event ingestion | Medium | v4 | Open |
+| 56 | Debug dashboard enabled by default | Medium | v4 | Deferred (post-PoC) |
+| 57 | Non-transactional metering + last_metered_at update | Medium | v4 | Open — still no transaction boundaries |
+| 58 | Silent NodeSets JSON parse failure | Medium | v4 | Fixed |
+| 59 | `projectCache` never invalidates | Medium | v4 | Fixed |
+| 60 | OSAC `listAll` pagination unbounded | Medium | v4 | Open — no safety cap on total pages |
+| 61 | Store is a God object (1300+ lines, 50 methods) | Medium | v4 | Accepted (PoC) |
+| 62 | Handler mixes routing, processing, and business logic | Medium | v4 | Accepted (PoC) |
+| 63 | Missing ADRs for auth model and tenant attribution | Medium | v4 | Open |
+| 64 | CI lacks golangci-lint / staticcheck | Medium | v4 | **Partially fixed** — CI has `go vet` but no `golangci-lint` or `staticcheck` |
+| 65 | Watcher backoff never resets after successful connection | Medium | v4 | Fixed |
+| 66 | Hardcoded metering and rating intervals | Low | v4 | **Fixed** — `METERING_INTERVAL` and `RATING_INTERVAL` env vars wired through config |
+| 67 | Duplicated `thresholdLevels` variable | Low | v4 | **Fixed** — exported `rating.ThresholdLevels`, handler.go references it |
+| 68 | Rating sweep silently skips unrated entries forever | Low | v4 | Open — entries with no matching rate stay `rated_at IS NULL` and re-appear every sweep |
+| 69 | Swallowed `json.Marshal` errors in watcher | Low | v4 | **Accepted** — `json.Marshal` on `map[string]string` is infallible; no runtime failure possible |
+| 70 | Containerfile Go version mismatch | Low | v4 | **Accepted** — `GOTOOLCHAIN=auto` downloads correct Go version; base image just needs Go 1.21+ |
+| 71 | DurationMs truncation loses sub-second precision | Low | v4 | Open — `int(data.DurationMs / 1000)` truncates, losing sub-second portion |
+| 72 | Inconsistent JSON response patterns | Low | v4 | Accepted (PoC) |
 
 ## New Findings Detail (v4)
 

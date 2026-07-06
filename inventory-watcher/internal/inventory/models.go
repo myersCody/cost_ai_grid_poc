@@ -15,6 +15,15 @@ type ProjectRecord struct {
 	LastUpdated time.Time       `json:"last_updated"`
 }
 
+type TenantRecord struct {
+	TenantID    string          `json:"tenant_id"`
+	Name        string          `json:"name"`
+	Labels      json.RawMessage `json:"labels"`
+	CreatedAt   time.Time       `json:"created_at"`
+	DeletedAt   *time.Time      `json:"deleted_at"`
+	LastUpdated time.Time       `json:"last_updated"`
+}
+
 type ComputeInstanceRecord struct {
 	InstanceID    string          `json:"instance_id"`
 	Name          string          `json:"name"`

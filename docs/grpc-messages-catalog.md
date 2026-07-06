@@ -101,7 +101,12 @@ Our Go mapping: [`internal/osac/types.go`](../inventory-watcher/internal/osac/ty
 |---|---|
 | Proto definition | [tenant_type.proto](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/tenant_type.proto) |
 | Go type | [`internal/osac/types.go`](../inventory-watcher/internal/osac/types.go) → `Tenant` |
-| Handler | Logged but no inventory table (tenants tracked implicitly via resource ownership) |
+| Handler | [`internal/watcher/watcher.go`](../inventory-watcher/internal/watcher/watcher.go) → inline `UpsertTenant` |
+| Inventory table | `inventory_tenant` |
+
+**Key fields consumed:**
+- `id` — tenant UUID
+- `metadata.name`, `metadata.labels`, `metadata.creation_timestamp`
 
 ### BareMetalInstance
 
@@ -173,6 +178,7 @@ message Metadata {
 | GET | `/api/fulfillment/v1/clusters` | [`ListClusters`](../inventory-watcher/internal/osac/client.go) | Reconcile cluster inventory |
 | GET | `/api/fulfillment/v1/instance_types` | [`ListInstanceTypes`](../inventory-watcher/internal/osac/client.go) | Sync instance type catalog |
 | GET | `/api/fulfillment/v1/projects` | [`ListProjects`](../inventory-watcher/internal/osac/client.go) | Sync project hierarchy |
+| GET | `/api/fulfillment/v1/tenants` | [`ListTenants`](../inventory-watcher/internal/osac/client.go) | Sync tenant inventory |
 | GET | `/api/fulfillment/v1/baremetal_instances` | [`ListBareMetalInstances`](../inventory-watcher/internal/osac/client.go) | Reconcile bare metal inventory |
 | GET | `/api/fulfillment/v1/cluster_catalog_items` | [`ListClusterCatalogItems`](../inventory-watcher/internal/osac/client.go) | Sync cluster catalog items |
 | GET | `/api/fulfillment/v1/compute_instance_catalog_items` | [`ListComputeInstanceCatalogItems`](../inventory-watcher/internal/osac/client.go) | Sync compute catalog items |

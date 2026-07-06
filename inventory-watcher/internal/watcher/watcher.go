@@ -166,6 +166,19 @@ func (w *Watcher) handleCreateOrUpdate(ctx context.Context, event osac.Event) er
 			CreatedAt: createdAt,
 		})
 	}
+	if t := event.Tenant; t != nil {
+		createdAt := time.Now()
+		if t.Metadata.CreationTimestamp != nil {
+			createdAt = *t.Metadata.CreationTimestamp
+		}
+		labelsJSON, _ := json.Marshal(t.Metadata.Labels)
+		return w.store.UpsertTenant(ctx, inventory.TenantRecord{
+			TenantID:  t.ID,
+			Name:      t.Metadata.Name,
+			Labels:    labelsJSON,
+			CreatedAt: createdAt,
+		})
+	}
 	return nil
 }
 

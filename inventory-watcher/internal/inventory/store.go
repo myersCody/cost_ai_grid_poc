@@ -87,6 +87,15 @@ CREATE TABLE IF NOT EXISTS inventory_project (
 
 CREATE INDEX IF NOT EXISTS idx_proj_tenant ON inventory_project (tenant);
 
+CREATE TABLE IF NOT EXISTS inventory_tenant (
+    tenant_id      TEXT PRIMARY KEY,
+    name           TEXT NOT NULL DEFAULT '',
+    labels         JSONB DEFAULT '{}'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL,
+    deleted_at     TIMESTAMPTZ,
+    last_updated   TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS inventory_compute_instance (
     instance_id    TEXT PRIMARY KEY,
     name           TEXT NOT NULL DEFAULT '',
@@ -660,6 +669,55 @@ func (s *Store) ListAliveProjects(ctx context.Context) ([]ProjectRecord, error) 
 	for rows.Next() {
 		var r ProjectRecord
 		if err := rows.Scan(&r.ProjectID, &r.Name, &r.Tenant, &r.Labels,
+			&r.CreatedAt, &r.DeletedAt, &r.LastUpdated); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// UpsertTenant inserts or updates a tenant in the inventory.
+func (s *Store) UpsertTenant(ctx context.Context, rec TenantRecord) error {
+	labelsJSON, err := marshalLabels(rec.Labels)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO inventory_tenant
+			(tenant_id, name, labels, created_at, deleted_at, last_updated)
+		VALUES ($1, $2, $3, $4, $5, NOW())
+		ON CONFLICT (tenant_id) DO UPDATE SET
+			name = EXCLUDED.name,
+			labels = EXCLUDED.labels,
+			deleted_at = EXCLUDED.deleted_at,
+			last_updated = NOW()
+	`, rec.TenantID, rec.Name, labelsJSON, rec.CreatedAt, rec.DeletedAt)
+
+	if err != nil {
+		return fmt.Errorf("upsert tenant %s: %w", rec.TenantID, err)
+	}
+
+	s.logger.Debug("upserted tenant", "id", rec.TenantID, "name", rec.Name)
+	return nil
+}
+
+// ListAliveTenants returns all tenants not yet deleted.
+func (s *Store) ListAliveTenants(ctx context.Context) ([]TenantRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT tenant_id, name, labels, created_at, deleted_at, last_updated
+		FROM inventory_tenant WHERE deleted_at IS NULL
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []TenantRecord
+	for rows.Next() {
+		var r TenantRecord
+		if err := rows.Scan(&r.TenantID, &r.Name, &r.Labels,
 			&r.CreatedAt, &r.DeletedAt, &r.LastUpdated); err != nil {
 			return nil, err
 		}

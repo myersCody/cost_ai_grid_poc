@@ -144,7 +144,7 @@ func matchRate(idx map[rateKey]*inventory.RateRecord, tenantID, resourceType, me
 	return nil
 }
 
-var thresholdLevels = []float64{50, 70, 90, 100}
+var ThresholdLevels = []float64{50, 70, 90, 100}
 
 func (r *Rater) evaluateThresholds(ctx context.Context) {
 	now := time.Now().UTC()
@@ -173,7 +173,7 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 
 			pct := (consumed / q.LimitValue) * 100
 
-			for _, threshold := range thresholdLevels {
+			for _, threshold := range ThresholdLevels {
 				if pct >= threshold {
 					inserted, err := r.store.InsertAlert(ctx, inventory.AlertRecord{
 						TenantID:     tenantID,

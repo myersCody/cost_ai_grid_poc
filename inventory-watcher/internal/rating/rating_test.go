@@ -136,12 +136,12 @@ func TestApplyRate_EmptyTiers(t *testing.T) {
 var thresholds = []float64{50, 70, 90, 100}
 
 func TestThresholdLevels(t *testing.T) {
-	if len(thresholdLevels) != 4 {
-		t.Fatalf("expected 4 threshold levels, got %d", len(thresholdLevels))
+	if len(ThresholdLevels) != 4 {
+		t.Fatalf("expected 4 threshold levels, got %d", len(ThresholdLevels))
 	}
 	for i, want := range []float64{50, 70, 90, 100} {
-		if thresholdLevels[i] != want {
-			t.Errorf("thresholdLevels[%d] = %v, want %v", i, thresholdLevels[i], want)
+		if ThresholdLevels[i] != want {
+			t.Errorf("ThresholdLevels[%d] = %v, want %v", i, ThresholdLevels[i], want)
 		}
 	}
 }
