@@ -11,8 +11,8 @@ This document is the consolidated requirements reference for the Cost Management
 ## Project Context
 
 - Sovereign cloud built on OCP, OCP Virtualization, OpenShift AI, ACM, Ansible
-- **OSAC** (Open Sovereign AI Console) is the orchestrator — provisions clusters (HCP), VMs (OpenShift Virtualization), models (MaaS), and bare metal
-- OSAC emits **CloudEvents** for resource lifecycle and metrics; transport for VM/cluster is gRPC Watch stream + 60s reconciler (Kafka deferred — see [ADR-002](../decisions/002-arguments-against-kafka.md)); MaaS transport pending verification (Martin/Noi)
+- **OSAC** (Open Sovereign AI Cloud) is the orchestrator — provisions clusters (HCP), VMs (OpenShift Virtualization), models (MaaS), and bare metal
+- OSAC emits **CloudEvents** for resource lifecycle and metrics; transport for VM/cluster is gRPC Watch stream + 60s reconciler (Kafka deferred — see [ADR-002](../decisions/002-arguments-against-kafka.md)); MaaS transport pending verification (Martin/Noy)
 - Billing model: **capacity-based** for clusters/VMs; **consumption-based** (token/request) for MaaS
 - No Cost Management Metrics Operator (CMMO) — OSAC is the sole metric source
 - Data freshness SLA: OSAC emits within 30 sec of event; **Cost must process within 60 sec of receipt**
@@ -77,8 +77,8 @@ Connect RHCM to the OSAC Region Management Cluster (gRPC/REST APIs) to read inve
 **Acceptance Criteria:**
 - RHCM connects to OSAC Region Management Cluster APIs (gRPC/REST)
 - Can read inventory and resource state from OSAC
-- Account/tenant lifecycle synced between OSAC and RHCM
-- Workload-level info includes tenant ID, project ID, resource ID
+- Account/tenant lifecycle synced between OSAC and RHCM. Even if a tenant is deleted, or not sending data from OSAC, RHCM will not delete the metering and cost data for that tenant. The only way Cost Management deletes data is when the data becomes older than the retention period (which must be configurable).
+- Workload-level info includes OSAC tenant ID, project ID, resource ID
 - Integration does not degrade orchestrator UX
 
 **Current State:**
@@ -104,9 +104,9 @@ Connect RHCM to the OSAC Region Management Cluster (gRPC/REST APIs) to read inve
 ### REQ-1b: OSAC Heartbeat Event Ingestion
 **Priority:** CRITICAL &nbsp;·&nbsp; [COST-7795](https://redhat.atlassian.net/browse/COST-7795) &nbsp;·&nbsp; **Rank:** 4
 
-Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain tenant ID, project ID, resource ID, and hardware config. The first event auto-registers the tenant.
+Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 meeting) at configurable intervals (10s–30s). Events contain OSAC tenant ID, project ID, resource ID, and hardware config (or service catalog item?). The first event auto-registers the tenant.
 
-> **What "heartbeat events" means:** CloudEvents emitted periodically by OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep; the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
+> **What "heartbeat events" means:** CloudEvents emitted periodically by OSAC metering collector (`osac-metering-discover-poc`) — same schema as state transition events but fired on a timer and pre-populated with `duration_seconds` and metering quantities. The PoC satisfies this today via a local 60-second sweep (is this enough in the worst case?); the collector is not required for the demo. See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md) for the full explanation.
 
 **Acceptance Criteria:**
 - RHCM can receive heartbeat events (periodic lifecycle CloudEvents) via HTTP or Kafka
@@ -121,7 +121,7 @@ Receive heartbeat events from OSAC via HTTP or Kafka (transport TBD per Jun 24 m
 
 **Open Questions:**
 - Transport mechanism: Kafka, HTTP, NATS?
-- Interval: every 10s, every 30s proposed on the Jun 23rd meeting
+- Interval: every 10s, every 30s proposed on the Jun 23rd meeting. It should be configurable.
 
 **Scope:**
 - IN: Receive and process periodic lifecycle CloudEvents for capacity-based charging
@@ -186,6 +186,8 @@ Map OSAC's `Tenant → Project` hierarchy to RHCM's organizational model. All co
 - Cost data can be drilled down to project level within a tenant
 - Tenant/project hierarchy read from OSAC Region Management Cluster
 - Multi-tenant attribution works even when all workloads run on shared infrastructure
+- Quotas/budgets tracked per OSAC project, per tenant, and projects roll up to tenant, i. e. sum of all project consumptions cannot exceed tenant quota/budget. This also allows for overcomitting quotas/budgets at the project level.
+
 
 **Current State:**
 - RHCM currently attributes data per organization/cluster
@@ -194,15 +196,14 @@ Map OSAC's `Tenant → Project` hierarchy to RHCM's organizational model. All co
 
 **Open Questions:**
 - Will providers view cost in the Cost Management UI or in OSAC?
-- Are quotas/budgets scoped per OSAC project?
 - Is RBAC needed for providers viewing cross-project cost data?
 
 > **Decision (Jul 2, 2026):** RBAC scope for PoC is **tenant + project level only**.
-> Fine-grained InsightsRBAC is deferred post-PoC. Project + tenant attribution is
-> already tracked on the event-driven side. Owners: Pau, Moti, Cody. (~00:17:18)
+> Fine-grained InsightsRBAC is deferred post-PoC provided that Cost Management implements the concept of project within a tenant, mimicking OSAC (e.g. via Keycloak). Project + tenant attribution is
+> already tracked on the event-driven side. Owners: Pau, Moti, Cody. (~00:17:18).
 
 **Scope:**
-- IN: Tenant and project-level cost attribution
+- IN: Tenant and project-level cost attribution. Implementing projects in Cost Management PoC.
 - OUT: Full tenant lifecycle management (onboarding, offboarding); fine-grained InsightsRBAC (post-PoC)
 
 ---
@@ -224,20 +225,21 @@ Single system of record for cost data with drill-down by tenant, project, model,
 
 **Scope:**
 - IN: Granular cost breakdowns at listed dimensions for both capacity and MaaS workloads
-- OUT: Account hierarchy management
+- OUT: Account hierarchy management. FOCUS export (but desirable if we have to choose something).
 
 ---
 
 ### REQ-9: Quota/Budget Status API
 **Priority:** HIGH &nbsp;·&nbsp; [COST-7801](https://redhat.atlassian.net/browse/COST-7801) &nbsp;·&nbsp; **Rank:** 9
 
-Provide a workflow to allow OSAC to check quota and budge status before allowing resource creation.
+Provide a workflow to allow OSAC to check quota and budget status before allowing resource creation.
 
 (e.g., "Is this tenant within quota?"). Enforcement remains with OSAC; RHCM provides the data.
 
 **Definitions:**
 - **Quota** = dimensional limit (CPU core-hours, GiB RAM-hour, tokens, etc.). Providers set quotas for tenants based on accumulated metered consumption over a period.
 - **Budget** = monetary quota. Cost applied to metering = budget consumed.
+- **Cost** = metered consumption x rates.
 
 **Acceptance Criteria:**
 - API responds with sub-second latency
@@ -245,16 +247,16 @@ Provide a workflow to allow OSAC to check quota and budge status before allowing
 - Supports threshold checks (50%, 70%, 90%, 100%)
 - Source of truth for quota data agreed between OSAC and RHCM
 - Grace period requirements verified
+- RHCM implements quota definition, irregardless of OSAC implementing them or not.
+- Quotas/budgets are scoped to tenants and tenant projects and rolled up from projects to tenants.
 
 **Current State:**
 - No quota/budget API exists in RHCM today
-- Open question: is RHCM or OSAC the source of truth for quota/budget data?
 - Enforcement is OSAC responsibility; RHCM provides the data
 
 **Open Questions:**
-- Single source of truth for quotas: Cost, OSAC, or both (synchronized)?
-- Are quotas/budgets scoped to tenant projects?
 - Do AI Grid requirements include grace periods?
+- Open question: is RHCM or OSAC the source of truth for quota/budget data? It does not matter: RHCM must implement quotas anyway (for non-OSAC customers) and typically who the source of truth is is resolved at implementation time via Professional Services (the source of truth could be a third system, e.g. ServiceNow, that is synchornized to both OSAC and RHCM).
 
 **Scope:**
 - IN: Read-only quota/budget status API for OSAC consumption
@@ -273,7 +275,7 @@ Send threshold notifications from RHCM to OSAC when cost/quota consumption hits 
 > Owners: Moti, Ronnie. (~00:51–00:53)
 
 **Acceptance Criteria:**
-- RHCM sends notifications to OSAC at configurable thresholds
+- RHCM sends notifications to OSAC at configurable (by OSAC administrators) thresholds, therefore synchornization of those thresholds is also required.
 - Notifications include: tenant ID, resource/project context, threshold level, current consumption
 - Transport mechanism agreed between OSAC and RHCM
 - Notifications delivered reliably (no silent drops)
@@ -309,13 +311,14 @@ Ability to create a custom rate from an arbitrary metric dimension emitted by OS
 - Requires investigation of CloudEvent schema extensibility
 
 **Open Questions:**
-- Who defines new dimensions to collect: OSAC or Cost team?
+- Who defines new dimensions to collect: OSAC or Cost team? As of today, it's OSAC, so for now, RHCM may define new rates based on existing metrics (i. e. "creative math" defined in RHCM). To collect new meters/metrics (per OSAC vocabulary in (OSAC PRD-78)[https://github.com/osac-project/enhancement-proposals/pull/78]), RHCM would need a backchannel to communicate with OSAC.
 - ID, classification, and rate naming scheme to be agreed
+- How to express those custom rates, i.e. RHCM would need to say "I want meter/metric X and meter/metric Y and multiply them by 24 and divide them by 3600 and sum X + Y". Should we use a programming language (e.g. PyScript, like CloudKitty), JSON (e.g. JDM, like GoRules) or what?
 
 **Related Ticket:** COST-3549
 
 **Scope:**
-- IN: Configurable ingestion of arbitrary CloudEvent dimensions as billable rate inputs
+- IN: Configurable ingestion of arbitrary ¿existing? ¿custom? CloudEvent dimensions as billable rate inputs
 - OUT: UI for custom metric management (API/config acceptable for PoC)
 
 ---
@@ -323,13 +326,13 @@ Ability to create a custom rate from an arbitrary metric dimension emitted by OS
 ### REQ-2a: Cloud Events from OpenShift AI (MaaS) & Token Metering
 **Priority:** HIGH &nbsp;·&nbsp; [COST-7797](https://redhat.atlassian.net/browse/COST-7797) &nbsp;·&nbsp; **Rank:** 12
 
-Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEvents with token counts (input, output, inference) and request counts. Track token dimensions (input, output, cached, reasoning) and GPU compute metrics for MaaS workloads provisioned via OSAC. Define MaaS rate structure priced per million units. Cost must compute MaaS cost within 60 seconds of receiving data.
+Consume CloudEvents from OpenShift AI 3.5 for token metering. OSAC emits CloudEvents with token counts (input, output, inference) and request counts. Track token dimensions (input, output, cached, reasoning) and GPU compute metrics for MaaS workloads provisioned via OSAC. Define MaaS rate structure priced per million units. Cost must compute MaaS cost within 60 seconds of receiving data.
 
 **Acceptance Criteria:**
 - RHCM can receive and process CloudEvents from OpenShift AI / OSAC for MaaS workloads
 - Events ingested within 30 seconds of emission
 - JSON/CloudEvents format parsed and stored
-- MaaS cost computed within 60 seconds of event receipt
+- MaaS cost computed within 60 seconds of event receipt and quotas/budget updates (REQ-9)
 - Validated with at least one MaaS workload type
 - Ingest `prompt_tokens`, `completion_tokens`, `cached_tokens` from vLLM / OSAC MaaS CloudEvents
 - Track hardware compute: GPU SKU, VRAM (GB-seconds), queue wait
@@ -337,7 +340,7 @@ Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEven
 - MaaS rate structure defined: tokens in/out, inference tokens, requests — priced per million units
 
 **Current State:**
-- OpenShift AI CloudEvents capability is upcoming (v5)
+- OpenShift AI CloudEvents capability is upcoming (v3.5)
 - Spike in progress investigating metrics for MaaS chargeback
 - Hardware compute metrics covered
 - Token details partially available via vLLM usage API
@@ -346,7 +349,7 @@ Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEven
 **Open Questions:**
 - Who collects RHOAI MaaS metrics — Cost or OSAC?
 - What fields will OSAC MaaS CloudEvents contain?
-- **Do events include `tenant_id` and `project_id` attribution?** — Martin verifying via Noi's emulator (action from Jul 2 meeting). If missing, OSAC may need to act as middleman. (~00:28:50–00:32:02)
+- **Do events include `tenant_id` and `project_id` attribution?** — Martin verifying via Noy's emulator (action from Jul 2 meeting). If missing, OSAC may need to act as middleman. (~00:28:50–00:32:02)
 - Transport for MaaS events: HTTP, Kafka, other?
 - Who defines the MaaS rate structure: Cost team, OSAC, or agreed jointly?
 
@@ -364,9 +367,10 @@ Consume CloudEvents from OpenShift AI 5 for token metering. OSAC emits CloudEven
 Read OSAC service catalog for pricing. Manual setup acceptable for PoC; API sync deferred to a later phase.
 
 **Acceptance Criteria:**
-- RHCM can read OSAC catalog items (instance types, storage tiers)
+- RHCM adds service catalog capabilities
+- RHCM can read OSAC catalog items (instance types,cluster sizes, storage tiers, etc) and synchronize
 - Price lists in RHCM correspond to OSAC catalog offerings
-- Cost calculations use catalog-based rates (capacity charging)
+- Cost calculations use catalog-based rate. Prices for catalog items must be set per catalog item, not based on the rates that constitue a catalog item, i. e. not a direct function of rates x capacity, i. e. a VM with 4 vCPUs and 16 GiB RAM might cost 3x what a VM with 2 vCPUs and 8 GiB RAM.
 
 **Current State:**
 - RHCM does not have a service catalog feature today
@@ -395,7 +399,7 @@ Export chargeback reports covering both capacity-based (provisioned compute hour
 
 **Scope:**
 - IN: Chargeback reports for all PoC workloads (capacity and MaaS)
-- OUT: Integration with external billing systems
+- OUT: Integration with external billing systems. Export in FOCUS format (though highly desirable).
 
 ---
 
@@ -410,7 +414,7 @@ Zero-leakage reconciliation, immutable audit logs, and dispute resolution suppor
 - Human-readable error logging for billing dispute resolution
 
 **Current State:**
-- In-product; no gap identified
+- In-product; no gap identified. COST-575 and COST-3358 have more extensive requirements for the audit trail.
 - On-prem audit work tracked under POC-ENV (COST-7541, COST-7328)
 
 ---
@@ -424,6 +428,7 @@ Tiered pricing support for both capacity-based and MaaS consumption-based rates.
 - Rate engine supports multiple pricing tiers per resource type
 - Tiers apply to both capacity-based rates (cluster/VM) and MaaS consumption rates (tokens, requests)
 - Tier configuration is manageable without code changes
+- Irregardless of OSAC implementing cost tiers, RHCM must implement cost tiers. At implementation time, Mr Customer will decide which one is the source of truth: OSAC, RHCM or a third tool (eg. ServiceNow).
 
 **Current State:**
 - Tiered pricing implemented in the PoC rate engine for MaaS token rates (per-event semantics)
@@ -431,7 +436,7 @@ Tiered pricing support for both capacity-based and MaaS consumption-based rates.
 - See [req11 gap analysis](req11-cost-tiers-gap-analysis.md) for full breakdown and implementation options
 
 **Open Questions:**
-- Where do cost tiers live: OSAC, Cost, or both synced?
+- None
 
 **Related Ticket:** COST-6951
 
@@ -444,16 +449,16 @@ Tiered pricing support for both capacity-based and MaaS consumption-based rates.
 ### REQ-12: Daily OpenShift Virtualization Costs
 **Priority:** LOW &nbsp;·&nbsp; [COST-7808](https://redhat.atlassian.net/browse/COST-7808) &nbsp;·&nbsp; **Rank:** 17
 
-Daily cost calculation for OpenShift Virtualization workloads provisioned through OSAC.
+Daily cost calculation for OpenShift Virtualization workloads (VMs) provisioned through OSAC.
 
 **Acceptance Criteria:**
-- TBD — pending confirmation from Product Management
+- Daily, even hourly, cost for every resource (CaaS, VMaaS, etc) is highly desirable. While not an explicity requirement yet, it feels like it will be just a matter of time.
 
 **Current State:**
-- Requirement pending confirmation; scope and acceptance criteria not yet defined
+- This is one of the epics comprised in [PRD13 OpenShift Virtualization fit & finish](https://github.com/project-koku/enhancements/pull/11)
 
 **Scope:**
-- TBD — Confirm with Product Management
+- Daily cost for OpenShift Virtualization VMs
 
 ---
 
@@ -467,7 +472,7 @@ Support bare metal nodes provisioned through OSAC (BMaaS), including potential s
 **Acceptance Criteria:**
 - RHCM receives and processes bare metal service CloudEvents from OSAC
 - Costs calculated for bare metal nodes based on provisioned capacity
-- Standalone bare metal nodes (not attached to OpenShift) supported if required by AI Grid
+- Standalone bare metal nodes (not attached to OpenShift, i. e. Windows bare metal, RHEL bare metal, Oracle Exadata, etc) supported if required by AI Grid
 
 **Current State:**
 - OSAC bare metal service is actively being built (confirmed Jun 24)
@@ -502,7 +507,6 @@ Support bare metal nodes provisioned through OSAC (BMaaS), including potential s
 | Usage-based metering (non-event) | Capacity-based charging adopted for PoC. Heartbeat events from OSAC replace the hourly CSV pipeline. |
 | Quota enforcement / budget cutoff | RHCM provides quota status data only (REQ-9); enforcement is OSAC's responsibility via OPA. |
 | Token/budget limit definitions | Limits are defined and owned by OSAC at the tenant/project level; RHCM notifies when thresholds are met. |
-| Service catalog ownership | The catalog (instance types, storage tiers) lives in OSAC. RHCM reads it for pricing; no bilateral sync needed for PoC. |
 | Cost Management Operator | Helm chart used for on-prem deployment; full OLM-based operator is post-PoC. |
 | Full UI | API-only is acceptable for PoC. OSAC provides user-facing consoles; RHCM may provide admin-level UI only. |
 | Full SaaS deployment | On-premise only. No SaaS features or resource optimization. |
@@ -520,6 +524,7 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 - MFA enforced on administrative consoles
 - RBAC governs access to rate structures and limit overrides
 - All API endpoints use modern crypto transport and short-lived tokens
+- Using Insights RBAC is NOT mandatory. We may want to move to a simpler model, e.g. per tenant and project, like OSAC does, where authentication is what matters and authorization hardly exists.
 
 **Current State:**
 - In-product; no gap identified
