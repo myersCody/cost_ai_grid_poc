@@ -199,7 +199,9 @@ func clusterMeters(cl inventory.ClusterRecord, projectID string, durationSeconds
 		Size     int32  `json:"size"`
 	}
 	if cl.NodeSetsJSON != nil {
-		_ = json.Unmarshal(cl.NodeSetsJSON, &nodeSets)
+		if err := json.Unmarshal(cl.NodeSetsJSON, &nodeSets); err != nil {
+			slog.Warn("failed to parse cluster node_sets JSON", "cluster", cl.ClusterID, "error", err)
+		}
 	}
 
 	totalWorkerNodeSeconds := 0.0

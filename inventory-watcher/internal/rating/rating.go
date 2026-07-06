@@ -51,18 +51,34 @@ func (r *Rater) sweep(ctx context.Context) {
 		return
 	}
 
-	rated := 0
+	now := time.Now().UTC()
+	allRates, err := r.store.AllActiveRates(ctx, now)
+	if err != nil {
+		r.logger.Error("failed to fetch rates", "error", err)
+		return
+	}
+
+	rateIndex := buildRateIndex(allRates)
+
+	var costEntries []inventory.CostEntry
+	var ratedIDs []int64
 	skipped := 0
+	skippedMeters := make(map[string]bool)
+
 	for _, me := range entries {
-		rate, err := r.store.FindRate(ctx, me.TenantID, me.ResourceType, me.MeterName, me.PeriodEnd)
-		if err != nil {
+		rate := matchRate(rateIndex, me.TenantID, me.ResourceType, me.MeterName)
+		if rate == nil {
 			skipped++
+			key := me.ResourceType + "/" + me.MeterName
+			if !skippedMeters[key] {
+				r.logger.Warn("no rate found for meter", "resource_type", me.ResourceType, "meter_name", me.MeterName)
+				skippedMeters[key] = true
+			}
 			continue
 		}
 
 		cost := ApplyRate(me.Value, *rate)
-
-		if err := r.store.InsertCostEntry(ctx, inventory.CostEntry{
+		costEntries = append(costEntries, inventory.CostEntry{
 			MeteringEntryID: me.ID,
 			RateID:          rate.ID,
 			TenantID:        me.TenantID,
@@ -75,18 +91,57 @@ func (r *Rater) sweep(ctx context.Context) {
 			Currency:        rate.Currency,
 			PeriodStart:     me.PeriodStart,
 			PeriodEnd:       me.PeriodEnd,
-		}); err != nil {
-			r.logger.Error("failed to insert cost entry", "metering_id", me.ID, "error", err)
-			continue
-		}
+		})
+		ratedIDs = append(ratedIDs, me.ID)
 		metrics.CostEntriesCreated.WithLabelValues(me.ResourceType, rate.CostType).Inc()
-		rated++
 	}
 
-	r.logger.Info("rating sweep complete", "rated", rated, "skipped", skipped)
+	if len(costEntries) > 0 {
+		if err := r.store.InsertCostEntryBatch(ctx, costEntries); err != nil {
+			r.logger.Error("failed to batch insert cost entries", "count", len(costEntries), "error", err)
+			return
+		}
+		if err := r.store.MarkMeteringEntriesRated(ctx, ratedIDs); err != nil {
+			r.logger.Error("failed to mark entries rated", "count", len(ratedIDs), "error", err)
+		}
+	}
+
+	r.logger.Info("rating sweep complete", "rated", len(costEntries), "skipped", skipped)
 	metrics.RatingSweepDuration.Observe(time.Since(start).Seconds())
 
 	r.evaluateThresholds(ctx)
+}
+
+type rateKey struct {
+	tenant       string
+	resourceType string
+	meterName    string
+}
+
+func buildRateIndex(rates []inventory.RateRecord) map[rateKey]*inventory.RateRecord {
+	idx := make(map[rateKey]*inventory.RateRecord, len(rates))
+	for i := range rates {
+		r := &rates[i]
+		tenant := ""
+		if r.TenantID != nil {
+			tenant = *r.TenantID
+		}
+		key := rateKey{tenant: tenant, resourceType: r.ResourceType, meterName: r.MeterName}
+		if _, exists := idx[key]; !exists {
+			idx[key] = r
+		}
+	}
+	return idx
+}
+
+func matchRate(idx map[rateKey]*inventory.RateRecord, tenantID, resourceType, meterName string) *inventory.RateRecord {
+	if r, ok := idx[rateKey{tenant: tenantID, resourceType: resourceType, meterName: meterName}]; ok {
+		return r
+	}
+	if r, ok := idx[rateKey{tenant: "", resourceType: resourceType, meterName: meterName}]; ok {
+		return r
+	}
+	return nil
 }
 
 var thresholdLevels = []float64{50, 70, 90, 100}

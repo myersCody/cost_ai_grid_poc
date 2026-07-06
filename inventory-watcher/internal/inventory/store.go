@@ -302,6 +302,12 @@ ALTER TABLE rates ADD COLUMN IF NOT EXISTS effective_to TIMESTAMPTZ;
 -- Replace with a regular index for lookups.
 DROP INDEX IF EXISTS idx_raw_events_event_id;
 CREATE INDEX IF NOT EXISTS idx_raw_events_event_id ON raw_events (event_id);
+
+-- rated_at replaces the LEFT JOIN anti-pattern for finding unrated entries.
+-- Query changes from "LEFT JOIN cost_entries WHERE ce.id IS NULL" (scans two
+-- growing tables) to "WHERE rated_at IS NULL" (indexed, O(unrated)).
+ALTER TABLE metering_entries ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_me_unrated ON metering_entries (id) WHERE rated_at IS NULL;
 `
 
 // InsertRawEvent appends an event to the immutable audit log.
@@ -348,17 +354,17 @@ func (s *Store) InsertMeteringEntryBatch(ctx context.Context, entries []Metering
 		return s.InsertMeteringEntry(ctx, entries[0])
 	}
 
-	query := "INSERT INTO metering_entries (raw_event_id, resource_type, resource_id, tenant_id, meter_name, value, unit, period_start, period_end) VALUES "
-	args := make([]interface{}, 0, len(entries)*9)
+	query := "INSERT INTO metering_entries (raw_event_id, resource_type, resource_id, tenant_id, project_id, meter_name, value, unit, period_start, period_end) VALUES "
+	args := make([]interface{}, 0, len(entries)*10)
 	for i, e := range entries {
 		if i > 0 {
 			query += ", "
 		}
-		base := i * 9
-		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9)
+		base := i * 10
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10)
 		args = append(args, e.RawEventID, e.ResourceType, e.ResourceID,
-			e.TenantID, e.MeterName, e.Value, e.Unit, e.PeriodStart, e.PeriodEnd)
+			e.TenantID, e.ProjectID, e.MeterName, e.Value, e.Unit, e.PeriodStart, e.PeriodEnd)
 	}
 	_, err := s.pool.Exec(ctx, query, args...)
 	if err != nil {
@@ -634,6 +640,7 @@ func (s *Store) UpsertProject(ctx context.Context, rec ProjectRecord) error {
 		return fmt.Errorf("upsert project %s: %w", rec.ProjectID, err)
 	}
 
+	s.projectCache.Delete(rec.Tenant)
 	s.logger.Debug("upserted project", "id", rec.ProjectID, "name", rec.Name)
 	return nil
 }
@@ -1005,15 +1012,15 @@ func (s *Store) FindRate(ctx context.Context, tenantID, resourceType, meterName 
 	return &rec, nil
 }
 
-// UnratedMeteringEntries returns metering entries that don't have a corresponding cost entry.
+// UnratedMeteringEntries returns metering entries not yet rated.
+// Uses a partial index on (id) WHERE rated_at IS NULL — O(unrated), not O(total).
 func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]MeteringEntry, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT me.id, me.raw_event_id, me.resource_type, me.resource_id, me.tenant_id,
-		       me.project_id, me.meter_name, me.value, me.unit, me.period_start, me.period_end
-		FROM metering_entries me
-		LEFT JOIN cost_entries ce ON ce.metering_entry_id = me.id
-		WHERE ce.id IS NULL
-		ORDER BY me.id
+		SELECT id, raw_event_id, resource_type, resource_id, tenant_id,
+		       project_id, meter_name, value, unit, period_start, period_end
+		FROM metering_entries
+		WHERE rated_at IS NULL
+		ORDER BY id
 		LIMIT $1
 	`, limit)
 	if err != nil {
@@ -1031,6 +1038,77 @@ func (s *Store) UnratedMeteringEntries(ctx context.Context, limit int) ([]Meteri
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// MarkMeteringEntriesRated sets rated_at on the given entry IDs.
+func (s *Store) MarkMeteringEntriesRated(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	query := "UPDATE metering_entries SET rated_at = NOW() WHERE id = ANY($1)"
+	_, err := s.pool.Exec(ctx, query, ids)
+	return err
+}
+
+// AllActiveRates returns all rates currently in effect.
+func (s *Store) AllActiveRates(ctx context.Context, at time.Time) ([]RateRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, resource_type, meter_name, koku_metric, cost_type,
+		       price_per_unit, currency, tiers, description, effective_from, effective_to
+		FROM rates
+		WHERE effective_from <= $1
+		  AND (effective_to IS NULL OR effective_to > $1)
+		ORDER BY resource_type, meter_name, CASE WHEN tenant_id IS NOT NULL AND tenant_id != '' THEN 0 ELSE 1 END
+	`, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []RateRecord
+	for rows.Next() {
+		var r RateRecord
+		var tiersJSON []byte
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.ResourceType, &r.MeterName,
+			&r.KokuMetric, &r.CostType, &r.PricePerUnit, &r.Currency, &tiersJSON,
+			&r.Description, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+			return nil, err
+		}
+		if tiersJSON != nil {
+			if err := json.Unmarshal(tiersJSON, &r.Tiers); err != nil {
+				return nil, fmt.Errorf("unmarshal tiers for rate %d: %w", r.ID, err)
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// InsertCostEntryBatch inserts multiple cost entries in a single statement.
+func (s *Store) InsertCostEntryBatch(ctx context.Context, entries []CostEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if len(entries) == 1 {
+		return s.InsertCostEntry(ctx, entries[0])
+	}
+
+	query := "INSERT INTO cost_entries (metering_entry_id, rate_id, tenant_id, project_id, resource_type, resource_id, meter_name, metered_value, cost_amount, currency, period_start, period_end) VALUES "
+	args := make([]interface{}, 0, len(entries)*12)
+	for i, e := range entries {
+		if i > 0 {
+			query += ", "
+		}
+		base := i * 12
+		query += fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6,
+			base+7, base+8, base+9, base+10, base+11, base+12)
+		args = append(args, e.MeteringEntryID, e.RateID, e.TenantID, e.ProjectID,
+			e.ResourceType, e.ResourceID, e.MeterName, e.MeteredValue,
+			e.CostAmount, e.Currency, e.PeriodStart, e.PeriodEnd)
+	}
+	_, err := s.pool.Exec(ctx, query, args...)
+	return err
 }
 
 // InsertCostEntry stores a computed cost record.

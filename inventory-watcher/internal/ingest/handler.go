@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/osac-project/cost-event-consumer/internal/config"
@@ -113,6 +114,7 @@ type Handler struct {
 	cfg           *config.Config
 	customMetrics *custommetrics.Registry
 	reconciler    Reconciler
+	reconciling   atomic.Bool
 	logger        *slog.Logger
 }
 
@@ -241,6 +243,10 @@ func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent)
 		return nil
 	}
 
+	if data.DurationSeconds <= 0 {
+		return fmt.Errorf("invalid duration_seconds: %d (must be positive)", data.DurationSeconds)
+	}
+
 	if err := h.store.UpsertComputeInstance(ctx, inventory.ComputeInstanceRecord{
 		InstanceID:  data.InstanceID,
 		Tenant:      data.TenantID,
@@ -281,6 +287,10 @@ func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
 
 	if !metering.IsClusterBillable(data.State) {
 		return nil
+	}
+
+	if data.DurationSeconds <= 0 {
+		return fmt.Errorf("invalid duration_seconds: %d (must be positive)", data.DurationSeconds)
 	}
 
 	periodStart := ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second)
@@ -346,6 +356,9 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 	}
 	if data.TenantID == "" && data.User != "" {
 		data.TenantID = data.User
+	}
+	if data.DurationSeconds < 0 {
+		return fmt.Errorf("invalid duration_seconds: %d (must be non-negative)", data.DurationSeconds)
 	}
 	if data.DurationMs > 0 && data.DurationSeconds == 0 {
 		data.DurationSeconds = int(data.DurationMs / 1000)
@@ -706,7 +719,14 @@ func (h *Handler) handleReconcile(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, "reconciler not configured", http.StatusServiceUnavailable)
 		return
 	}
-	go h.reconciler.ReconcileAll(context.Background())
+	if !h.reconciling.CompareAndSwap(false, true) {
+		writeErrorJSON(w, "reconciliation already in progress", http.StatusTooManyRequests)
+		return
+	}
+	go func() {
+		defer h.reconciling.Store(false)
+		h.reconciler.ReconcileAll(context.Background())
+	}()
 	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, map[string]string{"status": "reconciliation triggered"})
 }

@@ -182,6 +182,7 @@ function fmt(n) {
   return '$' + n.toFixed(6);
 }
 function fmtInt(n) { return n.toLocaleString(); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function switchTab(el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -208,7 +209,7 @@ function cfgRow(key, val) {
   let cls = '';
   if (val === true) { val = 'Yes'; cls = 'yes'; }
   else if (val === false) { val = 'No'; cls = 'no'; }
-  return '<div class="config-row"><span class="config-key">' + key + '</span><span class="config-val ' + cls + '">' + val + '</span></div>';
+  return '<div class="config-row"><span class="config-key">' + esc(key) + '</span><span class="config-val ' + cls + '">' + esc(String(val)) + '</span></div>';
 }
 
 async function fetchConfig() {
@@ -283,7 +284,7 @@ async function refresh() {
         const suppPct = row.cost > 0 ? (row.supplementary_cost / row.cost * 100) : 0;
         const barWidth = (row.cost / maxCost * 100);
         return '<tr>' +
-          '<td>' + row.group + '</td>' +
+          '<td>' + esc(row.group) + '</td>' +
           '<td class="num">' + fmtInt(row.entries) + '</td>' +
           '<td class="num"><strong>' + fmt(row.cost) + '</strong></td>' +
           '<td class="num" style="color:var(--green)">' + fmt(row.infrastructure_cost) + '</td>' +

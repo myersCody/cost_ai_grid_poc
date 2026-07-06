@@ -57,6 +57,23 @@ Key references:
 - Koku cost models source: `koku/cost_models/models.py`
 - Koku OCP provider map: `koku/api/report/ocp/provider_map.py`
 
+## Refactoring Rules
+
+**Never refactor billing-critical code without tests.** Before changing
+metering, rating, cost calculation, or inventory logic:
+
+1. Write tests that capture the current behavior (inputs → outputs)
+2. Verify the tests pass on the existing code
+3. Refactor
+4. Verify the same tests still pass
+
+Billing-critical paths: `internal/rating/`, `internal/metering/`,
+`internal/inventory/store.go` (metering/cost queries),
+`internal/ingest/handler.go` (event processing + meter creation).
+
+If existing test coverage is insufficient for a safe refactor, **add
+tests first as a separate commit** before making functional changes.
+
 ## Build
 
 ```bash

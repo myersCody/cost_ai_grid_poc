@@ -430,9 +430,11 @@ func TestQuotaStatusMissingTenant(t *testing.T) {
 func TestQuotaStatusWithConsumption(t *testing.T) {
 	ctx := context.Background()
 
-	// Seed a quota for test-tenant so consumption is visible
+	tenant := fmt.Sprintf("quota-test-%d", time.Now().UnixNano())
+
+	// Seed a quota
 	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
-		TenantID:      "test-tenant",
+		TenantID:      tenant,
 		MeterName:     "maas_tokens_in",
 		LimitValue:    1000000,
 		Unit:          "tokens",
@@ -440,8 +442,32 @@ func TestQuotaStatusWithConsumption(t *testing.T) {
 		EffectiveFrom: time.Now().Add(-1 * time.Hour),
 	})
 
-	// We already ingested MaaS events for test-tenant in earlier tests.
-	resp, err := http.Get(testServer.URL + "/api/v1/quotas/test-tenant")
+	// Ingest an event so consumption > 0
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "osac.model.lifecycle",
+		"source":      "test",
+		"id":          fmt.Sprintf("quota-evt-%d", time.Now().UnixNano()),
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"data": map[string]interface{}{
+			"tenant_id":        tenant,
+			"model_id":         "quota-model",
+			"model_name":       "quota-model",
+			"state":            "MODEL_STATE_RUNNING",
+			"tokens_in":        5000,
+			"tokens_out":       1000,
+			"requests":         10,
+			"duration_seconds":  60,
+		},
+	}
+	body, _ := json.Marshal(event)
+	postResp, err := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("event ingest failed: %v", err)
+	}
+	postResp.Body.Close()
+
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas/" + tenant)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -969,5 +995,153 @@ func TestIngestCustomMetricEvent_MissingField(t *testing.T) {
 		"SELECT count(*) FROM metering_entries WHERE resource_id = $1", resourceID).Scan(&count)
 	if err != nil || count != 1 {
 		t.Errorf("expected 1 metering entry (missing field skipped), got %d (err=%v)", count, err)
+	}
+}
+
+func TestIngestNegativeDurationRejected(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		data      map[string]interface{}
+	}{
+		{
+			name:      "VM negative duration",
+			eventType: "osac.compute_instance.lifecycle",
+			data: map[string]interface{}{
+				"duration_seconds": -3600,
+				"tenant_id":       "evil-tenant",
+				"instance_id":     fmt.Sprintf("neg-vm-%d", time.Now().UnixNano()),
+				"state":           "COMPUTE_INSTANCE_STATE_RUNNING",
+				"cores":           4,
+				"memory_gib":      16,
+			},
+		},
+		{
+			name:      "VM zero duration",
+			eventType: "osac.compute_instance.lifecycle",
+			data: map[string]interface{}{
+				"duration_seconds": 0,
+				"tenant_id":       "evil-tenant",
+				"instance_id":     fmt.Sprintf("zero-vm-%d", time.Now().UnixNano()),
+				"state":           "COMPUTE_INSTANCE_STATE_RUNNING",
+				"cores":           4,
+				"memory_gib":      16,
+			},
+		},
+		{
+			name:      "Cluster negative duration",
+			eventType: "osac.cluster.lifecycle",
+			data: map[string]interface{}{
+				"duration_seconds": -86400,
+				"tenant_id":       "evil-tenant",
+				"cluster_id":      fmt.Sprintf("neg-cl-%d", time.Now().UnixNano()),
+				"host_type":       "_control_plane",
+				"state":           "CLUSTER_STATE_READY",
+			},
+		},
+		{
+			name:      "MaaS negative duration",
+			eventType: "osac.model.lifecycle",
+			data: map[string]interface{}{
+				"duration_seconds": -60,
+				"tenant_id":       "evil-tenant",
+				"model_id":        fmt.Sprintf("neg-model-%d", time.Now().UnixNano()),
+				"model_name":      "bad-model",
+				"state":           "MODEL_STATE_RUNNING",
+				"tokens_in":       100,
+				"tokens_out":      50,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			event := map[string]interface{}{
+				"specversion": "1.0",
+				"type":        tt.eventType,
+				"source":      "test",
+				"id":          fmt.Sprintf("neg-dur-%d", time.Now().UnixNano()),
+				"time":        time.Now().UTC().Format(time.RFC3339),
+				"data":        tt.data,
+			}
+			body, _ := json.Marshal(event)
+			resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusNoContent {
+				t.Errorf("expected rejection for negative/zero duration, but got 204")
+			}
+		})
+	}
+}
+
+func TestBatchMeteringEntryIncludesProjectID(t *testing.T) {
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	instanceID := "proj-test-vm-" + suffix
+
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "osac.compute_instance.lifecycle",
+		"source":      "test",
+		"id":          "proj-evt-" + suffix,
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"data": map[string]interface{}{
+			"duration_seconds":   60,
+			"cpu_core_seconds":   240,
+			"memory_gib_seconds": 960,
+			"tenant_id":          "tenant-proj-test",
+			"instance_id":        instanceID,
+			"state":              "COMPUTE_INSTANCE_STATE_RUNNING",
+			"cores":              4,
+			"memory_gib":         16,
+		},
+	}
+	body, _ := json.Marshal(event)
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+
+	ctx := context.Background()
+	rows, err := testStore.Pool().Query(ctx,
+		"SELECT project_id FROM metering_entries WHERE resource_id = $1", instanceID)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var projectID string
+		if err := rows.Scan(&projectID); err != nil {
+			t.Fatalf("scan failed: %v", err)
+		}
+		count++
+		// project_id should be present in the column (not dropped by batch insert).
+		// The value may be empty for this test since no project is assigned,
+		// but the column itself must exist and not cause a SQL error.
+	}
+	if count != 3 {
+		t.Errorf("expected 3 metering entries from batch insert, got %d", count)
+	}
+}
+
+func TestReconcileNotConfigured(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/api/v1/reconcile", "", nil)
+	if err != nil {
+		t.Fatalf("reconcile request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 (no reconciler), got %d", resp.StatusCode)
 	}
 }

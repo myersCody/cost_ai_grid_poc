@@ -145,3 +145,94 @@ func TestThresholdLevels(t *testing.T) {
 		}
 	}
 }
+
+func strPtr(s string) *string { return &s }
+
+func TestBuildRateIndex(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+		{ID: 2, TenantID: strPtr("tenant-acme"), ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.02},
+		{ID: 3, TenantID: nil, ResourceType: "model", MeterName: "maas_tokens_in", PricePerUnit: 0.001},
+		{ID: 4, TenantID: strPtr(""), ResourceType: "cluster", MeterName: "cluster_uptime_seconds", PricePerUnit: 0.50},
+	}
+
+	idx := buildRateIndex(rates)
+
+	if len(idx) != 4 {
+		t.Fatalf("expected 4 entries in rate index, got %d", len(idx))
+	}
+
+	// Global rate (nil tenant → "")
+	r := idx[rateKey{tenant: "", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
+	if r == nil || r.ID != 1 {
+		t.Error("expected global VM rate (ID=1)")
+	}
+
+	// Tenant-specific rate
+	r = idx[rateKey{tenant: "tenant-acme", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
+	if r == nil || r.ID != 2 {
+		t.Error("expected tenant-acme VM rate (ID=2)")
+	}
+}
+
+func TestMatchRate_TenantSpecificTakesPrecedence(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+		{ID: 2, TenantID: strPtr("tenant-acme"), ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.02},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "tenant-acme", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 2 {
+		t.Errorf("expected tenant-specific rate (ID=2), got %+v", r)
+	}
+}
+
+func TestMatchRate_FallsBackToGlobal(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "tenant-unknown", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 1 {
+		t.Errorf("expected global fallback rate (ID=1), got %+v", r)
+	}
+}
+
+func TestMatchRate_ReturnsNilWhenNoMatch(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "any", "gpu_instance", "gpu_compute_seconds")
+	if r != nil {
+		t.Errorf("expected nil for unmatched meter, got %+v", r)
+	}
+}
+
+func TestMatchRate_EmptyStringTenantIsSameAsGlobal(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: strPtr(""), ResourceType: "model", MeterName: "maas_tokens_in", PricePerUnit: 0.001},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "any-tenant", "model", "maas_tokens_in")
+	if r == nil || r.ID != 1 {
+		t.Errorf("expected empty-string tenant to serve as global, got %+v", r)
+	}
+}
+
+func TestBuildRateIndex_FirstEntryWins(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, ResourceType: "model", MeterName: "maas_tokens_in", PricePerUnit: 0.001},
+		{ID: 2, TenantID: nil, ResourceType: "model", MeterName: "maas_tokens_in", PricePerUnit: 0.999},
+	}
+	idx := buildRateIndex(rates)
+
+	r := idx[rateKey{tenant: "", resourceType: "model", meterName: "maas_tokens_in"}]
+	if r == nil || r.ID != 1 {
+		t.Errorf("expected first rate to win (ID=1), got %+v", r)
+	}
+}
