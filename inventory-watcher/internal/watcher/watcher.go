@@ -30,12 +30,17 @@ func (w *Watcher) Run(ctx context.Context) error {
 	for {
 		w.logger.Info("connecting to OSAC event stream")
 
+		connectedAt := time.Now()
 		err := w.client.WatchEvents(ctx, func(event osac.Event) error {
 			return w.handleEvent(ctx, event)
 		})
 
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		if time.Since(connectedAt) > backoff {
+			backoff = time.Second
 		}
 
 		w.logger.Warn("event stream disconnected, reconnecting", "error", err, "backoff", backoff)

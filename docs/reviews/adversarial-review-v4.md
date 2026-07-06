@@ -106,8 +106,8 @@ validation — exactly the kind of thing that bites in production.
 | 31 | No sweep error metrics | Low | v2 | Open |
 | 32 | Panic response Content-Type | Info | v2 | Fixed |
 | 33 | Import grouping | Info | v2 | Fixed |
-| 34 | `toFloat64` partial string parse | Medium | v3 | Open |
-| 35 | Negative meter values accepted | Medium | v3 | Open |
+| 34 | `toFloat64` partial string parse | Medium | v3 | **Fixed** (commit a713817) |
+| 35 | Negative meter values accepted | Medium | v3 | **Fixed** (commit a713817) |
 | 36 | Config-driven metric cardinality | Medium | v3 | Accepted (PoC) |
 | 37 | Double JSON unmarshal | Low | v3 | Accepted (PoC) |
 | 38 | Classify fallback overwrites | Low | v3 | Accepted (PoC) |
@@ -119,25 +119,25 @@ validation — exactly the kind of thing that bites in production.
 | **44** | **Unbounded concurrent reconciliation** | **High** | v4 | **Open** |
 | **45** | **No event dedup after unique index removal** | **High** | v4 | **Open** |
 | **46** | **Negative DurationSeconds not validated** | **High** | v4 | **Open** |
-| **47** | **Cross-tenant data access in quota/balance endpoints** | **High** | v4 | **Open** |
+| **47** | **Cross-tenant data access in quota/balance endpoints** | **High** | v4 | **Deferred** (needs RBAC/authz model — [open question #18](../requirements/osac-open-questions.md)) |
 | **48** | **Watch stream has no read timeout** | **High** | v4 | **Open** |
 | **49** | **`/readyz` does not reflect component health** | **High** | v4 | **Open** |
 | **50** | **Rating sweep N+1 queries** | **High** | v4 | **Open** |
 | **51** | **`UnratedMeteringEntries` LEFT JOIN anti-pattern** | **High** | v4 | **Open** |
 | **52** | **No tests for watcher/reconciler/authn/store** | **High** | v4 | **Open** |
 | **53** | **CSV injection in cost report export** | **Medium** | v4 | **Open** |
-| **54** | **Wildcard CORS on sensitive endpoints** | **Medium** | v4 | **Open** |
+| **54** | **Wildcard CORS on sensitive endpoints** | **Medium** | v4 | **Accepted (PoC)** — useful for port-forward/dev testing |
 | **55** | **No rate limiting on event ingestion** | **Medium** | v4 | **Open** |
-| **56** | **Debug dashboard enabled by default** | **Medium** | v4 | **Open** |
+| **56** | **Debug dashboard enabled by default** | **Medium** | v4 | **Deferred** (post-PoC) |
 | **57** | **Non-transactional metering + last_metered_at update** | **Medium** | v4 | **Open** |
-| **58** | **Silent NodeSets JSON parse failure** | **Medium** | v4 | **Open** |
+| **58** | **Silent NodeSets JSON parse failure** | **Medium** | v4 | **Fixed** |
 | **59** | **`projectCache` never invalidates** | **Medium** | v4 | **Open** |
 | **60** | **OSAC `listAll` pagination unbounded** | **Medium** | v4 | **Open** |
 | **61** | **Store is a God object (1300+ lines, 50 methods)** | **Medium** | v4 | **Accepted (PoC)** |
 | **62** | **Handler mixes routing, processing, and business logic** | **Medium** | v4 | **Accepted (PoC)** |
 | **63** | **Missing ADRs for auth model and tenant attribution** | **Medium** | v4 | **Open** |
 | **64** | **CI lacks golangci-lint / staticcheck** | **Medium** | v4 | **Open** |
-| **65** | **Watcher backoff never resets after successful connection** | **Medium** | v4 | **Open** |
+| **65** | **Watcher backoff never resets after successful connection** | **Medium** | v4 | **Fixed** |
 | **66** | **Hardcoded metering and rating intervals** | **Low** | v4 | **Open** |
 | **67** | **Duplicated `thresholdLevels` variable** | **Low** | v4 | **Open** |
 | **68** | **Rating sweep silently skips unrated entries forever** | **Low** | v4 | **Open** |
