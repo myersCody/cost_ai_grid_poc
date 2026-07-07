@@ -26,6 +26,7 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/rating"
+	"github.com/osac-project/cost-event-consumer/internal/ruleengine"
 	"github.com/osac-project/cost-event-consumer/internal/reconciler"
 	"github.com/osac-project/cost-event-consumer/internal/splunk"
 	"github.com/osac-project/cost-event-consumer/internal/watcher"
@@ -84,6 +85,12 @@ func main() {
 
 	m := metering.New(store, cfg.MeteringInterval, logger)
 	rt := rating.New(store, cfg.RatingInterval, logger)
+
+	if rulesDir := os.Getenv("RULES_DIR"); rulesDir != "" {
+		re := ruleengine.New(rulesDir)
+		rt.SetRuleEngine(re)
+		logger.Info("rule engine enabled", "rules_dir", rulesDir)
+	}
 
 	var w *watcher.Watcher
 	var r *reconciler.Reconciler
