@@ -120,14 +120,19 @@
     Management UI or in OSAC's own UI? This affects where we build
     reporting and who needs access.
 
-17. **Quota scope** — Are quotas/budgets scoped per OSAC project or per
-    tenant? Currently we scope quotas per tenant. If per-project is
-    needed, we need project-level quota records.
+17. ~~**Quota scope**~~ — **Resolved.** Quotas/budgets scoped per tenant
+    AND per project. Projects roll up to tenant (sum of project
+    consumptions cannot exceed tenant quota). Overcommitting at project
+    level is allowed. Currently we only have tenant-level quotas;
+    project-level quotas with rollup is new work.
+    *Source: PR #33 (Pau Garcia Quiles), REQ-3a acceptance criteria.*
 
-18. **RBAC model** — For cross-project cost visibility, should we use
-    Insights RBAC (one role per OSAC project — Koku-compatible) or
-    Keycloak (OSAC-native)? Depends on whether this PoC merges into
-    Koku or becomes a standalone replacement.
+18. **RBAC model** — Pau clarified (PR #33): "Using Insights RBAC is
+    NOT mandatory. We may want to move to a simpler model, e.g. per
+    tenant and project, like OSAC does, where authentication is what
+    matters and authorization hardly exists." Fine-grained RBAC deferred
+    post-PoC provided Cost implements project-within-tenant concept.
+    Still open: final decision on Insights RBAC vs Keycloak-native.
 
 ## MaaS Tenant Attribution (IPP Integration)
 
