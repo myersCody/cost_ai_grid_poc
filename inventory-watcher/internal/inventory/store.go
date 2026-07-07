@@ -50,7 +50,7 @@ func (s *Store) TenantTier(ctx context.Context, tenantID string) string {
 	}
 	var tier string
 	err := s.pool.QueryRow(ctx,
-		"SELECT labels->>'tier' FROM inventory_tenant WHERE tenant_id = $1",
+		"SELECT COALESCE(labels->>'cost-mgmt/tier', labels->>'tier', '') FROM inventory_tenant WHERE tenant_id = $1",
 		tenantID).Scan(&tier)
 	if err != nil || tier == "" {
 		return "standard"

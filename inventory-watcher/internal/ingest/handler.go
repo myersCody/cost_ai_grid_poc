@@ -154,8 +154,6 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
 	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
 	mux.HandleFunc("POST /api/v1/reconcile", h.handleReconcile)
-	mux.HandleFunc("POST /api/v1/admin/tenant-tier", h.handleSetTenantTier)
-	mux.HandleFunc("GET /api/v1/admin/tenant-tiers", h.handleGetTenantTiers)
 	mux.HandleFunc("GET /demo/gorules", h.handleGoRulesDemo)
 	mux.HandleFunc("GET /healthz", h.handleLiveness)
 	mux.HandleFunc("GET /readyz", h.handleReadiness)

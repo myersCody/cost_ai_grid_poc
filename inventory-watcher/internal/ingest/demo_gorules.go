@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -27,8 +26,6 @@ const gorulesDemo = `<!DOCTYPE html>
   .btn-success:hover { background: #15803d; }
   .btn-warning { background: #d97706; color: white; }
   .btn-warning:hover { background: #b45309; }
-  .btn-danger { background: #dc2626; color: white; }
-  .btn-disabled { background: #9ca3af; color: white; cursor: not-allowed; }
   .log { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 4px; font-family: monospace; font-size: 0.85rem; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
   .stage { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #f0f0f0; }
   .stage:last-child { border-bottom: none; }
@@ -45,6 +42,9 @@ const gorulesDemo = `<!DOCTYPE html>
   .cost { font-family: monospace; font-weight: 600; }
   .decision-table { font-size: 0.85rem; }
   .decision-table th { background: #1a3a5c; color: white; }
+  .config { margin-top: 12px; }
+  .config label { font-size: 0.85rem; font-weight: 600; }
+  .config input { padding: 4px 8px; border: 1px solid #d0d7e0; border-radius: 4px; font-size: 0.85rem; width: 200px; margin: 4px; }
 </style>
 </head>
 <body>
@@ -53,6 +53,13 @@ const gorulesDemo = `<!DOCTYPE html>
   <div class="status" id="status">Ready</div>
 </div>
 <div class="container">
+
+<div class="config card">
+  <label>OSAC REST Gateway:</label>
+  <input type="text" id="osac-url" value="http://localhost:8011" />
+  <label>Token:</label>
+  <input type="text" id="osac-token" placeholder="paste OSAC token" style="width:300px" />
+</div>
 
 <div class="grid">
   <div class="card">
@@ -69,8 +76,8 @@ const gorulesDemo = `<!DOCTYPE html>
       <div class="stage" id="stage-2">
         <div class="stage-num">2</div>
         <div class="stage-desc">
-          <div class="title">Set Tenant Tiers</div>
-          <div class="detail">Tag "shared" as gold tier (20% discount)</div>
+          <div class="title">Set Tenant Tiers via OSAC</div>
+          <div class="detail">PATCH tenant labels in OSAC, then reconcile</div>
         </div>
         <button class="btn-warning" onclick="runStage(2)">Run</button>
       </div>
@@ -85,7 +92,7 @@ const gorulesDemo = `<!DOCTYPE html>
       <div class="stage" id="stage-4">
         <div class="stage-num">4</div>
         <div class="stage-desc">
-          <div class="title">View Cost Report by Tenant</div>
+          <div class="title">Cost Report by Tenant</div>
           <div class="detail">Compare gold vs standard tenant costs</div>
         </div>
         <button class="btn-success" onclick="runStage(4)">Run</button>
@@ -93,8 +100,8 @@ const gorulesDemo = `<!DOCTYPE html>
       <div class="stage" id="stage-5">
         <div class="stage-num">5</div>
         <div class="stage-desc">
-          <div class="title">View Cost Report by Resource</div>
-          <div class="detail">See per-VM costs with instance type pricing</div>
+          <div class="title">Cost Report by Resource</div>
+          <div class="detail">Per-VM costs with instance type pricing</div>
         </div>
         <button class="btn-success" onclick="runStage(5)">Run</button>
       </div>
@@ -118,7 +125,7 @@ const gorulesDemo = `<!DOCTYPE html>
       </tbody>
     </table>
     <p style="margin-top:12px; font-size:0.85rem; color:#666;">
-      This is a JSON file — no code. Edit, restart, pricing changes.
+      JSON file, not code. Edit, restart, pricing changes. No PR needed.
     </p>
   </div>
 </div>
@@ -130,20 +137,24 @@ const gorulesDemo = `<!DOCTYPE html>
   </div>
   <div class="card full">
     <h2>Log</h2>
-    <div class="log" id="log">Ready. Click a stage to begin.\n</div>
+    <div class="log" id="log">Ready. Click a stage to begin.
+</div>
   </div>
 </div>
 
 </div>
 
 <script>
-const API = window.location.origin;
-const log = document.getElementById('log');
+const COST_API = window.location.origin;
+const logEl = document.getElementById('log');
+
+function osacUrl() { return document.getElementById('osac-url').value; }
+function osacToken() { return document.getElementById('osac-token').value; }
 
 function addLog(msg) {
   const ts = new Date().toLocaleTimeString();
-  log.textContent += ts + '  ' + msg + '\n';
-  log.scrollTop = log.scrollHeight;
+  logEl.textContent += ts + '  ' + msg + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 function setStatus(msg) {
@@ -151,17 +162,23 @@ function setStatus(msg) {
 }
 
 function markStage(n, state) {
-  const el = document.querySelector('#stage-' + n + ' .stage-num');
-  el.className = 'stage-num ' + state;
+  document.querySelector('#stage-' + n + ' .stage-num').className = 'stage-num ' + state;
 }
 
-async function api(method, path, body) {
+async function costApi(method, path, body) {
   const opts = { method, headers: {} };
-  if (body) {
-    opts.headers['Content-Type'] = 'application/json';
-    opts.body = JSON.stringify(body);
-  }
-  const resp = await fetch(API + path, opts);
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const resp = await fetch(COST_API + path, opts);
+  const text = await resp.text();
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+async function osacApi(method, path, body) {
+  const token = osacToken();
+  if (!token) throw new Error('Paste OSAC token first');
+  const opts = { method, headers: { 'Authorization': 'Bearer ' + token } };
+  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  const resp = await fetch(osacUrl() + path, opts);
   const text = await resp.text();
   try { return JSON.parse(text); } catch { return text; }
 }
@@ -182,7 +199,7 @@ function renderTable(data, columns) {
       let val = row[col.key];
       if (col.fmt) val = col.fmt(val);
       const cls = col.cls ? col.cls(row) : '';
-      html += '<td class="' + cls + '">' + val + '</td>';
+      html += '<td class="' + cls + '">' + (val != null ? val : '') + '</td>';
     }
     html += '</tr>';
   }
@@ -198,15 +215,15 @@ async function runStage(n) {
     switch(n) {
     case 1:
       addLog('Triggering reconciliation...');
-      await api('POST', '/api/v1/reconcile');
+      await costApi('POST', '/api/v1/reconcile');
       addLog('Reconciliation triggered. Waiting 5s for sync...');
       await new Promise(r => setTimeout(r, 5000));
-      const summary = await api('GET', '/api/v1/reports/summary');
+      const summary = await costApi('GET', '/api/v1/reports/summary');
       addLog('Live VMs: ' + summary.live_vms + ', Clusters: ' + summary.live_clusters);
       showResults('Pipeline Status', renderTable([summary], [
         {key: 'raw_events', label: 'Raw Events'},
-        {key: 'metering_entries', label: 'Metering Entries'},
-        {key: 'cost_entries', label: 'Cost Entries'},
+        {key: 'metering_entries', label: 'Metering'},
+        {key: 'cost_entries', label: 'Costs'},
         {key: 'rates', label: 'Rates'},
         {key: 'live_vms', label: 'VMs'},
         {key: 'live_clusters', label: 'Clusters'},
@@ -214,22 +231,40 @@ async function runStage(n) {
       break;
 
     case 2:
-      addLog('Setting tenant tiers via API...');
-      await api('POST', '/api/v1/admin/tenant-tier', {tenant_id: 'shared', tier: 'gold'});
-      addLog('Set "shared" → gold tier (20% discount)');
-      const tenants = await api('GET', '/api/v1/admin/tenant-tiers');
-      if (Array.isArray(tenants)) {
-        showResults('Tenant Tiers', renderTable(tenants, [
-          {key: 'tenant_id', label: 'Tenant'},
-          {key: 'tier', label: 'Tier', cls: r => r.tier === 'gold' ? 'gold' : ''},
-        ]));
+      addLog('Listing tenants from OSAC...');
+      const tenantList = await osacApi('GET', '/api/fulfillment/v1/tenants');
+      const tenants = tenantList.items || [];
+      addLog('Found ' + tenants.length + ' tenants');
+
+      if (tenants.length > 0) {
+        const target = tenants[0];
+        addLog('Setting tier=gold on tenant "' + target.metadata.name + '" (' + target.id + ') via OSAC PATCH...');
+        const updated = Object.assign({}, target);
+        if (!updated.metadata.labels) updated.metadata.labels = {};
+        updated.metadata.labels['cost-mgmt/tier'] = 'gold';
+        await osacApi('PATCH', '/api/fulfillment/v1/tenants/' + target.id, updated);
+        addLog('OSAC tenant updated with label cost-mgmt/tier=gold');
+
+        addLog('Triggering reconciliation to sync labels...');
+        await costApi('POST', '/api/v1/reconcile');
+        await new Promise(r => setTimeout(r, 3000));
+        addLog('Reconciliation complete. Tenant tier synced to local inventory.');
       }
-      addLog('Tenant tiers set. Gold tenants get 20% off.');
+
+      showResults('Tenants', renderTable(tenants.map(t => ({
+        id: t.id,
+        name: t.metadata.name,
+        tier: (t.metadata.labels && t.metadata.labels['cost-mgmt/tier']) || 'standard',
+      })), [
+        {key: 'name', label: 'Tenant'},
+        {key: 'tier', label: 'Tier', cls: r => r.tier === 'gold' ? 'gold' : ''},
+        {key: 'id', label: 'ID'},
+      ]));
       break;
 
     case 3:
       addLog('Fetching pipeline summary...');
-      const sum = await api('GET', '/api/v1/reports/summary');
+      const sum = await costApi('GET', '/api/v1/reports/summary');
       addLog('Metering: ' + sum.metering_entries + ', Cost: ' + sum.cost_entries);
       showResults('Pipeline Summary', renderTable([sum], [
         {key: 'raw_events', label: 'Raw Events'},
@@ -241,22 +276,22 @@ async function runStage(n) {
 
     case 4:
       addLog('Fetching cost report by tenant...');
-      const byTenant = await api('GET', '/api/v1/reports/costs?group_by=tenant');
+      const byTenant = await costApi('GET', '/api/v1/reports/costs?group_by=tenant');
       if (byTenant.data) {
         showResults('Cost by Tenant', renderTable(byTenant.data, [
-          {key: 'group', label: 'Tenant', cls: r => r.group === 'shared' ? 'gold' : ''},
+          {key: 'group', label: 'Tenant'},
           {key: 'entries', label: 'Entries'},
           {key: 'cost', label: 'Total Cost', fmt: v => '$' + v.toFixed(4), cls: () => 'cost'},
-          {key: 'infrastructure_cost', label: 'Infrastructure', fmt: v => '$' + v.toFixed(4), cls: () => 'cost'},
-          {key: 'supplementary_cost', label: 'Supplementary', fmt: v => '$' + v.toFixed(4), cls: () => 'cost'},
+          {key: 'infrastructure_cost', label: 'Infra', fmt: v => '$' + v.toFixed(4), cls: () => 'cost'},
+          {key: 'supplementary_cost', label: 'Suppl.', fmt: v => '$' + v.toFixed(4), cls: () => 'cost'},
         ]));
-        addLog('Gold tenant (shared) should show lower per-unit cost due to 20% discount');
+        addLog('Gold tenant should show lower per-unit cost (20% discount)');
       }
       break;
 
     case 5:
       addLog('Fetching cost report by resource...');
-      const byResource = await api('GET', '/api/v1/reports/costs?group_by=resource');
+      const byResource = await costApi('GET', '/api/v1/reports/costs?group_by=resource');
       if (byResource.data) {
         showResults('Cost by Resource', renderTable(byResource.data, [
           {key: 'group', label: 'Resource ID'},
@@ -264,7 +299,7 @@ async function runStage(n) {
           {key: 'cost', label: 'Total Cost', fmt: v => '$' + v.toFixed(6), cls: () => 'cost'},
           {key: 'currency', label: 'Currency'},
         ]));
-        addLog('Different instance types → different costs per resource');
+        addLog('Different instance types = different costs per resource');
       }
       break;
     }
@@ -283,52 +318,4 @@ async function runStage(n) {
 func (h *Handler) handleGoRulesDemo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(gorulesDemo))
-}
-
-func (h *Handler) handleSetTenantTier(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		TenantID string `json:"tenant_id"`
-		Tier     string `json:"tier"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TenantID == "" {
-		writeErrorJSON(w, "tenant_id and tier required", http.StatusBadRequest)
-		return
-	}
-	if req.Tier == "" {
-		req.Tier = "standard"
-	}
-
-	ctx := r.Context()
-	_, err := h.store.Pool().Exec(ctx,
-		"UPDATE inventory_tenant SET labels = labels || $1 WHERE tenant_id = $2",
-		`{"tier":"`+req.Tier+`"}`, req.TenantID)
-	if err != nil {
-		writeErrorJSON(w, "failed to set tier: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, map[string]string{"status": "ok", "tenant_id": req.TenantID, "tier": req.Tier})
-}
-
-func (h *Handler) handleGetTenantTiers(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	rows, err := h.store.Pool().Query(ctx,
-		"SELECT tenant_id, COALESCE(labels->>'tier', 'standard') as tier FROM inventory_tenant WHERE deleted_at IS NULL ORDER BY tenant_id")
-	if err != nil {
-		writeErrorJSON(w, "query failed", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	type tenantTier struct {
-		TenantID string `json:"tenant_id"`
-		Tier     string `json:"tier"`
-	}
-	var results []tenantTier
-	for rows.Next() {
-		var t tenantTier
-		rows.Scan(&t.TenantID, &t.Tier)
-		results = append(results, t)
-	}
-	writeJSON(w, results)
 }
