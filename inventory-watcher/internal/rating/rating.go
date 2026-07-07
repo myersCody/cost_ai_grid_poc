@@ -11,19 +11,25 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/billing"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
+	"github.com/osac-project/cost-event-consumer/internal/ruleengine"
 )
 
 // Rater periodically processes unrated metering entries, looks up applicable
 // rates, and produces cost entries.
 type Rater struct {
-	store    *inventory.Store
-	interval time.Duration
-	batch    int
-	logger   *slog.Logger
+	store      *inventory.Store
+	rules      *ruleengine.Engine
+	interval   time.Duration
+	batch      int
+	logger     *slog.Logger
 }
 
 func New(store *inventory.Store, interval time.Duration, logger *slog.Logger) *Rater {
 	return &Rater{store: store, interval: interval, batch: 500, logger: logger}
+}
+
+func (r *Rater) SetRuleEngine(engine *ruleengine.Engine) {
+	r.rules = engine
 }
 
 func (r *Rater) Run(ctx context.Context) error {
@@ -74,6 +80,13 @@ func (r *Rater) sweep(ctx context.Context) {
 	priorUsageCache := make(map[accumKey]float64)
 
 	for _, me := range entries {
+		if ce, ok := r.tryRuleEngine(ctx, me); ok {
+			costEntries = append(costEntries, ce)
+			ratedIDs = append(ratedIDs, me.ID)
+			metrics.CostEntriesCreated.WithLabelValues(me.ResourceType, "RuleEngine").Inc()
+			continue
+		}
+
 		rate := matchRate(rateIndex, me.TenantID, me.InstanceType, me.ResourceType, me.MeterName)
 		if rate == nil {
 			skipped++
@@ -198,6 +211,57 @@ func (r *Rater) DeductWallets(ctx context.Context) {
 	if deducted > 0 {
 		r.logger.Info("wallet deductions complete", "entries_applied", deducted)
 	}
+}
+
+func (r *Rater) tryRuleEngine(ctx context.Context, me inventory.MeteringEntry) (inventory.CostEntry, bool) {
+	if r.rules == nil {
+		return inventory.CostEntry{}, false
+	}
+
+	if me.ResourceType != "compute_instance" || me.MeterName != "vm_uptime_seconds" {
+		return inventory.CostEntry{}, false
+	}
+
+	instanceType := ""
+	tenantTier := ""
+	inst, err := r.store.GetComputeInstance(ctx, me.ResourceID)
+	if err == nil && inst != nil {
+		instanceType = inst.InstanceType
+		tenantTier = r.store.TenantTier(ctx, me.TenantID)
+	}
+
+	output, err := r.rules.EvaluateRate("compute-pricing.json", ruleengine.PricingInput{
+		InstanceType: instanceType,
+		TenantTier:   tenantTier,
+		TenantID:     me.TenantID,
+		ResourceType: me.ResourceType,
+		MeterName:    me.MeterName,
+		Value:        me.Value,
+	})
+	if err != nil {
+		r.logger.Warn("rule engine evaluation failed, falling back to static rate",
+			"resource", me.ResourceID, "error", err)
+		return inventory.CostEntry{}, false
+	}
+
+	r.logger.Debug("rule engine rated entry",
+		"resource", me.ResourceID, "instance_type", instanceType,
+		"tenant_tier", tenantTier, "cost", output.CostAmount,
+		"effective_rate", output.EffectiveRate)
+
+	return inventory.CostEntry{
+		MeteringEntryID: me.ID,
+		TenantID:        me.TenantID,
+		ProjectID:       me.ProjectID,
+		ResourceType:    me.ResourceType,
+		ResourceID:      me.ResourceID,
+		MeterName:       me.MeterName,
+		MeteredValue:    me.Value,
+		CostAmount:      output.CostAmount,
+		Currency:        output.Currency,
+		PeriodStart:     me.PeriodStart,
+		PeriodEnd:       me.PeriodEnd,
+	}, true
 }
 
 type rateKey struct {

@@ -44,6 +44,20 @@ func (s *Store) DefaultProjectForTenant(ctx context.Context, tenantID string) st
 	return projectID
 }
 
+func (s *Store) TenantTier(ctx context.Context, tenantID string) string {
+	if tenantID == "" {
+		return "standard"
+	}
+	var tier string
+	err := s.pool.QueryRow(ctx,
+		"SELECT labels->>'tier' FROM inventory_tenant WHERE tenant_id = $1",
+		tenantID).Scan(&tier)
+	if err != nil || tier == "" {
+		return "standard"
+	}
+	return tier
+}
+
 // RunMigrations creates the inventory tables if they don't exist.
 func (s *Store) RunMigrations(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, schema); err != nil {
