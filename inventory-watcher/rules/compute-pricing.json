@@ -1,0 +1,118 @@
+{
+  "nodes": [
+    {
+      "id": "input-1",
+      "type": "inputNode",
+      "position": {"x": 100, "y": 200},
+      "name": "Request"
+    },
+    {
+      "id": "instance-rate",
+      "type": "decisionTableNode",
+      "position": {"x": 400, "y": 100},
+      "name": "Instance Type Rate",
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {"field": "instance_type", "id": "col-itype", "name": "Instance Type", "type": "expression"},
+          {"field": "tenant_tier", "id": "col-tier", "name": "Tenant Tier", "type": "expression"}
+        ],
+        "outputs": [
+          {"field": "price_per_hour", "id": "col-price", "name": "Price/Hour ($)", "type": "expression"},
+          {"field": "discount_pct", "id": "col-discount", "name": "Discount %", "type": "expression"},
+          {"field": "description", "id": "col-desc", "name": "Description", "type": "expression"},
+          {"field": "value", "id": "col-val", "name": "Value (passthrough)", "type": "expression"}
+        ],
+        "rules": [
+          {
+            "_id": "r1",
+            "col-itype": "\"standard-2-8\"",
+            "col-tier": "\"gold\"",
+            "col-price": "0.10",
+            "col-discount": "20",
+            "col-desc": "'2 cores 8GB Gold (20% off)'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r2",
+            "col-itype": "\"standard-2-8\"",
+            "col-tier": "",
+            "col-price": "0.10",
+            "col-discount": "0",
+            "col-desc": "'2 cores 8GB standard'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r3",
+            "col-itype": "\"standard-4-16\"",
+            "col-tier": "\"gold\"",
+            "col-price": "0.20",
+            "col-discount": "20",
+            "col-desc": "'4 cores 16GB Gold (20% off)'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r4",
+            "col-itype": "\"standard-4-16\"",
+            "col-tier": "",
+            "col-price": "0.20",
+            "col-discount": "0",
+            "col-desc": "'4 cores 16GB standard'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r5",
+            "col-itype": "\"standard-8-32\"",
+            "col-tier": "\"gold\"",
+            "col-price": "0.40",
+            "col-discount": "20",
+            "col-desc": "'8 cores 32GB Gold (20% off)'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r6",
+            "col-itype": "\"standard-8-32\"",
+            "col-tier": "",
+            "col-price": "0.40",
+            "col-discount": "0",
+            "col-desc": "'8 cores 32GB standard'",
+            "col-val": "value"
+          },
+          {
+            "_id": "r-default",
+            "col-itype": "",
+            "col-tier": "",
+            "col-price": "0.10",
+            "col-discount": "0",
+            "col-desc": "'unknown instance type - default rate'",
+            "col-val": "value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "calc-cost",
+      "type": "expressionNode",
+      "position": {"x": 700, "y": 200},
+      "name": "Calculate Cost",
+      "content": {
+        "expressions": [
+          {"id": "e1", "key": "cost_amount", "value": "(value / 3600) * price_per_hour * (1 - discount_pct / 100)"},
+          {"id": "e2", "key": "effective_rate", "value": "price_per_hour * (1 - discount_pct / 100)"},
+          {"id": "e3", "key": "currency", "value": "'USD'"}
+        ]
+      }
+    },
+    {
+      "id": "output-1",
+      "type": "outputNode",
+      "position": {"x": 1000, "y": 200},
+      "name": "Response"
+    }
+  ],
+  "edges": [
+    {"id": "e-in-table", "sourceId": "input-1", "type": "edge", "targetId": "instance-rate"},
+    {"id": "e-table-calc", "sourceId": "instance-rate", "type": "edge", "targetId": "calc-cost"},
+    {"id": "e-calc-out", "sourceId": "calc-cost", "type": "edge", "targetId": "output-1"}
+  ]
+}
