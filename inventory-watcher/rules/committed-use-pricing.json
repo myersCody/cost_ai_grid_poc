@@ -1,0 +1,188 @@
+{
+  "nodes": [
+    {
+      "id": "input-1",
+      "type": "inputNode",
+      "position": {"x": 100, "y": 200},
+      "name": "Request"
+    },
+    {
+      "id": "cud-lookup",
+      "type": "decisionTableNode",
+      "position": {"x": 400, "y": 100},
+      "name": "CUD Agreement Lookup",
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {"field": "tenant_id", "id": "col-tid", "name": "Tenant", "type": "expression"},
+          {"field": "resource_type", "id": "col-rtype", "name": "Resource Type", "type": "expression"}
+        ],
+        "outputs": [
+          {"field": "committed_qty", "id": "col-qty", "name": "Committed VMs", "type": "expression"},
+          {"field": "cud_discount_pct", "id": "col-cud-disc", "name": "CUD Discount %", "type": "expression"},
+          {"field": "commitment_type", "id": "col-ctype", "name": "Commitment", "type": "expression"},
+          {"field": "tenant_id", "id": "col-tid-pass", "name": "Tenant (pass)", "type": "expression"},
+          {"field": "resource_type", "id": "col-rtype-pass", "name": "Type (pass)", "type": "expression"},
+          {"field": "instance_type", "id": "col-itype-pass", "name": "Instance (pass)", "type": "expression"},
+          {"field": "value", "id": "col-val-pass", "name": "Value (pass)", "type": "expression"},
+          {"field": "running_vms", "id": "col-vms-pass", "name": "Running VMs (pass)", "type": "expression"},
+          {"field": "base_price_per_hour", "id": "col-base-pass", "name": "Base Price (pass)", "type": "expression"},
+          {"field": "monthly_utilization_pct", "id": "col-util-pass", "name": "Utilization (pass)", "type": "expression"}
+        ],
+        "rules": [
+          {
+            "_id": "cud-acme-1yr",
+            "col-tid": "\"tenant-acme\"",
+            "col-rtype": "\"compute_instance\"",
+            "col-qty": "5",
+            "col-cud-disc": "40",
+            "col-ctype": "'1-year'",
+            "col-tid-pass": "tenant_id",
+            "col-rtype-pass": "resource_type",
+            "col-itype-pass": "instance_type",
+            "col-val-pass": "value",
+            "col-vms-pass": "running_vms",
+            "col-base-pass": "base_price_per_hour",
+            "col-util-pass": "monthly_utilization_pct"
+          },
+          {
+            "_id": "cud-globex-1yr",
+            "col-tid": "\"tenant-globex\"",
+            "col-rtype": "\"compute_instance\"",
+            "col-qty": "10",
+            "col-cud-disc": "50",
+            "col-ctype": "'1-year'",
+            "col-tid-pass": "tenant_id",
+            "col-rtype-pass": "resource_type",
+            "col-itype-pass": "instance_type",
+            "col-val-pass": "value",
+            "col-vms-pass": "running_vms",
+            "col-base-pass": "base_price_per_hour",
+            "col-util-pass": "monthly_utilization_pct"
+          },
+          {
+            "_id": "cud-default",
+            "col-tid": "",
+            "col-rtype": "",
+            "col-qty": "0",
+            "col-cud-disc": "0",
+            "col-ctype": "'none'",
+            "col-tid-pass": "tenant_id",
+            "col-rtype-pass": "resource_type",
+            "col-itype-pass": "instance_type",
+            "col-val-pass": "value",
+            "col-vms-pass": "running_vms",
+            "col-base-pass": "base_price_per_hour",
+            "col-util-pass": "monthly_utilization_pct"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sustained-use",
+      "type": "decisionTableNode",
+      "position": {"x": 700, "y": 100},
+      "name": "Sustained-Use Discount",
+      "content": {
+        "hitPolicy": "first",
+        "inputs": [
+          {"field": "monthly_utilization_pct", "id": "col-util", "name": "Utilization %", "type": "expression"}
+        ],
+        "outputs": [
+          {"field": "sustained_discount_pct", "id": "col-sus-disc", "name": "Sustained Discount %", "type": "expression"},
+          {"field": "committed_qty", "id": "col-qty2", "name": "Committed (pass)", "type": "expression"},
+          {"field": "cud_discount_pct", "id": "col-cud2", "name": "CUD Disc (pass)", "type": "expression"},
+          {"field": "commitment_type", "id": "col-ctype2", "name": "Commitment (pass)", "type": "expression"},
+          {"field": "value", "id": "col-val2", "name": "Value (pass)", "type": "expression"},
+          {"field": "running_vms", "id": "col-vms2", "name": "Running VMs (pass)", "type": "expression"},
+          {"field": "base_price_per_hour", "id": "col-base2", "name": "Base Price (pass)", "type": "expression"}
+        ],
+        "rules": [
+          {
+            "_id": "sus-100",
+            "col-util": ">= 100",
+            "col-sus-disc": "30",
+            "col-qty2": "committed_qty",
+            "col-cud2": "cud_discount_pct",
+            "col-ctype2": "commitment_type",
+            "col-val2": "value",
+            "col-vms2": "running_vms",
+            "col-base2": "base_price_per_hour"
+          },
+          {
+            "_id": "sus-75",
+            "col-util": ">= 75",
+            "col-sus-disc": "20",
+            "col-qty2": "committed_qty",
+            "col-cud2": "cud_discount_pct",
+            "col-ctype2": "commitment_type",
+            "col-val2": "value",
+            "col-vms2": "running_vms",
+            "col-base2": "base_price_per_hour"
+          },
+          {
+            "_id": "sus-50",
+            "col-util": ">= 50",
+            "col-sus-disc": "10",
+            "col-qty2": "committed_qty",
+            "col-cud2": "cud_discount_pct",
+            "col-ctype2": "commitment_type",
+            "col-val2": "value",
+            "col-vms2": "running_vms",
+            "col-base2": "base_price_per_hour"
+          },
+          {
+            "_id": "sus-25",
+            "col-util": ">= 25",
+            "col-sus-disc": "5",
+            "col-qty2": "committed_qty",
+            "col-cud2": "cud_discount_pct",
+            "col-ctype2": "commitment_type",
+            "col-val2": "value",
+            "col-vms2": "running_vms",
+            "col-base2": "base_price_per_hour"
+          },
+          {
+            "_id": "sus-default",
+            "col-util": "",
+            "col-sus-disc": "0",
+            "col-qty2": "committed_qty",
+            "col-cud2": "cud_discount_pct",
+            "col-ctype2": "commitment_type",
+            "col-val2": "value",
+            "col-vms2": "running_vms",
+            "col-base2": "base_price_per_hour"
+          }
+        ]
+      }
+    },
+    {
+      "id": "calc-cost",
+      "type": "expressionNode",
+      "position": {"x": 1000, "y": 200},
+      "name": "Calculate Final Cost",
+      "content": {
+        "expressions": [
+          {"id": "e1", "key": "within_commitment", "value": "committed_qty > 0 and running_vms <= committed_qty"},
+          {"id": "e2", "key": "effective_discount_pct", "value": "committed_qty > 0 and running_vms <= committed_qty ? cud_discount_pct : sustained_discount_pct"},
+          {"id": "e3", "key": "cost_amount", "value": "(value / 3600) * base_price_per_hour * (1 - (committed_qty > 0 and running_vms <= committed_qty ? cud_discount_pct : sustained_discount_pct) / 100)"},
+          {"id": "e4", "key": "effective_rate", "value": "base_price_per_hour * (1 - (committed_qty > 0 and running_vms <= committed_qty ? cud_discount_pct : sustained_discount_pct) / 100)"},
+          {"id": "e5", "key": "currency", "value": "'USD'"},
+          {"id": "e6", "key": "description", "value": "committed_qty > 0 and running_vms <= committed_qty ? 'CUD ' + commitment_type : sustained_discount_pct > 0 ? 'Sustained-use' : 'On-demand'"}
+        ]
+      }
+    },
+    {
+      "id": "output-1",
+      "type": "outputNode",
+      "position": {"x": 1300, "y": 200},
+      "name": "Response"
+    }
+  ],
+  "edges": [
+    {"id": "e-in-cud", "sourceId": "input-1", "type": "edge", "targetId": "cud-lookup"},
+    {"id": "e-cud-sus", "sourceId": "cud-lookup", "type": "edge", "targetId": "sustained-use"},
+    {"id": "e-sus-calc", "sourceId": "sustained-use", "type": "edge", "targetId": "calc-cost"},
+    {"id": "e-calc-out", "sourceId": "calc-cost", "type": "edge", "targetId": "output-1"}
+  ]
+}
