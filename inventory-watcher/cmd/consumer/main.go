@@ -136,7 +136,7 @@ func main() {
 	// Metrics server on a separate port (no auth).
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", promhttp.Handler())
-	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metricsMux}
+	metricsSrv := &http.Server{Addr: ":" + cfg.MetricsPort, Handler: metricsMux, ReadHeaderTimeout: 10 * time.Second}
 	g.Go(func() error {
 		logger.Info("metrics endpoint listening", "addr", ":"+cfg.MetricsPort)
 		if err := metricsSrv.ListenAndServe(); err != http.ErrServerClosed {

@@ -1390,7 +1390,6 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 	if resourceType != "" {
 		where += fmt.Sprintf(" AND ce.resource_type = $%d", argN)
 		args = append(args, resourceType)
-		argN++
 	}
 
 	query := fmt.Sprintf(`

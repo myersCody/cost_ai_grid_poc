@@ -47,11 +47,6 @@ type DiagnosticInfo struct {
 }
 
 func (c *Config) Diagnostics() DiagnosticInfo {
-	dbHost := c.InventoryDBURL
-	if idx := findCredEnd(dbHost); idx > 0 {
-		dbHost = dbHost[:idx] + "****@" + dbHost[idx:]
-	}
-
 	return DiagnosticInfo{
 		OSACBaseURL:       c.OSACBaseURL,
 		InventoryDBHost:   maskDBURL(c.InventoryDBURL),
@@ -96,14 +91,6 @@ func maskDBURL(url string) string {
 	return scheme + "****@" + url[at+1:]
 }
 
-func findCredEnd(url string) int {
-	for i, c := range url {
-		if c == '@' {
-			return i
-		}
-	}
-	return -1
-}
 
 func Load() *Config {
 	return &Config{
