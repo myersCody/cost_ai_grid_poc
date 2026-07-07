@@ -32,10 +32,10 @@ style: |
 
 <!-- _class: lead -->
 
-# Cost Event Consumer
-## Demo 4 — Observability, Custom Metrics & Tooling
+# Cost Event Consumer — Status Update
+## 2026-07-07
 
-Martin Povolny — July 2026
+Martin Povolny
 
 <!--
 Narration: Welcome. This is our fourth demo — covering everything we built
@@ -53,7 +53,8 @@ and tooling.
 | **REQ-13** Custom metric extraction | <span class="done">Done</span> — config-driven, zero code changes |
 | **Observability** P1+P2 | <span class="done">Done</span> — Prometheus, probes, logging, shutdown |
 | **CI pipeline** | <span class="done">Done</span> — 6 jobs incl. k3s integration test |
-| **Integration test** | <span class="done">Done</span> — full OSAC + cost stack on k3s in CI |
+| **OSAC integration test** | <span class="done">Done</span> — full OSAC + cost stack on k3s in CI |
+| **MaaS integration test** | <span class="done">Done</span> — IPP + AI gateway + echo LLM on k3d |
 | **Adversarial review** | v3 — 41 findings, 22 fixed |
 | **Tooling** | Bruno collection + Grafana dashboard |
 
@@ -67,7 +68,7 @@ requirements are done.
 
 ---
 
-## REQ-13: Custom Metrics — The Problem
+## REQ-13: Custom Metrics
 
 OSAC will emit new CloudEvent types over time:
 - GPU workloads, storage volumes, network traffic, ...
@@ -75,70 +76,84 @@ OSAC will emit new CloudEvent types over time:
 
 Without REQ-13: **every new metric = code change + PR + deploy**
 
-With REQ-13: **drop a JSON config, restart**
+With REQ-13: **drop a JSON config, restart** → rating, reporting, quotas all work automatically
+
+`CUSTOM_METRICS_CONFIG=deploy/custom-metrics-example.json`
 
 <!--
 Narration: This is the most important functional feature we added.
 OSAC is evolving — new resource types, new metrics. Without REQ-13,
 every new dimension means a code change. With it, an operator drops
-a JSON config file and the system meters it automatically.
+a JSON config file and the system meters it automatically. No code
+changes, no recompile, no redeploy.
 -->
 
 ---
 
 ## REQ-13: How It Works
 
+<div class="columns">
+<div>
+
+**CloudEvent in:**
 ```json
 {
-  "custom_metrics": [{
-    "event_type": "osac.gpu.lifecycle",
-    "resource_type": "gpu_instance",
-    "resource_id_field": "instance_id",
-    "tenant_id_field": "tenant_id",
-    "meters": [
-      { "meter_name": "gpu_memory_gib_seconds",
-        "value_field": "gpu_memory_gib_seconds",
-        "unit": "gib_seconds" },
-      { "meter_name": "gpu_compute_seconds",
-        "value_field": "gpu_compute_seconds",
-        "unit": "seconds" }
-    ]
-  }]
+  "type": "osac.gpu.lifecycle",
+  "data": {
+    "instance_id": "gpu-i-abc123",
+    "tenant_id": "tenant-acme",
+    "gpu_model": "A100",
+    "gpu_memory_gib_seconds": 245760.0,
+    "gpu_compute_seconds": 3600.0,
+    "duration_seconds": 3600,
+    "state": "RUNNING"
+  }
 }
 ```
 
-Rating, reporting, quotas — all work automatically.
+</div>
+<div>
+
+**Config that extracts meters:**
+```json
+{
+  "event_type": "osac.gpu.lifecycle",
+  "resource_type": "gpu_instance",
+  "resource_id_field": "instance_id",
+  "tenant_id_field": "tenant_id",
+  "meters": [
+    { "meter_name":
+        "gpu_memory_gib_seconds",
+      "value_field":
+        "gpu_memory_gib_seconds",
+      "unit": "gib_seconds" },
+    { "meter_name":
+        "gpu_compute_seconds",
+      "value_field":
+        "gpu_compute_seconds",
+      "unit": "seconds" }
+  ]
+}
+```
+
+</div>
+</div>
+
+Rating, reporting, quotas — all work automatically. No code changes.
 
 <!--
-Narration: The config maps an event type to a resource type and lists
-which fields to extract as meters. The rating engine, report API, and
-quota system all work on free-text meter names — so custom metrics flow
-through the entire pipeline with zero code changes.
--->
-
----
-
-## REQ-13: Live Demo
-
-1. Show config file → `CUSTOM_METRICS_CONFIG=deploy/custom-metrics-example.json`
-2. Open **Bruno** → click "Custom GPU Metric" → Send
-3. Query metering entries → GPU meters appear
-4. Wait 30s → cost entries created with dollar amounts
-5. **No code was changed. No recompile. No redeploy.**
-
-<!--
-Narration: [Live demo] Open Bruno, show the CloudEvent catalog. Click
-"Custom GPU Metric" — this fires an event type that has no hardcoded
-handler. The custom metrics config extracts gpu_memory_gib_seconds and
-gpu_compute_seconds automatically. Check the pipeline summary — meters
-created. Wait for the rating sweep — costs in dollars.
+Narration: Left side is the CloudEvent that arrives. Right side is the
+config that tells the system which fields to extract as meters. The
+field names in the config point at the field names in the event data.
+Rating, reporting, and quotas all work on free-text meter names — so
+custom metrics flow through the entire pipeline with zero code changes.
 -->
 
 ---
 
 ## Built-in Debug Dashboard
 
-![bg right:55% fit](screenshots/cost-debug-dash-1.png)
+<a href="screenshots/cost-debug-dash-1.png" target="_blank"><img src="screenshots/cost-debug-dash-1.png" style="float:right; width:55%; margin-left:1rem;"></a>
 
 - Real-time cost summary
 - **$94.62** total across 4 tenants
@@ -157,7 +172,7 @@ tokens). Each tenant's cost is isolated.
 
 ## Debug Dashboard: Environment
 
-![bg right:55% fit](screenshots/cost-debug-dash-2.png)
+<a href="screenshots/cost-debug-dash-2.png" target="_blank"><img src="screenshots/cost-debug-dash-2.png" style="float:right; width:55%; margin-left:1rem;"></a>
 
 - OSAC connection status
 - Database connection (credentials masked)
@@ -174,7 +189,7 @@ This is served from the binary itself — no separate tool needed.
 
 ## Observability: Grafana Dashboard
 
-![bg right:55% fit](screenshots/grafana-dash-3.png)
+<a href="screenshots/grafana-dash-3.png" target="_blank"><img src="screenshots/grafana-dash-3.png" style="float:right; width:55%; margin-left:1rem;"></a>
 
 `docker compose up -d` → `http://localhost:3000`
 
@@ -220,9 +235,16 @@ Prometheus can scrape without a JWT.
 
 **Structured JSON logging** for OpenShift log aggregation:
 ```json
-{"time":"...","level":"INFO","msg":"http request",
- "method":"POST","path":"/api/v1/events",
- "status":202,"duration_ms":3,"request_id":"a1b2c3d4"}
+{
+  "time": "2026-07-06T18:05:33Z",
+  "level": "INFO",
+  "msg": "http request",
+  "method": "POST",
+  "path": "/api/v1/events",
+  "status": 202,
+  "duration_ms": 3,
+  "request_id": "a1b2c3d4"
+}
 ```
 
 **Kubernetes probes** (auth-exempt):
@@ -242,7 +264,7 @@ the error propagates to the errgroup and the pod restarts.
 
 ## CI Pipeline + Integration Test
 
-![bg right:55% fit](screenshots/integration-test-osac-in-k3s.png)
+<a href="screenshots/integration-test-osac-in-k3s.png" target="_blank"><img src="screenshots/integration-test-osac-in-k3s.png" style="float:right; width:55%; margin-left:1rem;"></a>
 
 **CI (every PR):** lint, build, test, links, container
 
@@ -265,7 +287,7 @@ instances, and our consumer — on k3s in GitHub Actions. Then it runs
 
 ## Bruno: Clickable CloudEvent Catalog
 
-![bg right:55% fit](screenshots/bruno-cost.png)
+<a href="screenshots/bruno-cost.png" target="_blank"><img src="screenshots/bruno-cost.png" style="float:right; width:55%; margin-left:1rem;"></a>
 
 Committed to git — no cloud, no accounts.
 
@@ -291,29 +313,30 @@ and for developers exploring the API.
 | v1 | Full codebase | 17 | 9 | 4 |
 | v2 | Observability | +16 = 33 | +10 = 19 | +0 = 4 |
 | v3 | Custom metrics | +8 = 41 | +3 = 22 | +4 = 8 |
+| v4 | Full re-audit | +31 = 72 | +24 = 46 | +8 = 16 |
 
-Key fixes: JWT auth, input validation, panic recovery,
-NaN/Inf rejection, cardinality protection, graceful shutdown.
+0 critical, 0 high open. 14 remaining (medium/low).
+Key v4 fixes: batch project_id, concurrent reconciliation guard,
+duration validation, readiness probe, rating N+1, configurable intervals.
 
 <!--
-Narration: We run adversarial reviews on every major PR. 41 findings
-total, 22 fixed, 8 accepted as known PoC limitations. The review
-catches real issues — the safeGo panic bug would have caused silent
-data loss in production.
+Narration: Four rounds of adversarial review. 72 total findings, 46
+fixed, 16 accepted as known PoC limitations. Zero critical or high
+severity open. The 14 remaining are medium and low — none blocking.
 -->
 
 ---
 
 ## MaaS End-to-End: IPP Integration Verified
 
-Full inference metering pipeline running on local k3d:
+<a href="../../diagrams/maas-ipp-flow.svg" target="_blank"><img src="../../diagrams/maas-ipp-flow.svg" style="float:right; width:50%; margin-left:1rem;"></a>
 
-![MaaS IPP Flow](../../diagrams/maas-ipp-flow.svg)
+Full inference metering pipeline on local k3d:
 
 - **Istio 1.29.2** + IPP ext_proc (PR #320) + llm-katan (echo LLM)
-- Balance check: our consumer called on every request → `hasAccess: true/false`
-- Usage report: CloudEvent `inference.tokens.used` → metering entries → cost
-- [Setup guide](../../dev/k3d-ipp-deployment.md) · [IPP overview](../../research/ipp-overview.md) · [MaaS flow](../../maas-flow.md)
+- Balance check on every request → `hasAccess: true/false`
+- Usage report: CloudEvent → metering → cost
+- [Setup](../../dev/k3d-ipp-deployment.md) · [IPP overview](../../research/ipp-overview.md) · [MaaS flow](../../maas-flow.md)
 
 <!--
 Narration: We deployed the full OSAC AI gateway stack locally and proved
@@ -326,7 +349,7 @@ verified against the upstream source code and OpenAPI spec.
 
 ## IPP Stress Test: 850 req/s, Zero Errors
 
-![Test Architecture](../../diagrams/k3d-test-stack.svg)
+<a href="../../diagrams/k3d-test-stack.svg" target="_blank"><img src="../../diagrams/k3d-test-stack.svg" style="float:right; width:45%; margin-left:1rem;"></a>
 
 | Test | Concurrency | RPS | P50 | P99 |
 |------|-------------|-----|-----|-----|
@@ -370,4 +393,6 @@ in-memory balance caching could double throughput.
 
 # Questions?
 
-`github.com/myersCody/cost_ai_grid_poc`
+Martin Povolny, mpovolny@redhat.com
+
+[github.com/myersCody/cost_ai_grid_poc](https://github.com/myersCody/cost_ai_grid_poc)
