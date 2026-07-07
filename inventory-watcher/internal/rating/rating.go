@@ -43,6 +43,7 @@ func (r *Rater) sweep(ctx context.Context) {
 	entries, err := r.store.UnratedMeteringEntries(ctx, r.batch)
 	if err != nil {
 		r.logger.Error("failed to fetch unrated entries", "error", err)
+		metrics.RatingSweepErrors.Inc()
 		return
 	}
 
@@ -55,6 +56,7 @@ func (r *Rater) sweep(ctx context.Context) {
 	allRates, err := r.store.AllActiveRates(ctx, now)
 	if err != nil {
 		r.logger.Error("failed to fetch rates", "error", err)
+		metrics.RatingSweepErrors.Inc()
 		return
 	}
 

@@ -1134,6 +1134,28 @@ func TestBatchMeteringEntryIncludesProjectID(t *testing.T) {
 	}
 }
 
+func TestCsvSafe(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"hello", "hello"},
+		{"=cmd()", "'=cmd()"},
+		{"+cmd()", "'+cmd()"},
+		{"-cmd()", "'-cmd()"},
+		{"@cmd()", "'@cmd()"},
+		{"has,comma", "\"has,comma\""},
+		{`has"quote`, `"has""quote"`},
+		{"has\nnewline", "\"has\nnewline\""},
+		{"", ""},
+	}
+	for _, tc := range tests {
+		got := ingest.CsvSafe(tc.in)
+		if got != tc.want {
+			t.Errorf("ingest.CsvSafe(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestReconcileNotConfigured(t *testing.T) {
 	resp, err := http.Post(testServer.URL+"/api/v1/reconcile", "", nil)
 	if err != nil {

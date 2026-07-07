@@ -55,7 +55,7 @@ and tooling.
 | **CI pipeline** | <span class="done">Done</span> — 6 jobs incl. k3s integration test |
 | **OSAC integration test** | <span class="done">Done</span> — full OSAC + cost stack on k3s in CI |
 | **MaaS integration test** | <span class="done">Done</span> — IPP + AI gateway + echo LLM on k3d |
-| **Adversarial review** | v3 — 41 findings, 22 fixed |
+| **Adversarial review** | v4 — 72 findings, 46 fixed, 0 critical/high open |
 | **Tooling** | Bruno collection + Grafana dashboard |
 
 **Score: 13 done / 4 partial / 1 TBD** (of 18 requirements)
@@ -274,7 +274,6 @@ the error propagates to the errgroup and the pod restarts.
 - Sends CloudEvents
 - Waits for metering + rating sweeps
 - Verifies: probes, metrics, cost entries, quota API
-- **12/12 ALL PASSED** in 6 minutes
 
 <!--
 Narration: Every PR runs 6 CI jobs. The integration test deploys the
@@ -329,14 +328,14 @@ severity open. The 14 remaining are medium and low — none blocking.
 
 ## MaaS End-to-End: IPP Integration Verified
 
-<a href="../../diagrams/maas-ipp-flow.svg" target="_blank"><img src="../../diagrams/maas-ipp-flow.svg" style="float:right; width:50%; margin-left:1rem;"></a>
+<a href="maas-ipp-flow.svg" target="_blank"><img src="maas-ipp-flow.svg" style="float:right; width:50%; margin-left:1rem;"></a>
 
 Full inference metering pipeline on local k3d:
 
 - **Istio 1.29.2** + IPP ext_proc (PR #320) + llm-katan (echo LLM)
 - Balance check on every request → `hasAccess: true/false`
 - Usage report: CloudEvent → metering → cost
-- [Setup](../../dev/k3d-ipp-deployment.md) · [IPP overview](../../research/ipp-overview.md) · [MaaS flow](../../maas-flow.md)
+- [Setup guide](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/dev/k3d-ipp-deployment.md) · [IPP overview](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/research/ipp-overview.md) · [MaaS flow](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/maas-flow.md)
 
 <!--
 Narration: We deployed the full OSAC AI gateway stack locally and proved
@@ -349,7 +348,7 @@ verified against the upstream source code and OpenAPI spec.
 
 ## IPP Stress Test: 850 req/s, Zero Errors
 
-<a href="../../diagrams/k3d-test-stack.svg" target="_blank"><img src="../../diagrams/k3d-test-stack.svg" style="float:right; width:45%; margin-left:1rem;"></a>
+<a href="k3d-test-stack.svg" target="_blank"><img src="k3d-test-stack.svg" style="float:right; width:45%; margin-left:1rem;"></a>
 
 | Test | Concurrency | RPS | P50 | P99 |
 |------|-------------|-----|-----|-----|
@@ -358,7 +357,7 @@ verified against the upstream source code and OpenAPI spec.
 | Sustained 30s | 20 | **848** | 23ms | 43ms |
 
 40K+ requests, 100% success. Unique constraint costs 6-11% throughput.
-[Full report](../../dev/ipp-stress-test-2026-07-05.md) · [PR #25](https://github.com/myersCody/cost_ai_grid_poc/pull/25)
+[Full report](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/dev/ipp-stress-test-2026-07-05.md) · [PR #25](https://github.com/myersCody/cost_ai_grid_poc/pull/25)
 
 <!--
 Narration: We hammered the pipeline with 40,000 requests at up to 100
@@ -373,18 +372,20 @@ k3d cluster running on ARM Mac via QEMU — production would be faster.
 
 | Item | Status | Next step |
 |---|---|---|
-| REQ-5 Chargeback export | Partial | Scheduled export (API done) |
-| REQ-7 Audit trail | Partial | Document raw_events coverage |
-| MaaS tenant attribution | Designed | Confirm subscription → tenant mapping |
-| Noy's dogfood | Ready to connect | Our endpoints are IPP-compatible |
-| Performance | 850 req/s baseline | In-memory balance cache for >2x |
+| MaaS tenant attribution | Researched | Confirm subscription → tenant mapping with OSAC |
+| Project-level quotas | Tenant-only done | Add project quotas with rollup (Pau, PR #33) |
+| gRPC Watch stream | PoC done ([PR #32](https://github.com/myersCody/cost_ai_grid_poc/pull/32)) | Clarify public vs private stream with OSAC |
+| Catalog-item pricing | Rates done | Add SKU-based pricing layer (Pau, PR #33) |
+| Performance | 850 req/s baseline | In-memory balance cache, report available |
+| REQ-5 Chargeback export | API done | Scheduled export + FOCUS format |
 
 <!--
-Narration: We're down to closing partial requirements and optimizing.
-The MaaS tenant attribution mapping needs confirmation from the OSAC
-team. We're ready to connect to Noy's dogfood environment — our
-endpoints match the IPP contract. Performance optimization next:
-in-memory balance caching could double throughput.
+Narration: The main open item is MaaS tenant attribution — we've
+researched the IPP pipeline and found that TokenMetadata on the
+MaaSSubscription CRD has the fields we need but they're not wired
+through to the CloudEvent. Project-level quotas and catalog pricing
+are new requirements from Pau's review. The gRPC Watch PoC is done
+and tested — ready to switch if needed.
 -->
 
 ---

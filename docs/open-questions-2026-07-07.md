@@ -12,7 +12,7 @@
 For capacity-based resources (VMs, clusters), every OSAC resource carries
 `metadata.tenant` — attribution is trivial. For MaaS inference, events
 come from the IPP external-metering plugin
-([ai-gateway-payload-processing](https://github.com/opendatahub-io/ai-gateway-payload-processing/tree/main/pkg/plugins/external-metering))
+([ai-gateway-payload-processing PR #320](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/320))
 and carry:
 
 | Field | What it is | Example |

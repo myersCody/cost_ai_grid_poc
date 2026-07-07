@@ -1,12 +1,23 @@
 package metrics
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"time"
 )
+
+type requestIDKey struct{}
+
+// RequestIDFromContext returns the request ID stored in the context, or "".
+func RequestIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
 
 func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -15,6 +26,9 @@ func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {
 		if requestID == "" {
 			requestID = generateID()
 		}
+
+		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, requestID))
+		w.Header().Set("X-Request-ID", requestID)
 
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)

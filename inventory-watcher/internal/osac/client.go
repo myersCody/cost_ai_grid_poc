@@ -130,6 +130,7 @@ type listResponse[T any] struct {
 }
 
 const listPageSize = 100
+const listMaxItems = 10000
 
 func listAll[T any](ctx context.Context, c *Client, path string) ([]T, error) {
 	var all []T
@@ -158,6 +159,10 @@ func listAll[T any](ctx context.Context, c *Client, path string) ([]T, error) {
 		all = append(all, result.Items...)
 
 		if len(all) >= result.Total || result.Size == 0 {
+			break
+		}
+		if len(all) >= listMaxItems {
+			c.logger.Warn("list pagination capped", "path", path, "items", len(all), "total", result.Total)
 			break
 		}
 		offset += result.Size

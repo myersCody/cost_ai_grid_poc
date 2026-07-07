@@ -65,6 +65,7 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 	instances, err := m.store.BillableComputeInstances(ctx)
 	if err != nil {
 		m.logger.Error("failed to list billable compute instances", "error", err)
+		metrics.MeteringSweepErrors.Inc()
 		return
 	}
 
@@ -141,6 +142,7 @@ func (m *Meter) meterClusters(ctx context.Context, now time.Time) {
 	clusters, err := m.store.BillableClusters(ctx)
 	if err != nil {
 		m.logger.Error("failed to list billable clusters", "error", err)
+		metrics.MeteringSweepErrors.Inc()
 		return
 	}
 
@@ -230,6 +232,7 @@ func (m *Meter) meterBareMetalInstances(ctx context.Context, now time.Time) {
 	instances, err := m.store.BillableBareMetalInstances(ctx)
 	if err != nil {
 		m.logger.Error("failed to list billable bare metal instances", "error", err)
+		metrics.MeteringSweepErrors.Inc()
 		return
 	}
 

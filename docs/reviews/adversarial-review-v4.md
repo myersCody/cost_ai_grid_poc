@@ -85,7 +85,7 @@ validation — exactly the kind of thing that bites in production.
 | 10 | JSON injection in errors | Medium | v1 | Fixed |
 | 11 | Scanner buffer size | Medium | v1 | Fixed |
 | 12 | N+1 query in summarizer | Medium | v1 | Fixed |
-| 13 | Duplicate event constants | Low | v1 | Open |
+| 13 | Duplicate event constants | Low | v1 | **Fixed** — single definition in `osac/types.go` |
 | 14 | Unbounded slice allocation | Low | v1 | Open |
 | 15 | No request IDs/tracing | Low | v1 | Fixed |
 | 16 | UTC timezone assumption | Info | v1 | Accepted |
@@ -97,13 +97,13 @@ validation — exactly the kind of thing that bites in production.
 | 22 | `/metrics` auth exemption | Medium | v2 | Fixed |
 | 23 | `normalizePath` fragility | Medium | v2 | Partially fixed |
 | 24 | `rand.Read` error ignored | Low | v2 | **Fixed** — error checked, falls back to zero ID |
-| 25 | Request ID not in context | Low | v2 | Open |
+| 25 | Request ID not in context | Low | v2 | **Fixed** — stored in context via `context.WithValue`, echoed in `X-Request-ID` response header |
 | 26 | No middleware tests | Low | v2 | **Fixed** — `internal/metrics/middleware_test.go` exists with `normalizePath` tests |
 | 27 | Stale resource gauges | Low | v2 | Accepted (PoC) |
 | 28 | 404 path cardinality attack | Medium | v2 | Fixed |
 | 29 | Probe log noise | Low | v2 | Fixed |
 | 30 | `LiveModels` gauge never set | Low | v2 | **Fixed** — set from `PipelineSummary` in summary handler |
-| 31 | No sweep error metrics | Low | v2 | Open |
+| 31 | No sweep error metrics | Low | v2 | **Fixed** — `metering_sweep_errors_total` and `rating_sweep_errors_total` counters added |
 | 32 | Panic response Content-Type | Info | v2 | Fixed |
 | 33 | Import grouping | Info | v2 | Fixed |
 | 34 | `toFloat64` partial string parse | Medium | v3 | Fixed (commit a713817) |
@@ -125,14 +125,14 @@ validation — exactly the kind of thing that bites in production.
 | 50 | Rating sweep N+1 queries | High | v4 | **Fixed** — `AllActiveRates` batch-loads all rates once, `buildRateIndex` + `matchRate` does in-memory lookup per entry |
 | 51 | `UnratedMeteringEntries` LEFT JOIN anti-pattern | High | v4 | **Fixed** — `rated_at` column + partial index `idx_me_unrated ON metering_entries (id) WHERE rated_at IS NULL`; query is `WHERE rated_at IS NULL` |
 | 52 | No tests for watcher/reconciler/authn/store | High | v4 | Open |
-| 53 | CSV injection in cost report export | Medium | v4 | Open — `row.Group` written directly to CSV without escaping |
+| 53 | CSV injection in cost report export | Medium | v4 | **Fixed** — `CsvSafe` escapes formula-triggering chars (`=`, `+`, `-`, `@`) and quotes values with commas/newlines |
 | 54 | Wildcard CORS on sensitive endpoints | Medium | v4 | Accepted (PoC) — useful for port-forward/dev testing |
-| 55 | No rate limiting on event ingestion | Medium | v4 | Open |
+| 55 | No rate limiting on event ingestion | Medium | v4 | **Deferred** (post-PoC) — OSAC is the only client in the PoC; not exposed to untrusted traffic |
 | 56 | Debug dashboard enabled by default | Medium | v4 | Deferred (post-PoC) |
 | 57 | Non-transactional metering + last_metered_at update | Medium | v4 | Open — still no transaction boundaries |
 | 58 | Silent NodeSets JSON parse failure | Medium | v4 | Fixed |
 | 59 | `projectCache` never invalidates | Medium | v4 | Fixed |
-| 60 | OSAC `listAll` pagination unbounded | Medium | v4 | Open — no safety cap on total pages |
+| 60 | OSAC `listAll` pagination unbounded | Medium | v4 | **Fixed** — capped at 10,000 items with warning log |
 | 61 | Store is a God object (1300+ lines, 50 methods) | Medium | v4 | Accepted (PoC) |
 | 62 | Handler mixes routing, processing, and business logic | Medium | v4 | Accepted (PoC) |
 | 63 | Missing ADRs for auth model and tenant attribution | Medium | v4 | Open |
@@ -143,7 +143,7 @@ validation — exactly the kind of thing that bites in production.
 | 68 | Rating sweep silently skips unrated entries forever | Low | v4 | Open — entries with no matching rate stay `rated_at IS NULL` and re-appear every sweep |
 | 69 | Swallowed `json.Marshal` errors in watcher | Low | v4 | **Accepted** — `json.Marshal` on `map[string]string` is infallible; no runtime failure possible |
 | 70 | Containerfile Go version mismatch | Low | v4 | **Accepted** — `GOTOOLCHAIN=auto` downloads correct Go version; base image just needs Go 1.21+ |
-| 71 | DurationMs truncation loses sub-second precision | Low | v4 | Open — `int(data.DurationMs / 1000)` truncates, losing sub-second portion |
+| 71 | DurationMs truncation loses sub-second precision | Low | v4 | **Fixed** — `DurationSeconds` changed to `float64`, `DurationMs` converts with `float64(ms)/1000.0` |
 | 72 | Inconsistent JSON response patterns | Low | v4 | Accepted (PoC) |
 
 ## New Findings Detail (v4)

@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -140,6 +142,54 @@ func TestRequestLogger_ProbesAtDebugLevel(t *testing.T) {
 
 	if buf.String() != "" {
 		t.Errorf("probe requests at INFO level should be silent, got: %s", buf.String())
+	}
+}
+
+func TestRequestLogger_SetsRequestIDInContext(t *testing.T) {
+	var capturedID string
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedID = RequestIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	wrapped := RequestLogger(logger, inner)
+
+	req := httptest.NewRequest("GET", "/api/v1/events", nil)
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if capturedID == "" {
+		t.Error("request ID not set in context")
+	}
+	if rec.Header().Get("X-Request-ID") != capturedID {
+		t.Errorf("response header X-Request-ID = %q, context has %q", rec.Header().Get("X-Request-ID"), capturedID)
+	}
+}
+
+func TestRequestLogger_PreservesIncomingRequestID(t *testing.T) {
+	var capturedID string
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedID = RequestIDFromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	wrapped := RequestLogger(logger, inner)
+
+	req := httptest.NewRequest("GET", "/api/v1/events", nil)
+	req.Header.Set("X-Request-ID", "incoming-123")
+	rec := httptest.NewRecorder()
+	wrapped.ServeHTTP(rec, req)
+
+	if capturedID != "incoming-123" {
+		t.Errorf("expected incoming-123, got %q", capturedID)
+	}
+}
+
+func TestRequestIDFromContext_Empty(t *testing.T) {
+	if id := RequestIDFromContext(context.Background()); id != "" {
+		t.Errorf("expected empty, got %q", id)
 	}
 }
 

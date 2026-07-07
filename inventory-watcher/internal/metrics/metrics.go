@@ -43,6 +43,18 @@ var (
 		Help:      "Cost entries produced by rating.",
 	}, []string{"resource_type", "cost_type"})
 
+	MeteringSweepErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "metering_sweep_errors_total",
+		Help:      "Errors during metering sweep.",
+	})
+
+	RatingSweepErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "rating_sweep_errors_total",
+		Help:      "Errors during rating sweep.",
+	})
+
 	MeteringSweepDuration = promauto.NewHistogram(prometheus.HistogramOpts{
 		Namespace: namespace,
 		Name:      "metering_sweep_duration_seconds",
