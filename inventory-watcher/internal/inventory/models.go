@@ -229,6 +229,34 @@ type CostReportRow struct {
 	Currency           string  `json:"currency"`
 }
 
+type FOCUSRow struct {
+	BilledCost         float64   `json:"BilledCost"`
+	BillingAccountId   string    `json:"BillingAccountId"`
+	BillingAccountName string    `json:"BillingAccountName"`
+	BillingCurrency    string    `json:"BillingCurrency"`
+	BillingPeriodStart time.Time `json:"BillingPeriodStart"`
+	BillingPeriodEnd   time.Time `json:"BillingPeriodEnd"`
+	ChargeCategory     string    `json:"ChargeCategory"`
+	ChargeDescription  string    `json:"ChargeDescription"`
+	ChargePeriodStart  time.Time `json:"ChargePeriodStart"`
+	ChargePeriodEnd    time.Time `json:"ChargePeriodEnd"`
+	ContractedCost     float64   `json:"ContractedCost"`
+	EffectiveCost      float64   `json:"EffectiveCost"`
+	InvoiceIssuerName  string    `json:"InvoiceIssuerName"`
+	ListCost           float64   `json:"ListCost"`
+	PricingQuantity    float64   `json:"PricingQuantity"`
+	PricingUnit        string    `json:"PricingUnit"`
+	ProviderName       string    `json:"ProviderName"`
+	PublisherName      string    `json:"PublisherName"`
+	ServiceCategory    string    `json:"ServiceCategory"`
+	ServiceName        string    `json:"ServiceName"`
+	ResourceId         string    `json:"ResourceId,omitempty"`
+	ResourceName       string    `json:"ResourceName,omitempty"`
+	ResourceType       string    `json:"ResourceType,omitempty"`
+	SubAccountId       string    `json:"SubAccountId,omitempty"`
+	SubAccountName     string    `json:"SubAccountName,omitempty"`
+}
+
 type PipelineSummary struct {
 	RawEvents       int `json:"raw_events"`
 	MeteringEntries int `json:"metering_entries"`

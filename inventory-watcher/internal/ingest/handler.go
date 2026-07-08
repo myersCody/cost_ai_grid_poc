@@ -132,6 +132,7 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/events", h.handleEvent)
 	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
+	mux.HandleFunc("GET /api/v1/reports/focus", h.handleFOCUSExport)
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
 	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
@@ -629,6 +630,94 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 			Filters: filters,
 		},
 		Data: rows,
+	})
+}
+
+func (h *Handler) handleFOCUSExport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	q := r.URL.Query()
+	tenantID := q.Get("tenant_id")
+
+	var from, to time.Time
+	if fromStr := q.Get("from"); fromStr != "" {
+		var err error
+		from, err = time.Parse("2006-01-02", fromStr)
+		if err != nil {
+			from, err = time.Parse(time.RFC3339, fromStr)
+			if err != nil {
+				writeErrorJSON(w, "invalid 'from' format", http.StatusBadRequest)
+				return
+			}
+		}
+	} else {
+		from = time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+	if toStr := q.Get("to"); toStr != "" {
+		var err error
+		to, err = time.Parse("2006-01-02", toStr)
+		if err != nil {
+			to, err = time.Parse(time.RFC3339, toStr)
+			if err != nil {
+				writeErrorJSON(w, "invalid 'to' format", http.StatusBadRequest)
+				return
+			}
+		}
+	} else {
+		to = time.Now().UTC()
+	}
+
+	limit := 1000
+	if l := q.Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+
+	ctx := r.Context()
+	rows, err := h.store.FOCUSExport(ctx, tenantID, from, to, limit)
+	if err != nil {
+		h.logger.Error("FOCUS export query failed", "error", err)
+		writeErrorJSON(w, "FOCUS export failed", http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []inventory.FOCUSRow{}
+	}
+
+	format := q.Get("format")
+	if format == "" && r.Header.Get("Accept") == "text/csv" {
+		format = "csv"
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=focus-export.csv")
+		fmt.Fprintln(w, "BilledCost,BillingAccountId,BillingAccountName,BillingCurrency,BillingPeriodStart,BillingPeriodEnd,ChargeCategory,ChargeDescription,ChargePeriodStart,ChargePeriodEnd,ContractedCost,EffectiveCost,InvoiceIssuerName,ListCost,PricingQuantity,PricingUnit,ProviderName,PublisherName,ServiceCategory,ServiceName,ResourceId,ResourceName,ResourceType,SubAccountId,SubAccountName")
+		for _, row := range rows {
+			fmt.Fprintf(w, "%.10f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%.10f,%.10f,%s,%.10f,%.6f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+				row.BilledCost,
+				CsvSafe(row.BillingAccountId), CsvSafe(row.BillingAccountName), row.BillingCurrency,
+				row.BillingPeriodStart.Format(time.RFC3339), row.BillingPeriodEnd.Format(time.RFC3339),
+				row.ChargeCategory, CsvSafe(row.ChargeDescription),
+				row.ChargePeriodStart.Format(time.RFC3339), row.ChargePeriodEnd.Format(time.RFC3339),
+				row.ContractedCost, row.EffectiveCost,
+				CsvSafe(row.InvoiceIssuerName), row.ListCost,
+				row.PricingQuantity, CsvSafe(row.PricingUnit),
+				CsvSafe(row.ProviderName), CsvSafe(row.PublisherName),
+				CsvSafe(row.ServiceCategory), CsvSafe(row.ServiceName),
+				CsvSafe(row.ResourceId), CsvSafe(row.ResourceName),
+				CsvSafe(row.ResourceType),
+				CsvSafe(row.SubAccountId), CsvSafe(row.SubAccountName))
+		}
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"meta": map[string]any{
+			"count":   len(rows),
+			"format":  "FOCUS v1.0",
+			"version": "1.0",
+		},
+		"data": rows,
 	})
 }
 
