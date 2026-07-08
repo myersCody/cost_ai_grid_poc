@@ -221,12 +221,26 @@ type DailyUsageSummary struct {
 }
 
 type CostReportRow struct {
+	Date               string  `json:"date,omitempty"`
 	Group              string  `json:"group"`
 	Entries            int     `json:"entries"`
 	Cost               float64 `json:"cost"`
 	InfrastructureCost float64 `json:"infrastructure_cost"`
 	SupplementaryCost  float64 `json:"supplementary_cost"`
 	Currency           string  `json:"currency"`
+}
+
+type CostBreakdownRow struct {
+	Date         string  `json:"date"`
+	TenantID     string  `json:"tenant_id"`
+	ProjectID    string  `json:"project_id"`
+	ResourceType string  `json:"resource_type"`
+	ResourceID   string  `json:"resource_id"`
+	MeterName    string  `json:"meter_name"`
+	MeteredValue float64 `json:"metered_value"`
+	CostAmount   float64 `json:"cost_amount"`
+	CostType     string  `json:"cost_type"`
+	Currency     string  `json:"currency"`
 }
 
 type PipelineSummary struct {

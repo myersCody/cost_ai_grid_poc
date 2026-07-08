@@ -1362,8 +1362,9 @@ func marshalLabels(labels json.RawMessage) ([]byte, error) {
 }
 
 // CostReport returns aggregated cost data grouped by the specified dimension.
-// groupBy must be one of: "tenant", "resource_type", "meter", "resource".
-func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy string, from, to time.Time) ([]CostReportRow, error) {
+// groupBy: "tenant", "resource_type", "meter", "resource", "project".
+// resolution: "" (aggregate) or "daily" (per-date breakdown).
+func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy, resolution string, from, to time.Time) ([]CostReportRow, error) {
 	var groupCol string
 	switch groupBy {
 	case "resource_type":
@@ -1392,8 +1393,16 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 		args = append(args, resourceType)
 	}
 
+	var dateCol, dateSelect, dateGroup, dateOrder string
+	if resolution == "daily" {
+		dateCol = "ce.period_start::date"
+		dateSelect = fmt.Sprintf("%s AS dt, ", dateCol)
+		dateGroup = fmt.Sprintf("%s, ", dateCol)
+		dateOrder = fmt.Sprintf("%s, ", dateCol)
+	}
+
 	query := fmt.Sprintf(`
-		SELECT %s AS grp,
+		SELECT %s%s AS grp,
 		       count(*)::int AS entries,
 		       COALESCE(SUM(ce.cost_amount), 0) AS cost,
 		       COALESCE(SUM(CASE WHEN r.cost_type = 'Infrastructure' THEN ce.cost_amount ELSE 0 END), 0) AS infra_cost,
@@ -1402,9 +1411,9 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 		FROM cost_entries ce
 		LEFT JOIN rates r ON ce.rate_id = r.id
 		%s
-		GROUP BY %s, ce.currency
-		ORDER BY cost DESC
-	`, groupCol, where, groupCol)
+		GROUP BY %s%s, ce.currency
+		ORDER BY %scost DESC
+	`, dateSelect, groupCol, where, dateGroup, groupCol, dateOrder)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1415,9 +1424,72 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 	var results []CostReportRow
 	for rows.Next() {
 		var r CostReportRow
-		if err := rows.Scan(&r.Group, &r.Entries, &r.Cost, &r.InfrastructureCost, &r.SupplementaryCost, &r.Currency); err != nil {
+		if resolution == "daily" {
+			var dt time.Time
+			if err := rows.Scan(&dt, &r.Group, &r.Entries, &r.Cost, &r.InfrastructureCost, &r.SupplementaryCost, &r.Currency); err != nil {
+				return nil, err
+			}
+			r.Date = dt.Format("2006-01-02")
+		} else {
+			if err := rows.Scan(&r.Group, &r.Entries, &r.Cost, &r.InfrastructureCost, &r.SupplementaryCost, &r.Currency); err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// CostBreakdown returns per-resource line items for a time range.
+func (s *Store) CostBreakdown(ctx context.Context, tenantID, resourceType string, from, to time.Time, limit int) ([]CostBreakdownRow, error) {
+	where := "WHERE ce.period_start >= $1 AND ce.period_end <= $2"
+	args := []any{from, to}
+	argN := 3
+
+	if tenantID != "" {
+		where += fmt.Sprintf(" AND ce.tenant_id = $%d", argN)
+		args = append(args, tenantID)
+		argN++
+	}
+	if resourceType != "" {
+		where += fmt.Sprintf(" AND ce.resource_type = $%d", argN)
+		args = append(args, resourceType)
+		argN++
+	}
+
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	args = append(args, limit)
+
+	query := fmt.Sprintf(`
+		SELECT ce.period_start::date AS dt,
+		       ce.tenant_id, ce.project_id, ce.resource_type, ce.resource_id,
+		       ce.meter_name, ce.metered_value, ce.cost_amount,
+		       COALESCE(r.cost_type, '') AS cost_type,
+		       ce.currency
+		FROM cost_entries ce
+		LEFT JOIN rates r ON ce.rate_id = r.id
+		%s
+		ORDER BY ce.period_start DESC, ce.cost_amount DESC
+		LIMIT $%d
+	`, where, argN)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("cost breakdown: %w", err)
+	}
+	defer rows.Close()
+
+	var results []CostBreakdownRow
+	for rows.Next() {
+		var r CostBreakdownRow
+		var dt time.Time
+		if err := rows.Scan(&dt, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.ResourceID,
+			&r.MeterName, &r.MeteredValue, &r.CostAmount, &r.CostType, &r.Currency); err != nil {
 			return nil, err
 		}
+		r.Date = dt.Format("2006-01-02")
 		results = append(results, r)
 	}
 	return results, rows.Err()

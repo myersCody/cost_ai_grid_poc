@@ -132,6 +132,7 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/events", h.handleEvent)
 	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
+	mux.HandleFunc("GET /api/v1/reports/breakdown", h.handleCostBreakdown)
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
 	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
 	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
@@ -543,17 +544,58 @@ type costReportResponse struct {
 }
 
 type costReportMeta struct {
-	Total   costTotal         `json:"total"`
-	Period  string            `json:"period"`
-	GroupBy string            `json:"group_by"`
-	Filters map[string]string `json:"filters"`
+	Total      kokuCostTotal     `json:"total"`
+	Period     string            `json:"period"`
+	GroupBy    string            `json:"group_by"`
+	Resolution string           `json:"resolution,omitempty"`
+	Filters    map[string]string `json:"filters"`
 }
 
-type costTotal struct {
-	Cost               float64 `json:"cost"`
-	InfrastructureCost float64 `json:"infrastructure_cost"`
-	SupplementaryCost  float64 `json:"supplementary_cost"`
-	Currency           string  `json:"currency"`
+type kokuCostLayer struct {
+	Value float64 `json:"value"`
+	Units string  `json:"units"`
+}
+
+type kokuCostBlock struct {
+	Raw    kokuCostLayer `json:"raw"`
+	Markup kokuCostLayer `json:"markup"`
+	Usage  kokuCostLayer `json:"usage"`
+	Total  kokuCostLayer `json:"total"`
+}
+
+type kokuCostTotal struct {
+	Cost           kokuCostBlock `json:"cost"`
+	Infrastructure kokuCostBlock `json:"infrastructure"`
+	Supplementary  kokuCostBlock `json:"supplementary"`
+	CostUnits      string        `json:"cost_units"`
+}
+
+func buildKokuTotal(cost, infraCost, suppCost float64, currency string) kokuCostTotal {
+	return kokuCostTotal{
+		Cost: kokuCostBlock{
+			Usage: kokuCostLayer{Value: cost, Units: currency},
+			Total: kokuCostLayer{Value: cost, Units: currency},
+		},
+		Infrastructure: kokuCostBlock{
+			Usage: kokuCostLayer{Value: infraCost, Units: currency},
+			Total: kokuCostLayer{Value: infraCost, Units: currency},
+		},
+		Supplementary: kokuCostBlock{
+			Usage: kokuCostLayer{Value: suppCost, Units: currency},
+			Total: kokuCostLayer{Value: suppCost, Units: currency},
+		},
+		CostUnits: currency,
+	}
+}
+
+type costBreakdownResponse struct {
+	Meta costBreakdownMeta              `json:"meta"`
+	Data []inventory.CostBreakdownRow   `json:"data"`
+}
+
+type costBreakdownMeta struct {
+	Count   int               `json:"count"`
+	Filters map[string]string `json:"filters"`
 }
 
 func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
@@ -566,20 +608,50 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 	if groupBy == "" {
 		groupBy = "tenant"
 	}
-	period := q.Get("period")
-	if period == "" {
-		period = time.Now().UTC().Format("2006-01")
-	}
+	resolution := q.Get("resolution")
 
-	periodStart, err := time.Parse("2006-01", period)
-	if err != nil {
-		writeErrorJSON(w, "invalid period format, use YYYY-MM", http.StatusBadRequest)
-		return
+	var periodStart, periodEnd time.Time
+	var period string
+
+	if fromStr := q.Get("from"); fromStr != "" {
+		var err error
+		periodStart, err = time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			periodStart, err = time.Parse("2006-01-02", fromStr)
+			if err != nil {
+				writeErrorJSON(w, "invalid 'from' format, use YYYY-MM-DD or RFC3339", http.StatusBadRequest)
+				return
+			}
+		}
+		if toStr := q.Get("to"); toStr != "" {
+			periodEnd, err = time.Parse(time.RFC3339, toStr)
+			if err != nil {
+				periodEnd, err = time.Parse("2006-01-02", toStr)
+				if err != nil {
+					writeErrorJSON(w, "invalid 'to' format, use YYYY-MM-DD or RFC3339", http.StatusBadRequest)
+					return
+				}
+			}
+		} else {
+			periodEnd = time.Now().UTC()
+		}
+		period = periodStart.Format("2006-01-02") + "/" + periodEnd.Format("2006-01-02")
+	} else {
+		period = q.Get("period")
+		if period == "" {
+			period = time.Now().UTC().Format("2006-01")
+		}
+		var err error
+		periodStart, err = time.Parse("2006-01", period)
+		if err != nil {
+			writeErrorJSON(w, "invalid period format, use YYYY-MM", http.StatusBadRequest)
+			return
+		}
+		periodEnd = periodStart.AddDate(0, 1, 0)
 	}
-	periodEnd := periodStart.AddDate(0, 1, 0)
 
 	ctx := r.Context()
-	rows, err := h.store.CostReport(ctx, tenantID, resourceType, groupBy, periodStart, periodEnd)
+	rows, err := h.store.CostReport(ctx, tenantID, resourceType, groupBy, resolution, periodStart, periodEnd)
 	if err != nil {
 		h.logger.Error("cost report query failed", "error", err)
 		writeErrorJSON(w, "report query failed", http.StatusInternalServerError)
@@ -589,12 +661,11 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 		rows = []inventory.CostReportRow{}
 	}
 
-	var total costTotal
-	total.Currency = "USD"
+	var totalCost, totalInfra, totalSupp float64
 	for _, row := range rows {
-		total.Cost += row.Cost
-		total.InfrastructureCost += row.InfrastructureCost
-		total.SupplementaryCost += row.SupplementaryCost
+		totalCost += row.Cost
+		totalInfra += row.InfrastructureCost
+		totalSupp += row.SupplementaryCost
 	}
 
 	filters := map[string]string{}
@@ -613,19 +684,117 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 	if format == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=costs.csv")
-		fmt.Fprintln(w, "group,entries,cost,infrastructure_cost,supplementary_cost,currency")
-		for _, row := range rows {
-			fmt.Fprintf(w, "%s,%d,%.6f,%.6f,%.6f,%s\n",
-				CsvSafe(row.Group), row.Entries, row.Cost, row.InfrastructureCost, row.SupplementaryCost, CsvSafe(row.Currency))
+		if resolution == "daily" {
+			fmt.Fprintln(w, "date,group,entries,cost,infrastructure_cost,supplementary_cost,currency")
+			for _, row := range rows {
+				fmt.Fprintf(w, "%s,%s,%d,%.6f,%.6f,%.6f,%s\n",
+					row.Date, CsvSafe(row.Group), row.Entries, row.Cost, row.InfrastructureCost, row.SupplementaryCost, CsvSafe(row.Currency))
+			}
+		} else {
+			fmt.Fprintln(w, "group,entries,cost,infrastructure_cost,supplementary_cost,currency")
+			for _, row := range rows {
+				fmt.Fprintf(w, "%s,%d,%.6f,%.6f,%.6f,%s\n",
+					CsvSafe(row.Group), row.Entries, row.Cost, row.InfrastructureCost, row.SupplementaryCost, CsvSafe(row.Currency))
+			}
 		}
 		return
 	}
 
 	writeJSON(w, costReportResponse{
 		Meta: costReportMeta{
-			Total:   total,
-			Period:  period,
-			GroupBy: groupBy,
+			Total:      buildKokuTotal(totalCost, totalInfra, totalSupp, "USD"),
+			Period:     period,
+			GroupBy:    groupBy,
+			Resolution: resolution,
+			Filters:    filters,
+		},
+		Data: rows,
+	})
+}
+
+func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	q := r.URL.Query()
+	tenantID := q.Get("tenant_id")
+	resourceType := q.Get("resource_type")
+
+	var from, to time.Time
+	if fromStr := q.Get("from"); fromStr != "" {
+		var err error
+		from, err = time.Parse(time.RFC3339, fromStr)
+		if err != nil {
+			from, err = time.Parse("2006-01-02", fromStr)
+			if err != nil {
+				writeErrorJSON(w, "invalid 'from' format", http.StatusBadRequest)
+				return
+			}
+		}
+	} else {
+		from = time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
+	}
+	if toStr := q.Get("to"); toStr != "" {
+		var err error
+		to, err = time.Parse(time.RFC3339, toStr)
+		if err != nil {
+			to, err = time.Parse("2006-01-02", toStr)
+			if err != nil {
+				writeErrorJSON(w, "invalid 'to' format", http.StatusBadRequest)
+				return
+			}
+		}
+	} else {
+		to = time.Now().UTC()
+	}
+
+	limit := 100
+	if l := q.Get("limit"); l != "" {
+		if v, err := fmt.Sscanf(l, "%d", &limit); err != nil || v != 1 {
+			limit = 100
+		}
+	}
+
+	ctx := r.Context()
+	rows, err := h.store.CostBreakdown(ctx, tenantID, resourceType, from, to, limit)
+	if err != nil {
+		h.logger.Error("cost breakdown query failed", "error", err)
+		writeErrorJSON(w, "breakdown query failed", http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []inventory.CostBreakdownRow{}
+	}
+
+	filters := map[string]string{}
+	if tenantID != "" {
+		filters["tenant_id"] = tenantID
+	}
+	if resourceType != "" {
+		filters["resource_type"] = resourceType
+	}
+
+	format := q.Get("format")
+	if format == "" && r.Header.Get("Accept") == "text/csv" {
+		format = "csv"
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=breakdown.csv")
+		fmt.Fprintln(w, "date,tenant_id,project_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
+		for _, row := range rows {
+			fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%.6f,%.10f,%s,%s\n",
+				row.Date, CsvSafe(row.TenantID), CsvSafe(row.ProjectID),
+				CsvSafe(row.ResourceType), CsvSafe(row.ResourceID),
+				CsvSafe(row.MeterName), row.MeteredValue, row.CostAmount,
+				CsvSafe(row.CostType), CsvSafe(row.Currency))
+		}
+		return
+	}
+
+	writeJSON(w, costBreakdownResponse{
+		Meta: costBreakdownMeta{
+			Count:   len(rows),
 			Filters: filters,
 		},
 		Data: rows,
