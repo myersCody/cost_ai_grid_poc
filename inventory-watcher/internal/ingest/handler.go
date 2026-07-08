@@ -75,10 +75,15 @@ type MaaSEventData struct {
 	Requests        int64  `json:"requests"`
 	DurationSeconds float64 `json:"duration_seconds"`
 	RequestCount    int64   `json:"request_count"`
-	// IPP external-metering plugin fields (authoritative format)
+	// IPP external-metering plugin fields (authoritative format).
+	// organization_id and cost_center are proposed additions to the IPP
+	// CloudEvent payload for tenant attribution without subscription parsing.
+	// See: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
 	User                string `json:"user"`
 	Group               string `json:"group"`
 	Subscription        string `json:"subscription"`
+	OrganizationID      string `json:"organization_id"`
+	CostCenter          string `json:"cost_center"`
 	Provider            string `json:"provider"`
 	Model               string `json:"model"`
 	PromptTokens        int64  `json:"prompt_tokens"`
@@ -338,15 +343,11 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 		data.ModelID = data.Model
 	}
 	// Tenant attribution from IPP CloudEvent identity fields.
-	// The IPP event has no tenant_id. We try in order:
-	// 1. subscription namespace (if format is "{namespace}/{name}")
-	// 2. group (K8s group membership from Authorino)
-	// 3. user (username from Authorino)
-	// NOTE: It is unclear whether the subscription field carries the namespace
-	// prefix. The MaaSSubscription CR is namespaced but may live in a shared
-	// MaaS namespace, not a per-tenant namespace. This mapping needs
-	// confirmation from the OSAC/RHOAI team.
-	// Source: docs/research/maas-tenant-attribution.md
+	// Priority: organization_id > subscription namespace > group > user
+	// See: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
+	if data.TenantID == "" && data.OrganizationID != "" {
+		data.TenantID = data.OrganizationID
+	}
 	if data.TenantID == "" && data.Subscription != "" {
 		if idx := strings.Index(data.Subscription, "/"); idx > 0 {
 			data.TenantID = data.Subscription[:idx]
@@ -403,18 +404,22 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 
 func classifyEvent(ce CloudEvent) (resourceType, resourceID, tenantID string) {
 	var peek struct {
-		TenantID   string `json:"tenant_id"`
-		InstanceID string `json:"instance_id"`
-		ClusterID  string `json:"cluster_id"`
-		ModelID    string `json:"model_id"`
-		User       string `json:"user"`
-		Model      string `json:"model"`
+		TenantID       string `json:"tenant_id"`
+		OrganizationID string `json:"organization_id"`
+		InstanceID     string `json:"instance_id"`
+		ClusterID      string `json:"cluster_id"`
+		ModelID        string `json:"model_id"`
+		User           string `json:"user"`
+		Model          string `json:"model"`
 	}
 	if err := json.Unmarshal(ce.Data, &peek); err != nil {
 		return ce.Type, "", ce.Subject
 	}
 
 	tenantID = peek.TenantID
+	if tenantID == "" {
+		tenantID = peek.OrganizationID
+	}
 	if tenantID == "" {
 		tenantID = ce.Subject
 	}
