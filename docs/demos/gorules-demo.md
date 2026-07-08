@@ -1,163 +1,123 @@
 # Demo: GoRules Programmable Rating
 
-> Instance-type pricing with tenant tier discounts — rates defined in a
-> JSON decision table, not code.
+> Recorded demo — instance-type pricing and committed-use discounts
+> using a JSON decision engine. No code changes for pricing updates.
 
-## Setup
+## Prerequisites
 
 ```bash
 source snippets/env.sh
 cd inventory-watcher
 go build -o inventory-watcher ./cmd/consumer/
+bash ../snippets/create-test-data.sh   # populate OSAC with VMs
 ```
 
-`snippets/env.sh` sets:
-```bash
-export OSAC_BASE_URL=http://localhost:8011
-export OSAC_TOKEN=$(cat /tmp/osac_token.txt)
-export INVENTORY_DB_URL=postgres://user:pass@localhost:5434/costdb
-export INGEST_LISTEN_ADDR=localhost:8020
-export BASE="$OSAC_BASE_URL"
-export TOKEN="$OSAC_TOKEN"
-export DB="docker exec cost-db psql -U user -d costdb -c"
-```
+OSAC + PostgreSQL running, token fresh in `/tmp/osac_token.txt`.
 
-Prerequisites: OSAC + PostgreSQL running, token fresh.
+## Setup
 
----
-
-## Act 1: Populate OSAC with test data
-
-```bash
-bash snippets/create-test-data.sh
-```
-
-This creates 3 instance types and 3 VMs in OSAC.
-
----
-
-## Act 2: Start consumer WITH rule engine
+Start the consumer with rule engine enabled:
 
 ```bash
 RULES_DIR=rules ./inventory-watcher
 ```
 
-**Point out in logs:**
-- `rule engine enabled rules_dir=rules`
-- `reconciled compute instances osac_count=N`
+Log should show: `rule engine enabled rules_dir=rules`
+
+Open two browser windows:
+1. **Debug dashboard**: http://localhost:8020/debug/dashboard
+2. **GoRules demo page**: http://localhost:8020/demo/gorules
 
 ---
 
-## Act 3: Set tenant tiers
+## Recording Flow
 
-After reconciliation syncs tenants, tag them:
+### Part 1: Show the rules (no running service needed)
 
-```bash
-$DB "UPDATE inventory_tenant SET labels = labels || '{\"tier\": \"gold\"}' WHERE tenant_id = 'shared';"
-$DB "SELECT tenant_id, labels->>'tier' as tier FROM inventory_tenant;"
-```
-
-**Show:** `shared` is gold, others are standard (no tier label).
-
----
-
-## Act 4: Inspect the decision table
-
-Open `rules/compute-pricing.json` or show in the presentation:
+Open `rules/compute-pricing.json` and explain the decision table:
 
 ```
-┌──────────────────┬─────────────┬──────────────┬────────────┐
-│ Instance Type     │ Tenant Tier │ Price/Hour $ │ Discount % │
-├──────────────────┼─────────────┼──────────────┼────────────┤
-│ standard-2-8     │ gold        │ 0.10         │ 20         │
-│ standard-2-8     │ (any)       │ 0.10         │ 0          │
-│ standard-4-16    │ gold        │ 0.20         │ 20         │
-│ standard-4-16    │ (any)       │ 0.20         │ 0          │
-│ standard-8-32    │ gold        │ 0.40         │ 20         │
-│ standard-8-32    │ (any)       │ 0.40         │ 0          │
-│ (any)            │ (any)       │ 0.10         │ 0          │
-└──────────────────┴─────────────┴──────────────┴────────────┘
+Instance Type × Tenant Tier → Price/Hour + Discount
+
+standard-2-8  + gold     → $0.10/hr, 20% off = $0.08 effective
+standard-4-16 + gold     → $0.20/hr, 20% off = $0.16 effective
+standard-4-16 + standard → $0.20/hr, 0% off  = $0.20 effective
+standard-8-32 + gold     → $0.40/hr, 20% off = $0.32 effective
 ```
 
-**Point out:** "This is a JSON file, not code. An operator can edit it,
-restart, and pricing changes. No PR, no recompile."
+Key point: "This is a JSON file. Not Go code. An operator edits it,
+restarts, and pricing changes. No PR. No recompile."
 
----
+Then show `rules/committed-use-pricing.json` — the 3-node graph:
 
-## Act 5: Wait for metering + rating sweeps
-
-Wait ~90 seconds (metering 60s + rating 30s).
-
-**Watch the logs for:**
 ```
-rule engine rated entry resource=vm-xxx instance_type=standard-4-16 tenant_tier=gold cost=... effective_rate=0.16
-```
+CUD Lookup → Sustained-Use Tier → Calculate Final Cost
 
----
-
-## Act 6: Compare costs — gold vs standard
-
-```bash
-$DB "
-SELECT ci.name, ci.instance_type, ce.tenant_id,
-       round(ce.cost_amount::numeric, 6) as cost,
-       ce.currency
-FROM cost_entries ce
-JOIN inventory_compute_instance ci ON ce.resource_id = ci.instance_id
-WHERE ce.meter_name = 'vm_uptime_seconds'
-ORDER BY ci.instance_type, ce.tenant_id
-LIMIT 20;
-"
+tenant-acme:  5 VMs committed, 40% CUD discount
+tenant-globex: 10 VMs committed, 50% CUD discount
+Over-commitment → sustained-use discounts (5-30% based on utilization)
+No commitment → on-demand pricing
 ```
 
-**Point out:** Same instance type, different cost for gold vs standard tenant.
+Key point: "This decision graph chains three nodes. A business analyst
+can modify any node independently. Try doing this with if/else in Go."
 
----
+### Part 2: Live demo via the demo page
 
-## Act 7: Show it in Bruno
+In the **GoRules demo page** (http://localhost:8020/demo/gorules):
 
-Open Bruno → **Cost Report (JSON)**:
-- `group_by=tenant` → gold tenant has lower total cost
-- `group_by=resource` → each VM shows its individual cost
+1. **Paste the OSAC token** into the token field at the top
 
----
+2. **Stage 1: Reconcile** — click Run
+   - Watch the debug dashboard counter update
+   - "We sync VMs and tenants from OSAC"
 
-## Act 8: Change the rules live
+3. **Stage 2: Set tenant tiers** — click Run
+   - This PATCHes the first tenant in OSAC with `cost-mgmt/tier=gold`
+   - Then triggers reconcile to sync labels
+   - "We set the tier as a label on the tenant via the OSAC API.
+     Our system reads it during rating."
 
-Edit the decision table — add a "platinum" tier with 40% discount:
+4. **Wait ~90 seconds** for metering (60s) + rating (30s) sweeps
+   - Watch the debug dashboard: metering entries appear, then cost entries
+   - Point out the log: `rule engine rated entry ... instance_type=standard-4-16 tenant_tier=gold cost=0.16`
 
-```bash
-# Add to rules/compute-pricing.json, restart consumer
-# OR just show the concept:
-echo "To add a new tier:"
-echo "  1. Edit rules/compute-pricing.json"
-echo "  2. Add a row: standard-4-16 | platinum | 0.20 | 40"
-echo "  3. Restart the consumer"
-echo "  No code change. No PR. No recompile."
-```
+5. **Stage 4: Cost by tenant** — click Run
+   - Gold tenant shows lower costs than standard tenants
+   - "Same VMs, different price. The rule engine applied the gold discount."
+
+6. **Stage 5: Cost by resource** — click Run
+   - Each VM shows different costs based on instance type
+   - "standard-8-32 costs 4× more than standard-2-8. Instance-type awareness."
+
+### Part 3: Change the rules live (most powerful moment)
+
+1. Edit `rules/compute-pricing.json` — change gold discount from 20% to 40%
+2. Restart the consumer: `RULES_DIR=rules ./inventory-watcher`
+3. Wait for the next rating sweep
+4. Show the cost report again — gold tenant costs dropped further
+
+"Pricing change in 30 seconds. No developer needed."
 
 ---
 
 ## Talking Points
 
-1. **Rates as data, not code** — the decision table is a JSON file.
-   Change pricing without touching Go code.
+1. **Rates as data, not code** — JSON decision tables, versionable in git
+2. **Instance-type awareness** — different SKUs, different prices
+3. **Tenant tier discounts** — gold/standard via OSAC labels
+4. **Committed-use agreements** — multi-node decision graph with CUD
+   lookup, sustained-use fallback, expression-based cost calculation
+5. **Graceful fallback** — rule engine failure → static rates, no disruption
+6. **Performance** — sub-microsecond evaluation per entry (Rust/Zen compiled)
+7. **Visual editor** — GoRules has an open-source React editor for
+   decision tables (editor.gorules.io)
 
-2. **Instance-type awareness** — a `standard-8-32` VM costs 4× more
-   than `standard-2-8`. The current flat-rate model charges the same
-   per uptime second regardless of size.
+## What to Show on Screen
 
-3. **Tenant tier discounts** — gold tenants get 20% off automatically.
-   The tier comes from tenant labels — set by an admin, applied by
-   the rule engine.
-
-4. **Graceful fallback** — if the rule engine fails or isn't configured,
-   the existing static rate system takes over. No disruption.
-
-5. **Performance** — GoRules/Zen compiles rules to native code via Rust.
-   Sub-microsecond evaluation per entry. No impact on the 30s rating
-   sweep.
-
-6. **Visual editor** — GoRules has an open-source React UI for editing
-   decision tables visually (editor.gorules.io). The JSON format is
-   compatible.
+| Window | Content |
+|---|---|
+| Browser 1 | Debug dashboard — live counters updating |
+| Browser 2 | GoRules demo page — click through stages |
+| Editor (optional) | `compute-pricing.json` open for the "change rules live" moment |
+| Terminal (optional) | Consumer logs showing `rule engine rated entry` lines |
