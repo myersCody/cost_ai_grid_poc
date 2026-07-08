@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1153,6 +1155,204 @@ func TestCsvSafe(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("ingest.CsvSafe(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func seedCostEntries(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	yesterday := now.AddDate(0, 0, -1)
+
+	testStore.Pool().Exec(ctx, "DELETE FROM cost_entries")
+
+	// Seed a rate if none exist (tests may run in any order)
+	rateID, _ := testStore.UpsertRate(ctx, inventory.RateRecord{
+		ResourceType: "compute_instance", MeterName: "vm_uptime_seconds",
+		CostType: "Infrastructure", PricePerUnit: 0.01, Currency: "USD",
+		EffectiveFrom: now.AddDate(-1, 0, 0),
+	})
+	if rateID == 0 {
+		rateID = 1
+	}
+
+	maasRateID, _ := testStore.UpsertRate(ctx, inventory.RateRecord{
+		ResourceType: "model", MeterName: "maas_tokens_in",
+		CostType: "Supplementary", PricePerUnit: 0.001, Currency: "USD",
+		EffectiveFrom: now.AddDate(-1, 0, 0),
+	})
+	if maasRateID == 0 {
+		maasRateID = 2
+	}
+
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		MeteringEntryID: 1, RateID: rateID, TenantID: "tenant-a", ProjectID: "proj-1",
+		ResourceType: "compute_instance", ResourceID: "vm-1", MeterName: "vm_uptime_seconds",
+		MeteredValue: 3600, CostAmount: 0.01, Currency: "USD",
+		PeriodStart: yesterday, PeriodEnd: yesterday.Add(time.Hour),
+	})
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		MeteringEntryID: 2, RateID: maasRateID, TenantID: "tenant-a", ProjectID: "proj-1",
+		ResourceType: "model", ResourceID: "llama-3", MeterName: "maas_tokens_in",
+		MeteredValue: 1000, CostAmount: 0.001, Currency: "USD",
+		PeriodStart: now.Add(-time.Hour), PeriodEnd: now,
+	})
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		MeteringEntryID: 3, RateID: maasRateID, TenantID: "tenant-b", ProjectID: "proj-2",
+		ResourceType: "model", ResourceID: "llama-3", MeterName: "maas_tokens_in",
+		MeteredValue: 500, CostAmount: 0.0005, Currency: "USD",
+		PeriodStart: now.Add(-time.Hour), PeriodEnd: now,
+	})
+}
+
+func TestCostReport_GroupByTenant(t *testing.T) {
+	seedCostEntries(t)
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/costs?group_by=tenant")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	meta := result["meta"].(map[string]any)
+	total := meta["total"].(map[string]any)
+	if total["cost_units"] != "USD" {
+		t.Errorf("expected cost_units=USD, got %v", total["cost_units"])
+	}
+	costBlock := total["cost"].(map[string]any)
+	costTotal := costBlock["total"].(map[string]any)
+	if costTotal["value"].(float64) <= 0 {
+		t.Error("expected positive total cost")
+	}
+
+	data := result["data"].([]any)
+	if len(data) < 2 {
+		t.Errorf("expected at least 2 tenant groups, got %d", len(data))
+	}
+}
+
+func TestCostReport_DailyResolution(t *testing.T) {
+	seedCostEntries(t)
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/costs?resolution=daily&group_by=tenant")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	meta := result["meta"].(map[string]any)
+	if meta["resolution"] != "daily" {
+		t.Errorf("expected resolution=daily, got %v", meta["resolution"])
+	}
+
+	data := result["data"].([]any)
+	for _, d := range data {
+		row := d.(map[string]any)
+		if row["date"] == nil || row["date"] == "" {
+			t.Error("daily resolution rows must have date field")
+		}
+	}
+}
+
+func TestCostReport_FromToParams(t *testing.T) {
+	seedCostEntries(t)
+	from := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	to := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/costs?from=" + from + "&to=" + to + "&group_by=tenant")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	meta := result["meta"].(map[string]any)
+	period := meta["period"].(string)
+	if !strings.Contains(period, "/") {
+		t.Errorf("expected period with / separator, got %q", period)
+	}
+}
+
+func TestCostReport_CSV(t *testing.T) {
+	seedCostEntries(t)
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/costs?format=csv&group_by=tenant")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "text/csv" {
+		t.Errorf("expected text/csv, got %q", ct)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) < 2 {
+		t.Errorf("expected header + data rows, got %d lines", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "group,") {
+		t.Errorf("unexpected CSV header: %s", lines[0])
+	}
+}
+
+func TestCostBreakdown(t *testing.T) {
+	seedCostEntries(t)
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/breakdown?limit=10")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]any
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	meta := result["meta"].(map[string]any)
+	count := int(meta["count"].(float64))
+	if count < 2 {
+		t.Errorf("expected at least 2 breakdown rows, got %d", count)
+	}
+
+	data := result["data"].([]any)
+	row := data[0].(map[string]any)
+	for _, field := range []string{"date", "tenant_id", "resource_type", "resource_id", "meter_name", "metered_value", "cost_amount", "cost_type", "currency"} {
+		if row[field] == nil {
+			t.Errorf("breakdown row missing field %q", field)
+		}
+	}
+}
+
+func TestCostBreakdown_CSV(t *testing.T) {
+	seedCostEntries(t)
+	resp, err := http.Get(testServer.URL + "/api/v1/reports/breakdown?format=csv&limit=10")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if ct := resp.Header.Get("Content-Type"); ct != "text/csv" {
+		t.Errorf("expected text/csv, got %q", ct)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) < 2 {
+		t.Errorf("expected header + data, got %d lines", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "date,") {
+		t.Errorf("unexpected CSV header: %s", lines[0])
 	}
 }
 
