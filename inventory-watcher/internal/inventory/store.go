@@ -1423,6 +1423,115 @@ func (s *Store) CostReport(ctx context.Context, tenantID, resourceType, groupBy 
 	return results, rows.Err()
 }
 
+// FOCUSExport returns cost entries formatted for the FOCUS specification.
+func (s *Store) FOCUSExport(ctx context.Context, tenantID string, from, to time.Time, limit int) ([]FOCUSRow, error) {
+	where := "WHERE ce.period_start >= $1 AND ce.period_end <= $2"
+	args := []any{from, to}
+	argN := 3
+
+	if tenantID != "" {
+		where += fmt.Sprintf(" AND ce.tenant_id = $%d", argN)
+		args = append(args, tenantID)
+		argN++
+	}
+
+	if limit <= 0 || limit > 10000 {
+		limit = 1000
+	}
+	args = append(args, limit)
+
+	query := fmt.Sprintf(`
+		SELECT ce.cost_amount, ce.tenant_id, ce.currency,
+		       ce.period_start, ce.period_end,
+		       ce.resource_type, ce.resource_id, ce.meter_name,
+		       ce.metered_value, ce.project_id,
+		       COALESCE(r.cost_type, '') AS cost_type,
+		       COALESCE(r.description, '') AS rate_desc,
+		       COALESCE(me.unit, '') AS unit
+		FROM cost_entries ce
+		LEFT JOIN rates r ON ce.rate_id = r.id
+		LEFT JOIN metering_entries me ON ce.metering_entry_id = me.id
+		%s
+		ORDER BY ce.period_start, ce.tenant_id
+		LIMIT $%d
+	`, where, argN)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("focus export: %w", err)
+	}
+	defer rows.Close()
+
+	billingStart := time.Date(from.Year(), from.Month(), 1, 0, 0, 0, 0, time.UTC)
+	billingEnd := billingStart.AddDate(0, 1, 0)
+
+	var results []FOCUSRow
+	for rows.Next() {
+		var costAmount float64
+		var tenantID, currency, resourceType, resourceID, meterName, projectID, costType, rateDesc, unit string
+		var periodStart, periodEnd time.Time
+		var meteredValue float64
+
+		if err := rows.Scan(&costAmount, &tenantID, &currency,
+			&periodStart, &periodEnd,
+			&resourceType, &resourceID, &meterName,
+			&meteredValue, &projectID,
+			&costType, &rateDesc, &unit); err != nil {
+			return nil, err
+		}
+
+		svcCategory := mapServiceCategory(resourceType)
+		desc := meterName
+		if rateDesc != "" {
+			desc = rateDesc
+		}
+
+		results = append(results, FOCUSRow{
+			BilledCost:         costAmount,
+			BillingAccountId:   tenantID,
+			BillingAccountName: tenantID,
+			BillingCurrency:    currency,
+			BillingPeriodStart: billingStart,
+			BillingPeriodEnd:   billingEnd,
+			ChargeCategory:     "Usage",
+			ChargeDescription:  desc,
+			ChargePeriodStart:  periodStart,
+			ChargePeriodEnd:    periodEnd,
+			ContractedCost:     costAmount,
+			EffectiveCost:      costAmount,
+			InvoiceIssuerName:  "OSAC",
+			ListCost:           costAmount,
+			PricingQuantity:    meteredValue,
+			PricingUnit:        unit,
+			ProviderName:       "OSAC",
+			PublisherName:      "OSAC",
+			ServiceCategory:    svcCategory,
+			ServiceName:        resourceType,
+			ResourceId:         resourceID,
+			ResourceName:       resourceID,
+			ResourceType:       resourceType,
+			SubAccountId:       projectID,
+			SubAccountName:     projectID,
+		})
+	}
+	return results, rows.Err()
+}
+
+func mapServiceCategory(resourceType string) string {
+	switch resourceType {
+	case "compute_instance":
+		return "Compute"
+	case "cluster":
+		return "Compute"
+	case "model":
+		return "AI and Machine Learning"
+	case "bare_metal_instance":
+		return "Compute"
+	default:
+		return "Other"
+	}
+}
+
 // PipelineSummary returns counts from all pipeline tables.
 func (s *Store) PipelineSummary(ctx context.Context) (*PipelineSummary, error) {
 	var ps PipelineSummary
