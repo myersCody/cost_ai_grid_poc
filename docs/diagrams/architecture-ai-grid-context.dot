@@ -1,0 +1,141 @@
+// AI Grid — System Context Architecture
+// Shows the sovereign cloud platform (AI Grid), its orchestrator (OSAC),
+// and the Cost Management integration (this repo) end to end.
+
+digraph architecture_ai_grid_context {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=14
+        label="AI Grid — Sovereign Cloud System Context"
+        labelloc=t
+        bgcolor=white
+        pad=0.4
+        nodesep=0.45
+        ranksep=0.7
+        compound=true
+        splines=spline
+    ]
+    node [fontname="Helvetica" fontsize=10]
+    edge [fontname="Helvetica" fontsize=9 color="#555555"]
+
+    // ── Customer / Tenant ──
+    customer [label="Customer / Tenant Admin" shape=box style="filled,rounded" fillcolor="#E1F5FE" color="#0277BD"]
+
+    // ── AI Grid Sovereign Cloud ──
+    subgraph cluster_ai_grid {
+        label="AI Grid — Sovereign Cloud Platform"
+        style=filled
+        fillcolor="#FFF3E0"
+        color="#E65100"
+        fontcolor="#E65100"
+        fontsize=12
+
+        ocp [label="OpenShift CP\n(CaaS)" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+        ocpvirt [label="OpenShift\nVirtualization (VMaaS)" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+        ocpai [label="OpenShift AI\n(MaaS)" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+        baremetal [label="Bare Metal\n(BMaaS)" shape=box style="filled,rounded,dashed" fillcolor="#FFECB3" color="#E65100"]
+        acm [label="Advanced Cluster\nManager" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+        ansible [label="Ansible Automation\nPlatform" shape=box style="filled,rounded" fillcolor="#FFE0B2" color="#E65100"]
+
+        // Force stable left-to-right order matching downstream edges.
+        ocp -> ocpvirt -> ocpai -> baremetal -> acm -> ansible [style=invis]
+    }
+
+    // ── OSAC ──
+    subgraph cluster_osac {
+        label="OSAC — Open Sovereign AI Console (orchestrator)"
+        style=filled
+        fillcolor="#E3F2FD"
+        color="#1565C0"
+        fontcolor="#1565C0"
+        fontsize=12
+
+        osac_ctrl [label="OSAC Controllers\ncluster / VM / model / bare-metal" shape=box style="filled,rounded" fillcolor="#90CAF9" color="#1565C0"]
+        osac_gateway [label="AI Gateway\n(Envoy/Istio + IPP)" shape=box style="filled,rounded" fillcolor="#90CAF9" color="#1565C0"]
+        osac_api [label="Fulfillment API\ngRPC + REST :8011" shape=box style="filled,rounded" fillcolor="#64B5F6" color="#1565C0"]
+        osac_watch [label="Watch Stream\n(NDJSON/SSE)" shape=box style="filled,rounded" fillcolor="#90CAF9" color="#1565C0"]
+        osac_db [label="OSAC\nPostgreSQL" shape=cylinder style=filled fillcolor="#BBDEFB" color="#1565C0"]
+
+        { rank=same; osac_ctrl; osac_gateway }
+        { rank=same; osac_api; osac_db }
+        osac_ctrl -> osac_gateway [style=invis]
+        osac_ctrl -> osac_api [minlen=1]
+        osac_api -> osac_watch [dir=back label="stream"]
+        osac_api -> osac_db [style=invis]
+    }
+
+    // ── Cost Management (this repo) ──
+    subgraph cluster_cost {
+        label="Cost Management — AI Grid PoC (this repo)"
+        style=filled
+        fillcolor="#E8F5E9"
+        color="#2E7D32"
+        fontcolor="#2E7D32"
+        fontsize=12
+
+        watcher [label="inventory-watcher\nWatcher + Reconciler" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32"]
+        ingest [label="HTTP Ingest\nCloudEvents" shape=box style="filled,rounded" fillcolor="#81C784" color="#2E7D32"]
+        { rank=same; watcher; ingest }
+
+        metering [label="Metering Sweep (60s)" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32"]
+        rating [label="Rating Sweep (30s)" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32"]
+        quota [label="Quota / Threshold\nEvaluation" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32"]
+        { rank=same; metering; rating; quota }
+        watcher -> metering [style=invis]
+        ingest -> rating [style=invis]
+
+        cost_db [label="Cost PostgreSQL\ninventory · metering ·\ncost_entries · quotas" shape=cylinder style=filled fillcolor="#C8E6C9" color="#2E7D32"]
+        cost_api [label="Cost / Quota API\n+ Dashboard (TBD)" shape=box style="filled,rounded" fillcolor="#81C784" color="#2E7D32"]
+        { rank=same; cost_db; cost_api }
+
+        metering -> cost_db [style=invis]
+        rating -> cost_db [style=invis]
+        quota -> cost_db [style=invis]
+    }
+
+    // ── Edges: Customer → platform ──
+    customer -> osac_api [label="provision / manage" color="#0277BD" fontcolor="#0277BD"]
+    customer -> cost_api [label="view cost / quota" color="#0277BD" fontcolor="#0277BD"]
+
+    // ── Edges: OSAC → AI Grid resources ──
+    osac_ctrl -> ocp [label="provisions +\nmonitors" color="#1565C0" fontcolor="#1565C0"]
+    osac_ctrl -> ocpvirt [label="provisions +\nmonitors" color="#1565C0" fontcolor="#1565C0"]
+    osac_ctrl -> ocpai [label="provisions" color="#1565C0" fontcolor="#1565C0"]
+    osac_ctrl -> baremetal [label="provisions" style=dashed color="#1565C0" fontcolor="#1565C0"]
+    osac_ctrl -> acm [label="registers" color="#1565C0" fontcolor="#1565C0"]
+    osac_ctrl -> ansible [label="triggers\nplaybooks" color="#1565C0" fontcolor="#1565C0"]
+    ocpai -> osac_gateway [label="inference\ntraffic" color="#1565C0" fontcolor="#1565C0"]
+
+    osac_ctrl -> osac_db [label="persist state"]
+    osac_ctrl -> osac_watch [label="emit events"]
+
+    // ── Edges: OSAC → Cost Management ──
+    osac_watch -> watcher [label="events (SSE)" color="#1565C0" fontcolor="#1565C0"]
+    osac_api -> watcher [label="List APIs\n(reconciler)" color="#1565C0" fontcolor="#1565C0"]
+    osac_gateway -> ingest [label="MaaS usage\nCloudEvents" color="#1565C0" fontcolor="#1565C0"]
+
+    // ── Edges: Cost Management internals ──
+    watcher -> cost_db [label="upsert inventory"]
+    ingest -> cost_db [label="store + meter"]
+    metering -> cost_db [label="write meters"]
+    rating -> cost_db [label="read/write"]
+    quota -> cost_db [label="read"]
+    cost_db -> cost_api [label="query" dir=back]
+
+    // ── Edges: Cost Management → OSAC (feedback loop, TBD) ──
+    cost_api -> osac_api [label="quota alerts\n(transport TBD)" style=dashed color="#C62828" fontcolor="#C62828" constraint=false]
+
+    // ── Legend ──
+    subgraph cluster_legend {
+        label="Legend"
+        style=filled
+        fillcolor=white
+        color="#BDBDBD"
+        fontsize=10
+
+        leg_solid [label="Implemented" shape=box style="filled,rounded" fillcolor="#A5D6A7" color="#2E7D32" fontsize=9]
+        leg_dashed [label="Planned / TBD" shape=box style="filled,dashed,rounded" fillcolor="#C8E6C9" color="#2E7D32" fontsize=9]
+        leg_solid -> leg_dashed [style=invis]
+    }
+}
