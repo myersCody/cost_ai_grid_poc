@@ -29,7 +29,7 @@ type Forwarder struct {
 func New(store *inventory.Store, hecURL, hecToken, index string, interval time.Duration, tlsInsecure bool, logger *slog.Logger) *Forwarder {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if tlsInsecure {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-controlled dev/PoC flag
 	}
 
 	return &Forwarder{
@@ -162,7 +162,7 @@ func (f *Forwarder) post(ctx context.Context, payload []byte) error {
 		return fmt.Errorf("HEC request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("HEC returned status %d", resp.StatusCode)
