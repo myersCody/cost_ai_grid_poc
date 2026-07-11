@@ -307,7 +307,26 @@ Koku (Python/Django)
 | Provider status: all complete | ✓ download/processing/summary |
 | Report API returns cost data | ✓ $0.4181 infrastructure |
 | UI shows "OSAC Sovereign Cloud" | ✓ visible as OCP source |
-| UI shows cost reports | Testing |
+| UI shows cost reports | **✓ VERIFIED** |
+
+### Screenshots
+
+**OpenShift details — cluster list showing OSAC Sovereign Cloud at $0.42:**
+
+![OSAC data in Koku UI — cluster list](../diagrams/koku-osac-data.png)
+
+**OSAC Sovereign Cloud cluster detail — cost breakdown with $0.42 raw cost:**
+
+![OSAC cluster detail — cost breakdown](../diagrams/koku-osac-data-2.png)
+
+The UI renders OSAC data natively:
+- Cluster name: "OSAC Sovereign Cloud" (osac-region-1)
+- Integration status: green checkmark, "Data integration and finalization"
+- Total cost: $0.42 USD (raw cost, no markup)
+- Cost breakdown chart shows the full bar
+- CPU and Memory panels show 0 (we populated `infrastructure_raw_cost`
+  but not `pod_request_cpu_core_hours` in the cost summary table)
+- Tabs available: Cost overview, Historical data, Virtualization
 
 ## Remaining Gaps
 
