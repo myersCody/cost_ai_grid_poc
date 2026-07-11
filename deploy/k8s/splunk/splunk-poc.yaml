@@ -1,0 +1,69 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: splunk
+  namespace: cost-mgmt
+  labels:
+    app: splunk
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: splunk
+  template:
+    metadata:
+      labels:
+        app: splunk
+    spec:
+      containers:
+      - name: splunk
+        image: splunk/splunk:9.4
+        env:
+        - name: SPLUNK_START_ARGS
+          value: "--accept-license"
+        - name: SPLUNK_PASSWORD
+          value: "changeme123"
+        - name: SPLUNK_HEC_TOKEN
+          value: "cost-audit-token"
+        ports:
+        - containerPort: 8000
+          name: web
+        - containerPort: 8088
+          name: hec
+        - containerPort: 8089
+          name: mgmt
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+        readinessProbe:
+          httpGet:
+            port: 8089
+            path: /services/server/health/splunkd/details
+            scheme: HTTPS
+          initialDelaySeconds: 60
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: splunk
+  namespace: cost-mgmt
+spec:
+  selector:
+    app: splunk
+  ports:
+  - name: web
+    port: 8000
+    targetPort: 8000
+  - name: hec
+    port: 8088
+    targetPort: 8088
+  - name: mgmt
+    port: 8089
+    targetPort: 8089
+  type: ClusterIP

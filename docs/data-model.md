@@ -31,6 +31,7 @@ into two groups:
 | `inventory_bare_metal_instance` | [`BareMetalInstanceRecord`](../inventory-watcher/internal/inventory/models.go) | Bare metal instances. References `catalog_item`. Metered for uptime. |
 | `inventory_instance_type` | [`InstanceTypeRecord`](../inventory-watcher/internal/inventory/models.go) | Instance type catalog (cores, memory) synced from OSAC. |
 | `inventory_catalog_item` | [`CatalogItemRecord`](../inventory-watcher/internal/inventory/models.go) | Catalog items (SKU definitions) for cluster, compute, and bare metal. Links template → published offering. |
+| `splunk_cursor` | [`RawEventRow`](../inventory-watcher/internal/inventory/store.go) | Single-row cursor tracking `last_sent_id` for Splunk HEC forwarding. See [Splunk audit forwarding](splunk-audit-forwarding.md). |
 
 ### Relationships
 

@@ -115,3 +115,25 @@ var (
 		Help:      "Active MaaS models in inventory.",
 	})
 )
+
+// Splunk forwarder metrics.
+var (
+	SplunkForwardTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "splunk_forward_total",
+		Help:      "Raw events forwarded to Splunk HEC.",
+	})
+
+	SplunkForwardErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Namespace: namespace,
+		Name:      "splunk_forward_errors_total",
+		Help:      "Errors forwarding to Splunk HEC.",
+	})
+
+	SplunkForwardDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Namespace: namespace,
+		Name:      "splunk_forward_duration_seconds",
+		Help:      "Splunk forward sweep duration.",
+		Buckets:   prometheus.DefBuckets,
+	})
+)

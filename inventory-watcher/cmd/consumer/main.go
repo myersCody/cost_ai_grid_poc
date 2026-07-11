@@ -27,6 +27,7 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/rating"
 	"github.com/osac-project/cost-event-consumer/internal/reconciler"
+	"github.com/osac-project/cost-event-consumer/internal/splunk"
 	"github.com/osac-project/cost-event-consumer/internal/summarizer"
 	"github.com/osac-project/cost-event-consumer/internal/watcher"
 )
@@ -132,6 +133,13 @@ func main() {
 	startComponent("summarizer", func() error { return s.Run(ctx) })
 	startComponent("metering", func() error { return m.Run(ctx) })
 	startComponent("rating", func() error { return rt.Run(ctx) })
+
+	if cfg.SplunkHECURL != "" {
+		sf := splunk.New(store, cfg.SplunkHECURL, cfg.SplunkHECToken,
+			cfg.SplunkIndex, cfg.SplunkInterval, cfg.SplunkTLSInsecure, logger)
+		startComponent("splunk", func() error { return sf.Run(ctx) })
+		logger.Info("splunk forwarder enabled", "url", cfg.SplunkHECURL, "interval", cfg.SplunkInterval)
+	}
 
 	// Metrics server on a separate port (no auth).
 	metricsMux := http.NewServeMux()

@@ -25,6 +25,11 @@ type Config struct {
 	AuthIssuerURL           string
 	DebugDashboard     bool
 	DisabledComponents map[string]bool
+	SplunkHECURL       string
+	SplunkHECToken     string
+	SplunkIndex        string
+	SplunkInterval     time.Duration
+	SplunkTLSInsecure  bool
 }
 
 // DiagnosticInfo returns config values safe to expose via the debug API (no secrets).
@@ -44,6 +49,9 @@ type DiagnosticInfo struct {
 	DebugDashboard    bool   `json:"debug_dashboard"`
 	OSACTokenSet      bool   `json:"osac_token_set"`
 	OSACCACertSet     bool   `json:"osac_ca_cert_set"`
+	SplunkHECURL      string `json:"splunk_hec_url,omitempty"`
+	SplunkTokenSet    bool   `json:"splunk_token_set"`
+	SplunkIndex       string `json:"splunk_index,omitempty"`
 }
 
 func (c *Config) Diagnostics() DiagnosticInfo {
@@ -63,6 +71,9 @@ func (c *Config) Diagnostics() DiagnosticInfo {
 		DebugDashboard:    c.DebugDashboard,
 		OSACTokenSet:      c.OSACToken != "",
 		OSACCACertSet:     c.OSACCACert != "",
+		SplunkHECURL:      c.SplunkHECURL,
+		SplunkTokenSet:    c.SplunkHECToken != "",
+		SplunkIndex:       c.SplunkIndex,
 	}
 }
 
@@ -111,6 +122,11 @@ func Load() *Config {
 		AuthIssuerURL:      os.Getenv("AUTH_ISSUER_URL"),
 		DebugDashboard:     envOrDefault("DEBUG_DASHBOARD", "true") != "false",
 		DisabledComponents: parseDisabledComponents(os.Getenv("DISABLE_COMPONENTS")),
+		SplunkHECURL:       os.Getenv("SPLUNK_HEC_URL"),
+		SplunkHECToken:     os.Getenv("SPLUNK_HEC_TOKEN"),
+		SplunkIndex:        os.Getenv("SPLUNK_INDEX"),
+		SplunkInterval:     durationOrDefault("SPLUNK_INTERVAL", 10*time.Second),
+		SplunkTLSInsecure:  os.Getenv("SPLUNK_TLS_INSECURE") == "true",
 	}
 }
 

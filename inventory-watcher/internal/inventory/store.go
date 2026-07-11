@@ -317,6 +317,13 @@ CREATE INDEX IF NOT EXISTS idx_raw_events_event_id ON raw_events (event_id);
 -- growing tables) to "WHERE rated_at IS NULL" (indexed, O(unrated)).
 ALTER TABLE metering_entries ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_me_unrated ON metering_entries (id) WHERE rated_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS splunk_cursor (
+    id             INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    last_sent_id   BIGINT NOT NULL DEFAULT 0,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO splunk_cursor (id, last_sent_id) VALUES (1, 0) ON CONFLICT DO NOTHING;
 `
 
 // InsertRawEvent appends an event to the immutable audit log.
@@ -1441,4 +1448,62 @@ func (s *Store) PipelineSummary(ctx context.Context) (*PipelineSummary, error) {
 		return nil, fmt.Errorf("pipeline summary: %w", err)
 	}
 	return &ps, nil
+}
+
+// SplunkCursor returns the last-sent raw_events ID.
+func (s *Store) SplunkCursor(ctx context.Context) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, "SELECT last_sent_id FROM splunk_cursor WHERE id = 1").Scan(&id)
+	if err != nil {
+		return 0, nil
+	}
+	return id, nil
+}
+
+// AdvanceSplunkCursor updates the cursor to the given ID.
+func (s *Store) AdvanceSplunkCursor(ctx context.Context, lastSentID int64) error {
+	_, err := s.pool.Exec(ctx,
+		"UPDATE splunk_cursor SET last_sent_id = $1, updated_at = NOW() WHERE id = 1",
+		lastSentID)
+	return err
+}
+
+// RawEventRow is a raw_events row with its BIGSERIAL id for cursor tracking.
+type RawEventRow struct {
+	ID           int64           `json:"id"`
+	EventID      string          `json:"event_id"`
+	EventType    string          `json:"event_type"`
+	EventSource  string          `json:"event_source"`
+	EventTime    time.Time       `json:"event_time"`
+	TenantID     string          `json:"tenant_id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceID   string          `json:"resource_id"`
+	Data         json.RawMessage `json:"data"`
+	ReceivedAt   time.Time       `json:"received_at"`
+}
+
+// RawEventsSince returns raw events with id > afterID, ordered by id.
+func (s *Store) RawEventsSince(ctx context.Context, afterID int64, limit int) ([]RawEventRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, event_id, event_type, event_source, event_time,
+		       tenant_id, resource_type, resource_id, data, received_at
+		FROM raw_events WHERE id > $1
+		ORDER BY id LIMIT $2
+	`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []RawEventRow
+	for rows.Next() {
+		var r RawEventRow
+		if err := rows.Scan(&r.ID, &r.EventID, &r.EventType, &r.EventSource,
+			&r.EventTime, &r.TenantID, &r.ResourceType, &r.ResourceID,
+			&r.Data, &r.ReceivedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
