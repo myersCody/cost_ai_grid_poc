@@ -13,6 +13,62 @@ that processes daily CSV uploads from the Cost Management Metrics Operator
 
 These two systems need to converge. The question is how.
 
+## Koku OCP Data Flow
+
+The diagram below shows Koku's complete OCP data pipeline — from data
+sources through raw line items, daily aggregation, summarization, cost
+model application, and UI summary tables. The orange elements show where
+our OSAC integration plugs in.
+
+![Koku OCP data flow with OSAC integration](koku-ocp-flow.svg)
+
+### How to read this diagram
+
+**Data Sources (top left):** CMMO (the existing OCP metrics operator)
+uploads CSV data. Our cost-event-consumer processes OSAC CloudEvents,
+and koku-sync bridges the two systems.
+
+**Raw Line Item Tables (blue):** Where CMMO's per-interval (5-minute)
+data lands. Six tables for pods, storage, node labels, namespace labels,
+VMs, and GPUs. We do NOT write here — our data is already daily.
+
+**Daily Aggregated Tables (purple):** CMMO's raw data is aggregated to
+daily granularity via pandas. Our OSAC table (orange) sits at this level
+because koku-sync writes pre-aggregated daily data directly. This is
+equivalent to what pandas produces from raw line items.
+
+**Summarization Pipeline (yellow):** The core SQL template reads from all
+daily tables and writes to a staging table, then copies to the main fact
+table (`reporting_ocpusagelineitem_daily_summary`). Our OSAC data enters
+via a conditional `UNION` in this SQL template.
+
+**Cost Model (red):** After data lands in the daily summary, Koku's cost
+model SQL applies rates from `cost_model_rate` rows, writes per-rate
+costs to `rates_to_usage`, and aggregates back into the daily summary's
+cost columns. VM costs use a special path that JOINs back to the raw
+VM line items for uptime-based pricing.
+
+**UI Summary Tables (indigo):** `populate_ui_summary_tables()` reads from
+the daily summary and produces 12+ pre-aggregated tables optimized for
+API queries. Each table serves a specific report view.
+
+**Koku Report API (green):** Reads from the UI summary tables to serve
+`/reports/openshift/costs/`, `/reports/openshift/compute/`, etc.
+
+### Our integration path (orange arrows)
+
+```
+cost-event-consumer → koku-sync → openshift_osac_usage_line_items_daily (purple layer)
+                                    → UNION into staging (yellow layer)
+                                      → daily summary → cost model → UI tables → API
+```
+
+We skip the blue (raw) layer entirely. koku-sync does the aggregation
+that pandas does for CMMO data, writing directly to the daily layer.
+From there, Koku's existing pipeline handles everything.
+
+---
+
 ## Architectural Differences
 
 | Aspect | cost-event-consumer | Koku |
