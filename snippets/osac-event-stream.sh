@@ -189,23 +189,23 @@ while [[ $SECONDS -lt $END_TIME ]]; do
   # Weighted random action
   action=$((RANDOM % 100))
 
-  if [[ $action -lt 40 ]]; then
-    # 40% MaaS inference
+  if [[ $action -lt 70 ]]; then
+    # 70% MaaS inference (dominant workload — realistic for AI platform)
     send_maas_event
-  elif [[ $action -lt 60 ]]; then
-    # 20% VM heartbeat
+  elif [[ $action -lt 80 ]]; then
+    # 10% VM heartbeat
     if [[ ${#LIVE_VMS[@]} -gt 0 ]]; then
       vm_idx=$((RANDOM % ${#LIVE_VMS[@]}))
       heartbeat_vm "${LIVE_VMS[$vm_idx]}"
     fi
-  elif [[ $action -lt 75 ]]; then
-    # 15% cluster heartbeat
-    send_cluster_heartbeat
   elif [[ $action -lt 88 ]]; then
-    # 13% create VM
+    # 8% cluster heartbeat
+    send_cluster_heartbeat
+  elif [[ $action -lt 95 ]]; then
+    # 7% create VM
     create_vm
   else
-    # 12% delete VM (if we have enough)
+    # 5% delete VM (if we have enough)
     if [[ ${#LIVE_VMS[@]} -gt 3 ]]; then
       delete_vm
     else
