@@ -172,15 +172,111 @@ API_TOKEN=false API_PROXY_URL=http://localhost:8000/api/cost-management/v1 \
 
 ## Shortcuts and Hacks
 
-| Shortcut | What we did | Production approach |
-|---|---|---|
-| Manual table creation | SQL DDL instead of Django migration | Add model + `manage.py makemigrations` |
-| Manual partition creation | SQL `CREATE TABLE ... PARTITION OF` | Use Koku's `get_or_create_postgres_partition()` |
-| Direct daily summary INSERT | Bypassed summarization pipeline | Trigger via `/report_data/` Masu API |
-| Manual Provider creation | Raw SQL INSERT into `api_provider` | Use Koku's Provider REST API |
-| No cost model | Pre-rated costs from our pipeline | Create Koku cost model with VM rates |
-| No pipeline trigger | Skipped Celery summarization | Call Masu API or trigger Celery task |
-| No RBAC | Bypassed with `is_org_admin: true` | Proper RBAC setup |
+All hacks are SQL statements against Koku's PostgreSQL (`docker exec koku-db psql -U postgres -d postgres`).
+
+| # | Shortcut | What we did | Production approach |
+|---|---|---|---|
+| 1 | Manual OSAC table creation | SQL DDL in tenant schema | Django migration via `manage.py makemigrations` |
+| 2 | Manual partition creation | `CREATE TABLE ... PARTITION OF` | Koku's `get_or_create_postgres_partition()` |
+| 3 | Direct daily summary INSERT | Bypassed summarization pipeline | Trigger via `/report_data/` Masu API |
+| 4 | Manual Provider creation | Raw SQL INSERT into `api_provider` | Koku's Provider REST API |
+| 5 | Manual Sources creation | Raw SQL INSERT into `api_sources` | Sources Kafka integration |
+| 6 | Manual OCP cluster registration | INSERT into `reporting_ocp_clusters` | Created by Koku pipeline on first data |
+| 7 | Manual manifest creation | INSERT into `reporting_common_costusagereportmanifest` | Created by Koku ingestion pipeline |
+| 8 | Set `additional_context = '{}'` on Provider | Without it, sources API crashes (NoneType) | Set by Koku during normal provider creation |
+| 9 | Set `operator_version` on manifest | Without it, sources API crashes (NoneType.split) | Set by CMMO operator report |
+| 10 | Set `data_updated_timestamp` on Provider | UI shows "incomplete" without it | Set by Koku after processing |
+| 11 | Set `creation_datetime` on manifest | Manifest invisible to `get_state()` without it | Set by Koku ingestion |
+| 12 | Flush Valkey cache after each DB hack | Koku caches aggressively | No cache issues in normal flow |
+| 13 | No cost model | Pre-rated costs from our pipeline | Create Koku cost model with VM rates |
+| 14 | No RBAC | `is_org_admin: true` identity header | Proper RBAC setup |
+
+### Hack SQL (reproducible, run in order)
+
+```sql
+-- Connect: docker exec -it koku-db psql -U postgres -d postgres
+
+-- 1. OSAC table + partition (Step 2 in main flow)
+-- (already documented above)
+
+-- 4. Provider authentication + billing source
+INSERT INTO public.api_providerauthentication (uuid, credentials)
+VALUES ('00000000-0000-0000-0000-0a5ac0000002',
+        '{"cluster_id": "osac-region-1"}'::jsonb)
+ON CONFLICT (uuid) DO NOTHING;
+
+INSERT INTO public.api_providerbillingsource (uuid, data_source)
+VALUES ('00000000-0000-0000-0000-0a5ac0000003', '{}'::jsonb)
+ON CONFLICT (uuid) DO NOTHING;
+
+-- Get the FK IDs (they're auto-increment integers, not UUIDs)
+-- Then create Provider
+INSERT INTO public.api_provider (
+    uuid, name, type, active, paused, setup_complete,
+    authentication_id, billing_source_id, customer_id,
+    data_updated_timestamp, additional_context
+)
+SELECT
+    '00000000-0000-0000-0000-0a5ac0000001',
+    'OSAC Sovereign Cloud', 'OCP', true, false, true,
+    a.id, b.id, 1, NOW(), '{}'::jsonb
+FROM public.api_providerauthentication a, public.api_providerbillingsource b
+WHERE a.uuid = '00000000-0000-0000-0000-0a5ac0000002'
+  AND b.uuid = '00000000-0000-0000-0000-0a5ac0000003'
+ON CONFLICT (uuid) DO NOTHING;
+
+-- Link TenantAPIProvider to Provider
+UPDATE org1234567.reporting_tenant_api_provider
+SET provider_id = '00000000-0000-0000-0000-0a5ac0000001'
+WHERE uuid = '00000000-0000-0000-0000-0a5ac0000001';
+
+-- 5. Sources entry (makes provider visible to UI)
+INSERT INTO public.api_sources (
+    source_id, source_uuid, name, "offset", org_id, source_type,
+    authentication, billing_source, koku_uuid,
+    status, pending_delete, pending_update, out_of_order_delete,
+    paused, updated_timestamp
+) VALUES (
+    99999, '00000000-0000-0000-0000-0a5ac0000001',
+    'OSAC Sovereign Cloud', 0, '1234567', 'OCP',
+    '{"credentials": {"cluster_id": "osac-region-1"}}',
+    '{}', '00000000-0000-0000-0000-0a5ac0000001',
+    '{"availability_status": "available"}',
+    false, false, false, false, NOW()
+);
+
+-- 6. Cluster registration (required for report API to return data)
+INSERT INTO org1234567.reporting_ocp_clusters (
+    uuid, cluster_id, cluster_alias, provider_id
+) VALUES (
+    gen_random_uuid(), 'osac-region-1', 'OSAC Sovereign Cloud',
+    '00000000-0000-0000-0000-0a5ac0000001'::uuid
+) ON CONFLICT DO NOTHING;
+
+-- 7. Manifest (required for UI status indicators)
+INSERT INTO public.reporting_common_costusagereportmanifest (
+    assembly_id, billing_period_start_datetime, num_total_files,
+    provider_id, cluster_id, operator_version,
+    creation_datetime, completed_datetime, state
+) VALUES (
+    'osac-sync-2026-07-10', '2026-07-01', 1,
+    '00000000-0000-0000-0000-0a5ac0000001', 'osac-region-1',
+    'costmanagement-metrics-operator.v0.0.1',
+    NOW(), NOW(),
+    '{"download": {"end": "2026-07-10T12:00:00", "start": "2026-07-10T11:59:00"},
+      "processing": {"end": "2026-07-10T12:01:00", "start": "2026-07-10T12:00:00"},
+      "summary": {"end": "2026-07-10T12:02:00", "start": "2026-07-10T12:01:00"}}'::jsonb
+) ON CONFLICT (provider_id, assembly_id) DO NOTHING;
+
+-- 10. Report period timestamps
+UPDATE org1234567.reporting_ocpusagereportperiod
+SET summary_data_creation_datetime = NOW(),
+    summary_data_updated_datetime = NOW()
+WHERE cluster_id = 'osac-region-1';
+
+-- 12. Flush cache after all hacks
+-- Run: docker exec koku_valkey redis-cli FLUSHALL
+```
 
 ## Architecture Proven
 
@@ -191,17 +287,33 @@ cost-event-consumer (Go)
         → openshift_osac_usage_line_items_daily (Koku DB, port 15432, org1234567 schema)
         → [hack] reporting_ocpusagelineitem_daily_summary
         → [hack] reporting_ocp_cost_summary_p
+        → [hack] reporting_ocp_clusters
+        → [hack] api_provider + api_sources + manifest
 
 Koku (Python/Django)
-    → API reads from UI summary tables
-    → UI renders at localhost:9001
+    → Sources API: count=1, status=download/processing/summary all "complete"
+    → Report API: $0.42 infrastructure cost for "OSAC Sovereign Cloud"
+    → UI at localhost:9001/openshift/cost-management/ocp
 ```
+
+## Results
+
+| Milestone | Status |
+|---|---|
+| Data in Koku OSAC table | ✓ 57 rows |
+| Data in daily summary | ✓ 57 rows |
+| Data in cost summary UI table | ✓ 1 row, $0.42 |
+| Provider visible via Sources API | ✓ count=1 |
+| Provider status: all complete | ✓ download/processing/summary |
+| Report API returns cost data | ✓ $0.4181 infrastructure |
+| UI shows "OSAC Sovereign Cloud" | ✓ visible as OCP source |
+| UI shows cost reports | Testing |
 
 ## Remaining Gaps
 
 | Gap | Effort | Notes |
 |---|---|---|
-| Provider not visible via Sources API | S | Need proper Sources integration or mock |
+| UI may still need cost model for cost breakdown | S | Create via Cost Models API |
 | Pipeline not triggered | M | Masu API endpoint or Celery task |
 | No Koku cost model for OSAC | S | Create via Cost Models API |
 | OSAC SQL UNION in summarization template | Done (in code) | Not tested via pipeline |
