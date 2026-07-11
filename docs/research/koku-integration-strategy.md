@@ -354,6 +354,195 @@ Koku-native for reporting and cost model management.
 
 ---
 
+## Strategy F: OSAC Resources as OCP Resources (Hybrid)
+
+### Key Insight: OSAC IS OCP
+
+OSAC provisions OpenShift resources — VMs via OpenShift Virtualization,
+clusters via HCP (Hosted Control Planes), bare metal nodes as OCP nodes.
+These are not foreign resource types; they are OCP resources with OCP
+identities. Koku already has dedicated line item tables for each:
+
+| OSAC resource | Koku line item table | Existing? |
+|---|---|---|
+| VMs (OpenShift Virtualization) | `openshift_vm_usage_line_items_daily` | **Yes** |
+| Clusters / Nodes | `openshift_pod_usage_line_items_daily` | **Yes** |
+| Bare metal nodes | `openshift_pod_usage_line_items_daily` | **Yes** |
+| MaaS (inference tokens) | — | **No** — needs new table |
+
+### VM column mapping
+
+Koku's `OCPVMUsageLineItemDaily` (in `self_hosted_models.py`) has columns
+designed for OpenShift Virtualization VMs. Our OSAC VM data maps directly:
+
+| Our field/meter | Koku VM column | Conversion |
+|---|---|---|
+| `instance_id` | `resource_id` | direct |
+| `tenant_id` | `namespace` | OSAC tenant as K8s namespace |
+| — | `vm_name` | `instance_id` or descriptive name |
+| `cores` | `vm_cpu_request_cores` | direct |
+| `memory_gib` | `vm_memory_request_bytes` | × 1073741824 |
+| `vm_uptime_seconds` | `vm_uptime_total_seconds` | direct |
+| `vm_cpu_core_seconds` | `vm_cpu_request_core_seconds` | direct |
+| `vm_memory_gib_seconds` | `vm_memory_request_byte_seconds` | × 1073741824 |
+
+Koku's VM table also has: `vm_instance_type`, `vm_os`, `vm_guest_os_*`,
+`vm_labels`, `vm_cpu_limit_*`, `vm_memory_limit_*`, `vm_cpu_request_sockets`,
+`node_capacity_*`. We can populate these from OSAC Watch stream data
+where available, or leave NULL (all columns are nullable).
+
+### Cluster/Node column mapping
+
+For cluster-level capacity data, Koku's `OCPPodUsageLineItemDaily` tracks
+per-node capacity:
+
+| Our field/meter | Koku Pod column | Conversion |
+|---|---|---|
+| `cluster_id` | — (metadata, not a column) | Via `source` (provider UUID) |
+| `cluster_uptime_seconds` | `node_capacity_cpu_core_seconds` | × node cores |
+| `cluster_worker_node_seconds` | aggregate across multiple node rows | 1 row per node |
+| `bm_uptime_seconds` | `node_capacity_cpu_core_seconds` | direct |
+
+This is less clean than VMs — cluster-level meters need to be split into
+per-node rows. The OSAC Watch stream gives us individual node data, which
+maps better than our aggregated `cluster_worker_node_seconds` meter.
+
+### What the pipeline does with VM data
+
+Koku's VM processing path (separate from Pod/Storage):
+
+```
+openshift_vm_usage_line_items_daily
+  → populate_vm_tmp_table_with_vm_report.sql  (temp table)
+  → reporting_ocp_vm_summary_p                (UI table)
+  → hourly_cost_virtual_machine.sql           (cost model: vm_cost_per_hour, vm_core_cost_per_hour)
+```
+
+Source: `ocp_report_db_accessor.py:_populate_virtualization_ui_summary_table()`
+
+This means: if we write into the VM table, Koku's existing VM cost model
+rates (`vm_cost_per_hour`, `vm_core_cost_per_hour`, `vm_cost_per_month`,
+`vm_core_cost_per_month`) are applied automatically. These are exactly the
+rate types we already map to via `koku_metric` in our `rates` table.
+
+### Where MaaS doesn't fit
+
+MaaS inference data has no OCP equivalent:
+- Token dimensions (prompt, completion, cached, reasoning) — no Koku column
+- Per-request metering — Koku tracks usage per pod/node/PVC, not per API call
+- Inference model identity — Koku has no concept of LLM models
+
+For MaaS, we need either:
+- A new self-hosted table (`openshift_osac_maas_line_items_daily`) + SQL template
+- Or Strategy E (our own API serves MaaS reports, Koku serves VM/cluster reports)
+
+### Hybrid approach
+
+```
+OSAC VMs       → write to openshift_vm_usage_line_items_daily      → Koku VM pipeline
+OSAC Clusters  → write to openshift_pod_usage_line_items_daily     → Koku Pod pipeline
+OSAC Bare Metal→ write to openshift_pod_usage_line_items_daily     → Koku Pod pipeline
+OSAC MaaS      → our API serves directly (Koku has no MaaS concept)
+```
+
+**Koku changes needed for VMs/clusters/BM: ZERO.** The existing pipeline
+processes the data. Cost models with `vm_cost_per_hour` etc. apply
+automatically.
+
+**Koku changes needed for MaaS:** Either a new table + SQL template
+(Strategy F variant), or no Koku change (MaaS served by our API).
+
+### Pros
+
+- **Zero SQL template changes** for VMs and clusters
+- **Existing cost model rates apply** — `vm_cost_per_hour`, `cluster_cost_per_month`
+  work out of the box
+- **Existing UI** — VM summary page (`reporting_ocp_vm_summary_p`) shows
+  OSAC VMs natively
+- **Proven pipeline** — no risk of breaking existing OCP data processing
+
+### Cons
+
+- **Semantic overloading** — OSAC VMs are represented as OpenShift
+  Virtualization VMs. They're the same technology, but the provenance
+  differs (OSAC-provisioned vs manually created). May confuse operators.
+- **Cluster meter splitting** — our `cluster_worker_node_seconds` is an
+  aggregate; Koku wants per-node rows
+- **MaaS excluded** — can't use this approach for inference data
+
+### Deep Dive: How Koku VM Costs Actually Work
+
+The VM cost pipeline is more complex than "write to VM table, get costs":
+
+```
+openshift_vm_usage_line_items
+  → populate_vm_tmp_table_with_vm_report.sql
+    → tmp_virt_{uuid} (vm_name, node, cpu_request, mem_request)
+
+reporting_ocpusagelineitem_daily_summary (must have data_source='Pod'
+  AND pod_labels ? 'vm_kubevirt_io_name')
+  → hourly_cost_virtual_machine.sql
+    → JOINs daily summary with VM line items on vm_name
+    → cost = vm_uptime_hours * hourly_rate
+  → hourly_vm_core.sql
+    → cost = vm_uptime_hours * vm_cpu_cores * core_hourly_rate
+  → reporting_ocp_vm_summary_p.sql
+    → JOINs with tmp_virt table for latest VM info
+```
+
+**Critical coupling:** The VM cost SQL reads from BOTH the daily summary
+AND the VM line items table. Writing to only one isn't enough. The daily
+summary row needs `pod_labels = {"vm_kubevirt_io_name": "my-vm"}` and
+non-null `pod_usage_cpu_core_hours` / `pod_request_cpu_core_hours`.
+
+**Minimum viable data for VM costs:**
+
+1. `openshift_vm_usage_line_items` row with:
+   - `vm_name`, `vm_uptime_total_seconds > 0`, `vm_cpu_request_cores`
+   - `source`, `year`, `month`, `usage_start`
+
+2. `reporting_ocpusagelineitem_daily_summary` row with:
+   - `data_source = 'Pod'`
+   - `pod_labels = {"vm_kubevirt_io_name": "vm-name"}`
+   - `pod_usage_cpu_core_hours IS NOT NULL`
+   - `pod_request_cpu_core_hours IS NOT NULL`
+   - `namespace`, `cluster_id`, `node`, `source_uuid`, `report_period_id`
+
+3. Cost model with `vm_cost_per_hour` or `vm_core_cost_per_hour` rate
+   linked to the provider via `CostModelMap`
+
+### Columns that Drive Costs (verified against SQL)
+
+| Rate metric | Required column(s) | NULL behavior |
+|---|---|---|
+| `vm_cost_per_hour` | `vm_uptime_total_seconds` (VM table) | Zero cost if NULL |
+| `vm_core_cost_per_hour` | `vm_uptime_total_seconds` × `vm_cpu_request_cores` | Skipped if table missing |
+| `cpu_core_request_per_hour` | `pod_request_cpu_core_hours` | COALESCE to 0 |
+| `memory_gb_request_per_hour` | `pod_request_memory_gigabyte_hours` | COALESCE to 0 |
+| `node_cost_per_month` | `node_capacity_cpu_core_hours` | **Skipped if NULL** |
+| `cluster_cost_per_month` | `cluster_capacity_cpu_core_hours` | **Skipped if NULL** |
+
+### Revised Assessment
+
+Writing VMs into the existing OCP VM table is viable but requires:
+1. ALSO writing a daily summary row (the summarization SQL creates this
+   from pod data normally, but we'd need to create it for OSAC VMs)
+2. Setting `pod_labels` with `vm_kubevirt_io_name` — this is how Koku
+   identifies VM-related pod rows
+3. Creating a Koku cost model with VM rates linked to our provider
+
+This is MORE work than the new OSAC table approach for the spike,
+because we need to populate TWO tables with coupled data. But for
+production it's the right path — it uses Koku's proven VM cost model.
+
+### Effort (revised)
+
+**Medium** for VMs (two coupled tables + cost model setup).
+**Medium** for clusters (per-node disaggregation + capacity columns).
+**Separate solution** for MaaS.
+
+---
+
 ## Key Decisions Needed
 
 | # | Decision | Impact |
