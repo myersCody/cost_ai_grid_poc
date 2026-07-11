@@ -3,6 +3,53 @@
 How to run the full pipeline: generate OSAC events → process through
 our consumer → sync to Koku → see data in Koku UI.
 
+## Related Documents
+
+| Document | What it covers |
+|---|---|
+| [Integration Strategy](strategy.md) | 6 strategies analyzed, pipeline diagram, on-prem assessment |
+| [Spike Results](spike-results.md) | End-to-end test results, 14 SQL hacks, screenshots |
+| [Pipeline Diagram](koku-ocp-flow.svg) | Koku OCP data flow with OSAC integration points |
+| [Implementation Status](../implementation-status.md) | Overall PoC requirements tracker |
+| [ADR-004: Drop unique index](../decisions/004-raw-events-no-unique-index.md) | Performance: raw_events dedup trade-off |
+| [ADR-005: Single binary](../decisions/005-single-binary-subcommands.md) | Proposed: subcommands for serve/koku-sync/simulate |
+| [Performance Characteristics](../research/performance-characteristics.md) | Load estimation, profiling, scaling techniques |
+
+### PRs
+
+| PR | Repo | Status |
+|---|---|---|
+| [#44](https://github.com/myersCody/cost_ai_grid_poc/pull/44) | cost_ai_grid_poc | Draft — koku-sync + docs |
+| [#6178](https://github.com/project-koku/koku/pull/6178) | koku | Draft — OSAC model + SQL UNION |
+
+### Screenshots
+
+| | |
+|---|---|
+| ![Cluster list](koku-osac-data.png) | ![Cluster detail](koku-osac-data-2.png) |
+| Koku OpenShift page — OSAC Sovereign Cloud at $0.42 | Cluster detail — cost breakdown chart |
+
+## Current Architecture
+
+```
+cost-event-consumer (Go, port 8020)
+  ├── real-time: events → metering → rating → cost_entries
+  ├── serves: quotas, balance checks, MaaS reports
+  └── dashboard: http://localhost:8020/debug/dashboard
+
+koku-sync (Go, runs on-demand or as CronJob)
+  ├── reads: cost_entries from our DB (port 5434)
+  ├── writes: openshift_osac_usage_line_items_daily in Koku DB (port 15432)
+  └── triggers: Koku pipeline via Masu API (port 5042)
+
+Koku (Python/Django, port 8000)
+  ├── pipeline: OSAC UNION → daily summary → cost model → UI tables
+  ├── serves: /reports/openshift/costs/ (VMs, clusters, bare metal)
+  └── UI: http://localhost:9001 (koku-ui on-prem)
+
+Split: VMs/clusters/BM → Koku reports | MaaS inference → our API
+```
+
 ## Prerequisites
 
 All of these must be running:
