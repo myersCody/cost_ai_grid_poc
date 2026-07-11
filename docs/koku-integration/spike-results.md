@@ -313,11 +313,11 @@ Koku (Python/Django)
 
 **OpenShift details — cluster list showing OSAC Sovereign Cloud at $0.42:**
 
-![OSAC data in Koku UI — cluster list](../diagrams/koku-osac-data.png)
+![OSAC data in Koku UI — cluster list](koku-osac-data.png)
 
 **OSAC Sovereign Cloud cluster detail — cost breakdown with $0.42 raw cost:**
 
-![OSAC cluster detail — cost breakdown](../diagrams/koku-osac-data-2.png)
+![OSAC cluster detail — cost breakdown](koku-osac-data-2.png)
 
 The UI renders OSAC data natively:
 - Cluster name: "OSAC Sovereign Cloud" (osac-region-1)
@@ -343,10 +343,10 @@ The UI renders OSAC data natively:
 
 ### Our repo (cost_ai_grid_poc)
 - `inventory-watcher/cmd/koku-sync/main.go` — sync binary
-- `docs/research/koku-integration-strategy.md` — full strategy analysis
-- `docs/research/koku-integration-review.md` — adversarial review
-- `docs/research/koku-integration-spike.md` — this document
-- `docs/diagrams/koku-ocp-flow.dot` + `.svg` — data flow diagram
+- `docs/koku-integration/strategy.md` — full strategy analysis
+- `docs/koku-integration/adversarial-review.md` — adversarial review
+- `docs/koku-integration/spike-results.md` — this document
+- `docs/koku-integration/koku-ocp-flow.dot` + `.svg` — data flow diagram
 
 ### Koku repo (~/Projects/koku/koku/)
 - `koku/reporting/provider/ocp/self_hosted_models.py` — OSACUsageLineItemDaily model
