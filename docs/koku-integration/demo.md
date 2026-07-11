@@ -96,20 +96,22 @@ The key steps:
 4. Create manifest in `reporting_common_costusagereportmanifest`
 5. Flush Valkey: `docker exec koku_valkey redis-cli FLUSHALL`
 
-## Start our consumer
+## Start our consumer (with koku-sync)
 
 ```bash
 cd ~/Projects/cost_ai_grid_poc/inventory-watcher
 
 # Build
 go build -o cost-event-consumer ./cmd/consumer/
-go build -o maas-simulator ./cmd/maas-simulator/
 
-# Start (metrics on 9090 to avoid conflict with Koku's S4 on 9000)
+# Start with koku-sync enabled (auto-syncs every 2 minutes)
 OSAC_BASE_URL=http://localhost:8011 \
 INVENTORY_DB_URL=postgres://user:pass@localhost:5434/costdb \
 INGEST_LISTEN_ADDR=localhost:8020 \
 METRICS_PORT=9090 \
+KOKU_DB_URL=postgres://postgres:postgres@localhost:15432/postgres \
+KOKU_MASU_URL=http://localhost:5042 \
+KOKU_SYNC_INTERVAL=2m \
 LOG_LEVEL=info \
 DEBUG_DASHBOARD=true \
 ./cost-event-consumer &
@@ -117,7 +119,14 @@ DEBUG_DASHBOARD=true \
 # Verify
 curl -sf http://localhost:8020/healthz
 # → {"status":"ok"}
+# Look for: "koku-sync initialized schema=org1234567 interval=2m0s"
 ```
+
+When `KOKU_DB_URL` is set, the consumer automatically syncs cost data
+to Koku every `KOKU_SYNC_INTERVAL` and triggers the pipeline. No manual
+sync step needed.
+
+To run WITHOUT koku-sync, simply omit `KOKU_DB_URL`.
 
 OSAC connection errors are expected if OSAC isn't running — the consumer
 reconnects automatically. The ingest endpoint works independently.
@@ -151,40 +160,22 @@ Options:
 - `--vms 20` — start with 20 VMs
 - `--models 5` — number of MaaS models
 
-### 2. Wait for rating sweep
+### 2. Wait for automatic sync
 
-The metering sweep runs every 60s, the rating sweep every 30s. Wait
-~90s after the event stream ends for all entries to be rated.
+The koku-sync goroutine runs every `KOKU_SYNC_INTERVAL` (default 2m).
+It aggregates rated cost entries to daily, writes to Koku's OSAC table,
+and triggers the Koku pipeline via Masu API. No manual step needed.
 
-Check progress:
+Check pipeline progress:
 ```bash
 curl -sf http://localhost:8020/api/v1/reports/summary | python3 -m json.tool
 ```
 
-### 3. Sync to Koku
+**Note:** Only rated non-MaaS entries are synced to Koku. MaaS data is
+served by our own API (see "MaaS reports" below). The rating sweep
+processes 500 entries per 30s batch — large backlogs take time.
 
-```bash
-cd inventory-watcher
-
-SYNC_DATE=$(date +%Y-%m-%d) \
-KOKU_DB_URL="postgres://postgres:postgres@localhost:15432/postgres" \
-go run ./cmd/koku-sync/
-```
-
-### 4. Trigger Koku pipeline
-
-```bash
-curl "http://localhost:5042/api/cost-management/v1/report_data/?provider_uuid=00000000-0000-0000-0000-0a5ac0000001&schema=org1234567&start_date=$(date +%Y-%m-%d)"
-```
-
-This triggers Celery tasks that:
-1. Run the summarization SQL (including OSAC UNION)
-2. Apply cost model rates
-3. Refresh UI summary tables
-
-Wait ~20 seconds for Celery to finish.
-
-### 5. Verify
+### 3. Verify
 
 **Via API:**
 ```bash
@@ -202,14 +193,47 @@ Open `http://localhost:9001/openshift/cost-management/ocp` and look for
 **Via our dashboard:**
 Open `http://localhost:8020/debug/dashboard` for real-time pipeline stats.
 
-## Quick re-sync (after generating more events)
+## MaaS reports (served by our API)
+
+MaaS inference data (tokens, requests) is NOT synced to Koku — Koku has
+no consumption-based cost model. MaaS reports are served directly by our
+consumer API.
+
+**Cost by token type:**
+```bash
+curl -sf 'http://localhost:8020/api/v1/reports/costs?resource_type=model&group_by=meter' \
+  | python3 -m json.tool
+# → maas_tokens_in: $6.99, maas_tokens_out: $5.18, ...
+```
+
+**Cost by model:**
+```bash
+curl -sf 'http://localhost:8020/api/v1/reports/costs?resource_type=model&group_by=resource' \
+  | python3 -m json.tool
+# → granite-34b: $3.39, claude-opus: $3.01, llama-3-70b: $2.94, ...
+```
+
+**Cost by tenant:**
+```bash
+curl -sf 'http://localhost:8020/api/v1/reports/costs?resource_type=model&group_by=tenant' \
+  | python3 -m json.tool
+```
+
+**All MaaS cost (total):**
+```bash
+curl -sf 'http://localhost:8020/api/v1/reports/costs?resource_type=model' \
+  | python3 -m json.tool
+```
+
+## Manual sync (standalone binary)
+
+For one-shot or CronJob use, the standalone `cmd/koku-sync/` binary
+is still available:
 
 ```bash
-# One-liner: sync + trigger
-SYNC_DATE=$(date +%Y-%m-%d) KOKU_DB_URL="postgres://postgres:postgres@localhost:15432/postgres" \
-  go run ./cmd/koku-sync/ && \
-curl -s "http://localhost:5042/api/cost-management/v1/report_data/?provider_uuid=00000000-0000-0000-0000-0a5ac0000001&schema=org1234567&start_date=$(date +%Y-%m-%d)" && \
-echo " Pipeline triggered — wait ~20s then refresh UI"
+SYNC_DATE=$(date +%Y-%m-%d) \
+KOKU_DB_URL="postgres://postgres:postgres@localhost:15432/postgres" \
+  go run ./cmd/koku-sync/
 ```
 
 ## Troubleshooting
