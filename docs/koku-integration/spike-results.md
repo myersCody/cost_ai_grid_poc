@@ -333,10 +333,13 @@ The UI renders OSAC data natively:
 | Gap | Effort | Notes |
 |---|---|---|
 | UI may still need cost model for cost breakdown | S | Create via Cost Models API |
-| Pipeline not triggered | M | Masu API endpoint or Celery task |
+| Pipeline not triggered | M | Masu API on port 5042, not 8000 |
 | No Koku cost model for OSAC | S | Create via Cost Models API |
-| OSAC SQL UNION in summarization template | Done (in code) | Not tested via pipeline |
+| OSAC SQL UNION in summarization template | Done (in code) | Tested — pipeline processes OSAC data |
 | Django migration for OSAC table | S | `manage.py makemigrations` |
+| project_id not synced | S | koku-sync writes empty string — Koku project-level reports show no breakdown for OSAC data |
+| MaaS data excluded from Koku | By design | MaaS (tokens, inference) served by our API only — Koku has no consumption-based cost model |
+| Concurrent koku-sync safety | S | No unique constraint — overlapping CronJob runs can produce duplicate rows |
 | koku-ui navigation to OSAC data | M | May need UI customization |
 
 ## Files Changed
@@ -344,7 +347,6 @@ The UI renders OSAC data natively:
 ### Our repo (cost_ai_grid_poc)
 - `inventory-watcher/cmd/koku-sync/main.go` — sync binary
 - `docs/koku-integration/strategy.md` — full strategy analysis
-- `docs/koku-integration/adversarial-review.md` — adversarial review
 - `docs/koku-integration/spike-results.md` — this document
 - `docs/koku-integration/koku-ocp-flow.dot` + `.svg` — data flow diagram
 

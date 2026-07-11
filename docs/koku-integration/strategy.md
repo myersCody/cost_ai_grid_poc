@@ -90,14 +90,20 @@ In SaaS mode, Koku creates per-tenant PostgreSQL schemas (`orgNNNNNNN`),
 uses Trino/Hive for parquet processing, and relies on Insights platform
 identity. These are major integration barriers.
 
-**However, for on-prem (`ONPREM=True`), the picture simplifies significantly:**
+**For on-prem (`ONPREM=True`), some barriers drop but not all:**
 
-- **Single tenant, `public` schema.** No per-org schema overhead. All
-  reporting tables live in `public`. Our data can go in the same schema.
+- **Still per-tenant schemas.** Even on-prem, Koku creates `orgNNNNNNN`
+  schemas (e.g., `org1234567`). The `ONPREM` flag does NOT switch to the
+  `public` schema — it only controls SQL template selection
+  (`self_hosted_sql/` vs `trino_sql/`). Verified during the spike:
+  koku-sync discovers the schema via `SELECT schema_name FROM api_customer`.
+- **Typically one tenant.** On-prem deployments usually have a single
+  customer/org, so there's one schema — but it's `org{id}`, not `public`.
 - **PostgreSQL only.** On-prem uses `self_hosted_sql/` templates that
   run against PostgreSQL directly — no Trino, no parquet, no S3.
-- **No Insights identity.** `is_no_auth()` mode uses `public` schema
-  directly. No org_id mapping needed.
+- **Auto-provisioned.** Koku's middleware creates the Customer + Tenant +
+  schema on the first request with an `x-rh-identity` header. No manual
+  schema creation needed.
 
 **Remaining incompatibilities (even on-prem):**
 
@@ -173,10 +179,10 @@ Koku's existing UI, API, and cost model processing take over from there.
 - **Loses real-time.** Koku's summary tables are daily granularity.
   Our sub-minute data would be aggregated to daily before Koku can use it.
 
-**On-prem simplification:** With `ONPREM=True`, all tables live in the
-`public` schema. No per-tenant schema resolution needed. Our Go service
-can write directly to the same PostgreSQL instance. The SQL templates
-under `self_hosted_sql/` run against PostgreSQL, not Trino.
+**On-prem note:** With `ONPREM=True`, tables live in a per-tenant schema
+(`org{id}`), but typically there's only one tenant. koku-sync discovers
+the schema automatically via `SELECT schema_name FROM api_customer`.
+The SQL templates under `self_hosted_sql/` run against PostgreSQL, not Trino.
 
 **Verified against code:** `populate_ui_summary_tables()` in
 `ocp_report_db_accessor.py:105` iterates `UI_SUMMARY_TABLES` and runs
@@ -293,8 +299,8 @@ view layer unifies them for the UI.
 
 **How it would work:**
 1. Deploy both systems against the same PostgreSQL instance
-2. Our tables live in `public` schema or a dedicated `osac` schema
-3. Koku tables live in per-tenant `orgNNNNNN` schemas
+2. Our tables live in a dedicated `osac` schema or alongside Koku in `org{id}`
+3. Koku tables live in per-tenant `org{id}` schemas
 4. PostgreSQL views or materialized views join across schemas
 5. A unified report API (or views) presents the merged data
 
@@ -360,10 +366,10 @@ parameter handling is complex but finite. No Koku codebase changes.
 ### Context: On-prem single-tenant changes everything
 
 When viewed as a single-tenant on-prem deployment (`ONPREM=True`), the
-per-tenant schema and Trino/S3 objections disappear. The integration
-becomes a tractable PostgreSQL problem: write data into Koku's daily
-summary table in the `public` schema, then let Koku's existing SQL
-templates aggregate it into the UI summary tables.
+Trino/S3 objections disappear and the per-tenant schema is typically just
+one (`org{id}`). The integration becomes a tractable PostgreSQL problem:
+write data into the OSAC table in the tenant schema, then let Koku's
+pipeline aggregate it into the daily summary and UI tables.
 
 ### For the PoC (July 31)
 

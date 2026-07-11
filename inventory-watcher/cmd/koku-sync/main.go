@@ -100,7 +100,7 @@ func main() {
 		logger.Warn("pipeline trigger failed (is Koku server running?)", "error", err)
 		logger.Info("data is in the OSAC table — trigger manually with:")
 		logger.Info(fmt.Sprintf(
-			"  curl 'localhost:8000/api/cost-management/v1/report_data/?provider_uuid=%s&schema=%s&start_date=%s'",
+			"  curl 'localhost:5042/api/cost-management/v1/report_data/?provider_uuid=%s&schema=%s&start_date=%s'",
 			osacProviderUUID, kokuSchema, syncDate.Format("2006-01-02")))
 	}
 
@@ -135,6 +135,7 @@ func fetchDailyCosts(ctx context.Context, pool *pgxpool.Pool, syncDate time.Time
 		FROM cost_entries ce
 		JOIN rates r ON r.id = ce.rate_id
 		WHERE ce.period_start >= $1 AND ce.period_start < $2
+			AND ce.resource_type != 'model'
 		GROUP BY ce.tenant_id, ce.resource_type, ce.resource_id,
 				 ce.meter_name, r.cost_type, r.koku_metric, r.currency
 	`, syncDate, nextDay)
@@ -224,6 +225,13 @@ func writeToKoku(ctx context.Context, pool *pgxpool.Pool, schema string, rows []
 	}
 	defer tx.Rollback(ctx)
 
+	// Advisory lock prevents concurrent koku-sync runs from duplicating data
+	_, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))",
+		fmt.Sprintf("koku-sync-%s", syncDate.Format("2006-01-02")))
+	if err != nil {
+		return 0, fmt.Errorf("acquiring advisory lock: %w", err)
+	}
+
 	// Delete existing OSAC data for this date
 	_, err = tx.Exec(ctx, fmt.Sprintf(`
 		DELETE FROM "%s".openshift_osac_usage_line_items_daily
@@ -267,7 +275,7 @@ func writeToKoku(ctx context.Context, pool *pgxpool.Pool, schema string, rows []
 }
 
 func triggerKokuPipeline(schema string, syncDate time.Time, logger *slog.Logger) error {
-	kokuURL := envOr("KOKU_URL", "http://localhost:8000")
+	kokuURL := envOr("KOKU_MASU_URL", "http://localhost:5042")
 	url := fmt.Sprintf(
 		"%s/api/cost-management/v1/report_data/?provider_uuid=%s&schema=%s&start_date=%s&end_date=%s",
 		kokuURL, osacProviderUUID, schema,
