@@ -32,12 +32,11 @@ digraph koku_ocp_flow {
         ns_labels [label="openshift_namespace_labels\n_line_items", fillcolor="#BBDEFB"];
         vm_raw [label="openshift_vm_usage\n_line_items", fillcolor="#BBDEFB"];
         gpu_raw [label="openshift_gpu_usage\n_line_items", fillcolor="#BBDEFB"];
-        osac_raw [label="openshift_osac_usage\n_line_items_daily\n(NEW — MaaS data)", fillcolor="#FFE0B2", style="filled,bold"];
     }
 
     // ===== DAILY TABLES =====
     subgraph cluster_daily {
-        label="Daily Aggregated Tables";
+        label="Daily Aggregated Tables (pandas or koku-sync)";
         style=filled;
         color="#F3E5F5";
 
@@ -47,6 +46,7 @@ digraph koku_ocp_flow {
         ns_labels_daily [label="openshift_namespace_labels\n_line_items_daily", fillcolor="#CE93D8"];
         vm_daily [label="openshift_vm_usage\n_line_items_daily", fillcolor="#CE93D8"];
         gpu_daily [label="openshift_gpu_usage\n_line_items_daily", fillcolor="#CE93D8"];
+        osac_daily [label="openshift_osac_usage\n_line_items_daily\n(NEW — OSAC data)", fillcolor="#FFE0B2", style="filled,bold"];
     }
 
     // ===== SUMMARIZATION =====
@@ -148,8 +148,8 @@ digraph koku_ocp_flow {
 
     // ===== OSAC INTEGRATION (NEW) =====
     osac_consumer -> koku_sync [label="reads\ncost_entries", color="#E65100", penwidth=2];
-    koku_sync -> osac_raw [label="writes daily\nOSAC data", color="#E65100", penwidth=2];
-    osac_raw -> staging [label="OSAC UNION\n(new SQL block)", color="#E65100", penwidth=2, style=bold];
+    koku_sync -> osac_daily [label="writes pre-aggregated\ndaily OSAC data", color="#E65100", penwidth=2];
+    osac_daily -> staging [label="OSAC UNION\n(new SQL block)", color="#E65100", penwidth=2, style=bold];
 
     // Alternative: VMs directly to existing VM table
     koku_sync -> vm_raw [label="VM data\n(future: use\nexisting table)", color="#E65100", style=dashed];
