@@ -11,6 +11,12 @@ Documentation for running the cost-event-consumer in different environments.
 **For local development:**
 1. Follow: [`local-dev-setup.md`](local-dev-setup.md)
 
+**For GitHub Codespaces (zero-install, browser-based):**
+1. Click "Code → Codespaces → Create codespace on main" on GitHub
+2. Wait ~3 min for the environment to build (k3d cluster starts automatically)
+3. Run `bash .devcontainer/deploy-stack.sh` to deploy the full OSAC + consumer stack
+4. Run `bash integration-test/test.sh` to verify
+
 ## Documents
 
 | File | Purpose | Audience |
@@ -19,6 +25,7 @@ Documentation for running the cost-event-consumer in different environments.
 | **crc-full-deployment.md** | Complete step-by-step CRC deployment | Reference for detailed steps |
 | **crc-osac-deployment.md** | OSAC-specific details and troubleshooting | When debugging OSAC issues |
 | **local-dev-setup.md** | Local development (Docker + native binaries) | Developers working on the code |
+| **[`.devcontainer/`](../../.devcontainer/)** | GitHub Codespaces config (k3d, k9s, Claude Code) | Zero-install browser-based dev |
 
 ## Deployment Options
 
@@ -39,7 +46,41 @@ Documentation for running the cost-event-consumer in different environments.
 
 **Timeline:** ~45 minutes first time, ~20 minutes subsequent deployments
 
-### Option 2: Local Development - Recommended for Coding
+### Option 2: GitHub Codespaces - Recommended for Quick Start
+
+**Pros:**
+- Zero local setup (runs in browser or via `gh codespace ssh`)
+- Full k3s cluster (k3d) with kubectl, k9s, helm pre-installed
+- Claude Code CLI available out of the box
+- Same integration tests as CI
+
+**Cons:**
+- Requires GitHub Codespaces access (paid)
+- Higher latency than local dev
+- 4-core machine minimum recommended
+
+**When to use:** Onboarding, demos, quick integration testing without local setup
+
+**Timeline:** ~3 min environment build + ~5 min stack deploy
+
+**How to start:**
+```bash
+# From GitHub UI: Code → Codespaces → Create codespace
+# Or from CLI:
+gh codespace create --repo martinpovolny/cost_ai_grid_poc --machine premiumLinux
+```
+
+Once inside the codespace, deploy and test:
+```bash
+bash .devcontainer/deploy-stack.sh    # deploy OSAC + consumer (~5 min)
+bash integration-test/test.sh         # run integration tests
+k9s                                   # browse cluster
+```
+
+![Codespace with port forwarding](../../.devcontainer/poc-in-codespaces.png)
+![k9s in codespace](../../.devcontainer/poc-in-codespaces-2.png)
+
+### Option 3: Local Development - Recommended for Coding
 
 **Pros:**
 - Fast iteration (rebuild in seconds)

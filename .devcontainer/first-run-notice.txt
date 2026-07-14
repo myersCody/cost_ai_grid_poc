@@ -1,0 +1,32 @@
+👋 Welcome to the Cost AI Grid PoC Codespace!
+
+A k3d cluster (cost-dev) is already running with k3s inside it.
+Run `kubectl get nodes` to verify.
+
+🚀 Deploy the full OSAC + cost-consumer stack:
+
+    bash .devcontainer/deploy-stack.sh
+
+   This builds OSAC and consumer images, generates TLS certs and auth
+   tokens, imports everything into k3d, and starts port-forwards.
+   Takes ~5 min. After it finishes:
+
+    curl -sf http://localhost:8020/healthz    # consumer health
+    bash integration-test/test.sh             # run integration tests
+
+🧪 Deploy the IPP gateway stack (Istio + ext_proc + llm-katan):
+
+   First deploy the consumer (the IPP stack sends metering events to it):
+
+    echo "unused" > /tmp/osac_token.txt
+    bash integration-test/deploy-consumer.sh
+
+   Then follow the IPP CI workflow steps — see .github/workflows/ipp-integration.yml
+
+🛠️  Available tools: kubectl, k9s, helm, k3d, gh, go, claude, docker
+
+   k9s                          # terminal UI for Kubernetes
+   kubectl get pods -A          # list all pods
+   claude                       # Claude Code CLI
+
+🔍 To explore VS Code to its fullest, search using the Command Palette (Cmd/Ctrl + Shift + P)
