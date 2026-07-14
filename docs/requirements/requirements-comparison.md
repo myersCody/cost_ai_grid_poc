@@ -1,4 +1,4 @@
-# Requirements Comparison: Updated Spec vs Our Implementation
+# Requirements Comparison:
 
 > Comparing the [requirements overview](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
 > against what we've built in the `osac-cost-consumer` branch.
@@ -7,29 +7,75 @@
 
 The updated spec **refines and reprioritizes** the original requirements:
 
-1. **MaaS is explicitly out of scope for PoC** — token metering (REQ-4) and
-   OpenShift AI events (REQ-2a) are deferred to a separate MaaS workstream.
-   Our MaaS implementation is ahead of schedule — useful for the MaaS
-   workstream when it starts, but not needed for PoC deadline.
+1. **MaaS is now explicitly in scope for the PoC** — token metering (REQ-4)
+   and OpenShift AI cloud events (REQ-2a) are no longer deferred; v1.3 states
+   "MaaS ... Cost Tiers, and Custom Metrics are included as in-scope PoC
+   requirements." Our MaaS work (built ahead of schedule under the old
+   "deferred" framing) is now core PoC scope, not a bonus.
 
-2. **Heartbeat events are the primary data source** (REQ-1b) — not the Watch
-   stream we're using. Heartbeat events are HTTP-based with configurable
-   intervals (10-30s) containing tenant/project/resource/hardware info. This
-   is essentially what the OSAC metering collector produces.
+2. **Heartbeat events are the primary data source** (REQ-1b). Heartbeat
+   events are HTTP-based with configurable intervals (10-30s) containing
+   tenant/project/resource/hardware info — the same CloudEvent types OSAC's
+   metering collector produces. Our HTTP ingest endpoint now accepts these
+   directly (`osac.cluster.lifecycle`, `osac.compute_instance.lifecycle`),
+   in the collector's exact format; only an OSAC-side URL redirect remains.
+   See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md).
 
 3. **90-second end-to-end SLA** (POC-ARCH) — OSAC sends within 30s, Cost
    processes within 60s. We meet this (<1ms per event).
 
 4. **Cluster Orders** are the OSAC ordering workflow for clusters (REQ-1a).
    ClusterOrder is the purchase request; the resulting Cluster is the
-   provisioned resource we track for cost. Verified — see
-   [open question #15](osac-open-questions.md) (resolved).
+   provisioned resource we track for cost. Resolved — see
+   [open question #15](osac-open-questions.md#cluster-lifecycle-req-1a).
 
-5. **Quota API** (REQ-9) and **Notifications** (REQ-10) are HIGH priority —
-   elevated from the original brief.
+5. **REQ-9 (Quota API) shipped; REQ-10 (Notifications) parked.** Both were
+   elevated to HIGH in the prior revision. REQ-9 is now **Done**. Per the
+   Jul 2 decision, REQ-10 is **parked** — OSAC's existing MaaS check-balance
+   API plus our pull-model quota endpoint are sufficient for Jul 31; the
+   push/webhook mechanism has no timeline.
 
-6. **No Kafka needed for PoC** — HTTP heartbeat events are the transport.
-   Aligns with our ADR-002 arguments.
+6. **REQ-8 (Bare Metal) parked (post-PoC)** — deferred from Jul 31 scope per the Jul 2 decision.
+
+7. **REQ-3a RBAC scope decided** — tenant + project level only for the PoC;
+   fine-grained InsightsRBAC deferred post-PoC.
+
+8. **No Kafka needed for PoC** (transport question raised in REQ-1b, REQ-2a,
+   REQ-10) — gRPC Watch stream + 60s reconciler is the transport for
+   VM/cluster events; Kafka is deferred and only warranted if multiple
+   independent consumers need the same event stream. Aligns with our
+   [ADR-002](../decisions/002-arguments-against-kafka.md). MaaS event
+   transport (HTTP vs Kafka vs OSAC-as-intermediary) is still an [open
+   question](osac-open-questions.md#event-transport) for the Jul 7 OSAC
+   sync. Separately, MaaS **tenant attribution** is now resolved: the
+   `organization_id` field flows end-to-end from MaaSSubscription
+   TokenMetadata to `tenant_id` on our metering entries, verified in a
+   [tenant attribution experiment](../dev/tenant-attribution-experiment-2026-07-08.md)
+   and merged (PR #39, PR #47). Production auto-injection of the header via
+   Authorino/maas-api is still pending upstream. MaaS **project**
+   attribution remains an open product decision (subscription vs. model
+   namespace).
+
+9. **Report API gained date filtering, daily resolution, and a
+   line-item breakdown endpoint** (PR #42, merged Jul 8) —
+   `GET /api/v1/reports/breakdown` returns per-resource rows
+   (tenant/project/resource/meter/cost) for a date range, `from`/`to`
+   params replace month-only periods, and `?resolution=daily` adds a
+   date column to the cost report. Response envelope is now
+   Koku-compatible (`meta.total` with nested `cost`/`infrastructure`/
+   `supplementary` blocks). This closes most of the REQ-3/REQ-5 gap —
+   only the `group_by=user` dimension remains open.
+
+10. **REQ-7 (Audit trail) is now Done** — a Splunk HEC forwarder
+    (PR #46) streams the immutable `raw_events` log to Splunk for
+    compliance search and dispute resolution, closing the gap noted in
+    the prior revision. See [Splunk audit forwarding](../splunk-audit-forwarding.md).
+
+11. **REQ-11 (Cost Tiers)** is **Partial** — done for MaaS per-event
+    rates, gap remains for capacity cumulative tiers (GiB-month, core-hours).
+
+12. REQ-12 (Daily OpenShift Virtualization Costs) is **TBD** — blocked on PM
+    defining concrete acceptance criteria; no implementation started.
 
 ## Requirement-by-Requirement Status
 
@@ -40,7 +86,7 @@ The updated spec **refines and reprioritizes** the original requirements:
 | POC-ENV | On-premise deployment | **Not started** | Out of scope for our component — this is about deploying RHCM on-prem, not the consumer |
 | POC-ARCH | Capacity-based charging model | **Done** | Standalone component, heartbeat-driven, capacity-based. Matches exactly. |
 | REQ-1 | OSAC integration via Region Management Cluster | **Done** | Connected via gRPC Watch + REST. Reads inventory, state, tenant. |
-| REQ-1b | Heartbeat event ingestion | **Partial** | We use Watch stream, not HTTP heartbeats. Ingest endpoint exists but accepts CloudEvents, not heartbeat format. See "Gaps" below. |
+| REQ-1b | Heartbeat event ingestion | **Done** | `POST /api/v1/events` accepts the OSAC metering collector's heartbeat CloudEvents (`osac.cluster.lifecycle`, `osac.compute_instance.lifecycle`) directly, writing pre-calculated `duration_seconds`/`cpu_core_seconds`/etc. to `metering_entries`. Remaining work is OSAC-side only (collector URL redirect). See [ADR-003](../decisions/003-heartbeat-emitter-vs-sweep.md). |
 | REQ-2 | Near-real-time cost calculation | **Done** | <1ms per event, cost entries within 30s. Exceeds 60s SLA. |
 
 ### HIGH Priority
@@ -48,127 +94,83 @@ The updated spec **refines and reprioritizes** the original requirements:
 | Req | Title | Our Status | Gap |
 |---|---|---|---|
 | REQ-1a | Cluster lifecycle via cluster orders | **Done** | ClusterOrder is the ordering workflow; we track the resulting Cluster (verified — [open question #15](osac-open-questions.md)) |
-| REQ-3 | Granular cost tracking | **Partial** | Cost data exists with drill-down by tenant, resource type, meter. No export API (CSV/JSON) yet. |
-| REQ-3a | Tenant/project attribution | **Done** | Tenant → Project hierarchy in inventory. Costs attributed per tenant. |
-| REQ-8 | Bare metal costing | **Not started** | OSAC bare metal service is being built. No BMaaS events defined yet. |
-| REQ-9 | Quota/budget status API | **Not started** | No API endpoint. Metering data exists to compute quota consumption. |
-| REQ-10 | Threshold notifications to OSAC | **Not started** | No notification mechanism. Would need webhook/event emitter. |
+| REQ-3 | Granular cost tracking | **Partial** | Report API done, filterable by tenant/resource, CSV+JSON export, date range (`from`/`to`) + daily resolution. `group_by=project` shipped Jul 4; `GET /api/v1/reports/breakdown` (Jul 8) adds per-resource line-item drill-down. Missing: `group_by=user` dimension |
+| REQ-3a | Tenant/project attribution | **Done** | Tenant → Project hierarchy in inventory; costs attributed per tenant. RBAC scope now decided (tenant + project only) but not yet built |
+| REQ-8 | Bare metal costing | **Done, but parked (post-PoC)** | Fully implemented ([gap analysis](req8-bare-metal-gap-analysis.md)) — reconciler + inventory + metering + rates. Explicitly deferred from Jul 31 demo scope by the Jul 2 decision, independent of our implementation status |
+| REQ-9 | Quota/budget status API | **Done** | `GET /api/v1/quotas/{tenant_id}` — sub-second, threshold flags at 50/70/90/100% |
+| REQ-10 | Threshold notifications to OSAC | **Done (pull), parked (push)** | Pull model shipped via quota API's `alerts` field; push/webhook deferred indefinitely per Jul 2 decision — no longer a PoC gap |
 | REQ-13 | Custom rate dimensions | **Done** | Config-driven extraction of arbitrary CloudEvent fields as metering entries. [Design](../research/req13-custom-metrics-design.md) |
+| REQ-2a | Cloud events from OpenShift AI (MaaS) & token metering | **Done (mock/emulator)** | IPP verified with real external-metering plugin + echo LLM. [Stress test](../dev/ipp-stress-test-2026-07-05.md). MaaS tenant attribution now implemented via `organization_id` end-to-end ([experiment report](../dev/tenant-attribution-experiment-2026-07-08.md)); production Authorino/maas-api wiring still pending upstream. Project attribution for MaaS still needs a product decision |
 
 ### MEDIUM Priority
 
 | Req | Title | Our Status | Gap |
 |---|---|---|---|
-| REQ-3b | Service catalog sync from OSAC | **Partial** | We sync instance types. Manual rate setup done. No catalog API sync. |
-| REQ-5 | Chargeback reporting | **Partial** | Cost data queryable. No export mechanism or formatted reports. |
+| REQ-3b | Service catalog sync from OSAC | **Done** | Catalog items (cluster, compute_instance, bare_metal_instance) synced via reconciler; rates still seeded as defaults, not auto-derived from catalog pricing |
+| REQ-5 | Chargeback reporting | **Partial** | Report API covers capacity + MaaS cost types, CSV/JSON export, `group_by=project`, date filtering + daily resolution, breakdown drill-down. Scheduled export documented as a [Kubernetes CronJob pattern](../dev/scheduled-chargeback-export.md) calling the report API (verified on k3d) — pending PM sign-off on whether that satisfies the acceptance criterion. Missing: `group_by=user` dimension (same schema gap as REQ-3) |
+| REQ-7 | Audit trail | **Done** | `raw_events` table provides immutable audit log; [Splunk HEC forwarder](../splunk-audit-forwarding.md) streams events for compliance search and dispute resolution |
 
-### Deferred (MaaS workstream, not PoC)
+### LOW Priority
+
+| Req | Title | Our Status | Gap |
+|---|---|---|---|
+| REQ-11 | Cost tiers | **Partial** | Tiered pricing engine done and correct for MaaS (per-event). Capacity meters (GiB-month, core-hours) need cumulative/period-accumulating tier logic — not yet implemented. See [gap analysis](req11-cost-tiers-gap-analysis.md) |
+| REQ-12 | Daily OpenShift Virtualization costs | **TBD** | Blocked on PM definition of acceptance criteria; not yet started |
+
+### Parked / Deferred (per Jul 2, 2026 decisions)
 
 | Req | Title | Our Status | Notes |
 |---|---|---|---|
-| REQ-2a | Cloud events from OpenShift AI | **Done (mock)** | Ahead of schedule — built for future MaaS workstream |
-| REQ-4 | Token metering | **Done (mock)** | 4 token meters working with simulator |
+| REQ-8 | Bare metal costing | **Done**, deferred from demo | See HIGH table above — implementation complete, just not in the Jul 31 demo script |
+| REQ-10 | Threshold notification push/webhook | **Not planned for PoC** | Pull model (REQ-9) accepted as sufficient; no timeline for push |
 
-### Out of Scope / Standard
+### Future Work / Out of Scope for Consumer Component
 
 | Req | Title | Our Status | Notes |
 |---|---|---|---|
-| REQ-6 | Security & access control | N/A | In-product, no gap |
-| REQ-7 | Reconciliation & auditing | **Partial** | Raw event log provides immutable audit trail |
+| REQ-6 | Security & access control | N/A | In-product, no gap. On-prem RBAC/security review tracked under POC-ENV |
+| POC-ENV | On-premise deployment | **Partial** (see CRITICAL table) | RHCM-owned Helm/OLM chart, not consumer scope |
 
-## Critical Gaps to Close for PoC
+## Remaining Gaps to Close for PoC
 
-### 1. Heartbeat Event Format (REQ-1b) — CRITICAL
-
-**What the spec says:** HTTP endpoint receiving heartbeat events with
-tenant_id, project_id, resource_id, hardware config at 10-30s intervals.
-Auto-register tenants on first event.
-
-**What we have:** Watch stream consumption + HTTP ingest endpoint that
-accepts CloudEvents format.
-
-**Gap:** Our ingest endpoint accepts MaaS CloudEvents, not the heartbeat
-format described in the spec. We need to either:
-- Adapt the ingest endpoint to accept heartbeat events too
-- Verify that the heartbeat format matches what the OSAC metering collector
-  produces (likely yes — the collector script already exists)
-
-**Effort:** Small — add a heartbeat event handler to the ingest endpoint.
-
-### 2. Quota/Budget Status API (REQ-9) — HIGH
-
-**What the spec says:** Fast API (sub-second) for OSAC to query:
-"is this tenant within quota? What % of budget consumed?"
-Threshold checks at 50%, 70%, 90%, 100%.
-
-**What we have:** Metering entries and cost entries exist. No API to query
-aggregated consumption against limits.
-
-**Gap:** Need:
-- `quotas` table (defined in data model but not implemented)
-- API endpoint: `GET /api/v1/quotas/{tenant_id}/status`
-- Aggregate metering by tenant + meter for current period
-- Compare against quota limit, return percentage
-
-**Effort:** Medium — new table, API endpoint, aggregation query.
-
-### 3. Threshold Notifications (REQ-10) — HIGH
-
-**What the spec says:** Send notifications to OSAC when consumption hits
-50%, 70%, 90%, 100% of quota/budget.
-
-**What we have:** Nothing.
-
-**Gap:** Need:
-- Alert evaluation in the rating sweep or quota check
-- `alerts` table (defined in data model but not implemented)
-- Webhook or event emitter to notify OSAC
-- Deduplication (don't fire the same threshold alert repeatedly)
-
-**Effort:** Medium — depends on REQ-9 (needs quota tracking first).
-
-### 4. Bare Metal Costing (REQ-8) — HIGH
-
-**What the spec says:** Consume bare metal service cloud events from OSAC.
-
-**What we have:** Nothing.
-
-**What's needed from OSAC:** BMaaS event schema definition. OSAC has a
-BareMetalInstance entity in the fulfillment-service proto, so Watch stream
-events should exist. We'd add a handler + meters like we did for VMs.
-
-**Effort:** Small-Medium — same pattern as VM metering, just different entity.
-
-### 5. Chargeback Reporting / Export (REQ-3/REQ-5) — MEDIUM
+### 1. Chargeback Reporting / Export (REQ-3/REQ-5) — MEDIUM
 
 **What the spec says:** Cost data filterable by tenant/project/model/user.
 Export in CSV and JSON.
 
-**What we have:** Cost data in PostgreSQL, queryable via `snippets/query-costs.sh`.
-No API endpoint or export mechanism.
+**What we have:** Report API (`GET /api/v1/reports/costs`) covers
+capacity + MaaS cost types with CSV/JSON export, filterable by
+tenant/resource, and groupable by tenant/resource_type/meter/resource/
+**project** (project dimension wired end-to-end Jul 4 — schema, metering
+sweep, rating sweep, custom metrics, and report API). As of Jul 8
+(PR #42), it also supports `from`/`to` date filtering, `?resolution=daily`,
+a Koku-compatible response envelope, and a new
+`GET /api/v1/reports/breakdown` endpoint for per-resource line-item
+drill-down. Periodic export is documented as a
+[Kubernetes CronJob pattern](../dev/scheduled-chargeback-export.md)
+calling the existing report API on a schedule — verified on k3d,
+pending PM confirmation that this satisfies the "exportable" acceptance
+criterion (vs. a built-in scheduler).
 
-**Gap:** Need a report API endpoint. Could be simple:
-`GET /api/v1/reports/costs?tenant_id=X&group_by=meter_name&format=csv`
+**Gap:** Missing `group_by=user` dimension — IPP CloudEvents carry a
+`user` field we currently discard during ingestion.
 
-**Effort:** Medium — new API handler, query builder, CSV/JSON serializer.
+**Effort:** Small — extend the existing query builder with a user
+dimension (requires storing `user` on metering/cost entries first).
 
 ## Recommended Priority Order
 
-Based on the updated spec priorities:
+Based on the updated spec priorities, the only PoC-scope item still open
+is:
 
-1. **Heartbeat event format** (REQ-1b, CRITICAL) — adapt ingest endpoint
-2. **Bare metal handler** (REQ-8, HIGH) — add BareMetalInstance to Watch
-   stream dispatcher + meters
-3. **Quota status API** (REQ-9, HIGH) — quotas table + status endpoint
-4. **Threshold notifications** (REQ-10, HIGH) — alerts + webhook emitter
-5. **Report/export API** (REQ-3/REQ-5, MEDIUM) — cost query endpoint
+1. **User report dimension** (REQ-3/REQ-5, MEDIUM) — store `user` on
+   metering/cost entries and add `group_by=user` to the existing report
+   API
 
-## What We Built That's Ahead of Schedule
+Everything else in the original priority list is already resolved:
+REQ-1b (heartbeat ingestion), REQ-9 (quota status API), REQ-10 (pull
+notifications), REQ-7 (audit trail via Splunk forwarding), and the
+REQ-3/REQ-5 project dimension + breakdown/date-filtering enhancements
+are **Done**; REQ-8 (bare metal) is fully implemented but deferred from
+Jul 31 demo scope by the Jul 2, 2026 decision.
 
-- **MaaS metering** (REQ-2a/REQ-4) — explicitly deferred from PoC but
-  we have it working with simulator and cost calculation
-- **Rate engine with tiered pricing** — not a named requirement but
-  essential for cost calculation
-- **Immutable audit trail** (REQ-7) — raw_events table provides this
-- **Arguments against Kafka** (ADR-002) — the updated spec confirms
-  HTTP heartbeats, not Kafka, for the PoC
