@@ -204,7 +204,7 @@ func main() {
 		})
 	}
 
-	if err := g.Wait(); err != nil && ctx.Err() == nil {
+	if err := g.Wait(); err != nil {
 		logger.Error("consumer exited with error", "error", err)
 		os.Exit(1)
 	}

@@ -35,6 +35,10 @@ func (w *Watcher) Run(ctx context.Context) error {
 			return w.handleEvent(ctx, event)
 		})
 
+		if err != nil {
+			w.logger.Error("event stream error", "error", err)
+		}
+
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -43,7 +47,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 			backoff = time.Second
 		}
 
-		w.logger.Warn("event stream disconnected, reconnecting", "error", err, "backoff", backoff)
+		w.logger.Warn("event stream disconnected, reconnecting", "backoff", backoff)
 
 		select {
 		case <-ctx.Done():
