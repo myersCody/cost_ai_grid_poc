@@ -1,0 +1,107 @@
+// OSAC Capacity-Based Cost Flow
+// How VM/cluster lifecycle events flow through the cost pipeline
+
+digraph osac_capacity_flow {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=14
+        label="OSAC Capacity-Based Cost Flow"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+        nodesep=0.6
+        ranksep=0.7
+    ]
+    node [fontname="Helvetica" fontsize=10]
+    edge [fontname="Helvetica" fontsize=9 color="#555555"]
+
+    // ── OSAC ──
+    subgraph cluster_osac {
+        label="OSAC Fulfillment Service"
+        style=filled
+        fillcolor="#E3F2FD"
+        color="#1565C0"
+        fontcolor="#1565C0"
+        fontsize=11
+
+        osac_db [label="OSAC PostgreSQL\nVMs, Clusters, Bare Metal,\nProjects, Tenants" shape=cylinder style=filled fillcolor="#BBDEFB" color="#1565C0"]
+        watch [label="Watch Stream (public gRPC)\nCREATED · UPDATED · DELETED" shape=box style="filled,rounded" fillcolor="#90CAF9" color="#1565C0"]
+        rest [label="REST List APIs\nGET /api/fulfillment/v1/*\n(pagination, full inventory)" shape=box style="filled,rounded" fillcolor="#90CAF9" color="#1565C0"]
+
+        osac_db -> watch [style=invis]
+        osac_db -> rest [style=invis]
+    }
+
+    // ── Cost Event Consumer ──
+    subgraph cluster_consumer {
+        label="Cost Event Consumer (single Go binary)"
+        style=filled
+        fillcolor="#E8F5E9"
+        color="#2E7D32"
+        fontcolor="#2E7D32"
+        fontsize=11
+
+        watcher [label="① Watcher\nreal-time event consumer\nCREATED → upsert, DELETED → soft-delete + final metering" shape=box style="filled,rounded" fillcolor="#C8E6C9" color="#2E7D32"]
+        reconciler [label="② Reconciler (every 5 min)\nList all → diff → upsert/delete\ncatches missed Watch events" shape=box style="filled,rounded" fillcolor="#C8E6C9" color="#2E7D32"]
+    }
+
+    // ── Data Pipeline ──
+    subgraph cluster_pipeline {
+        label="Metering & Rating Pipeline"
+        style=filled
+        fillcolor="#FFF3E0"
+        color="#E65100"
+        fontcolor="#E65100"
+        fontsize=11
+
+        inventory [label="Inventory Tables\ncompute_instance · cluster\nbare_metal · project · model" shape=cylinder style=filled fillcolor="#FFE0B2" color="#E65100"]
+        raw_events [label="Raw Events\n(immutable audit log)" shape=cylinder style=filled fillcolor="#FFE0B2" color="#E65100"]
+        metering [label="③ Metering Sweep (every 60s)\nfor each RUNNING resource:\n  cpu_core_seconds = cores × 60\n  memory_gib_seconds = mem × 60\n  uptime_seconds = 60" shape=box style="filled,rounded" fillcolor="#FFECB3" color="#F57F17"]
+        metering_entries [label="Metering Entries\nresource × meter × period × value" shape=cylinder style=filled fillcolor="#FFE0B2" color="#E65100"]
+        rating [label="④ Rating Sweep (every 30s)\nfor each unrated entry:\n  cost = value × rate\n  tenant override → global fallback\n  tiered pricing supported" shape=box style="filled,rounded" fillcolor="#FFECB3" color="#F57F17"]
+        cost_entries [label="Cost Entries\ncost_amount · currency\nInfrastructure / Supplementary" shape=cylinder style=filled fillcolor="#FFE0B2" color="#E65100"]
+    }
+
+    // ── APIs ──
+    subgraph cluster_api {
+        label="APIs (served from same binary)"
+        style=filled
+        fillcolor="#F3E5F5"
+        color="#7B1FA2"
+        fontcolor="#7B1FA2"
+        fontsize=11
+
+        report_api [label="Cost Report API\nGET /api/v1/reports/costs\ngroup_by: tenant · resource · meter\nformat: JSON · CSV" shape=box style="filled,rounded" fillcolor="#E1BEE7" color="#7B1FA2"]
+        quota_api [label="Quota API\nGET /api/v1/quotas/{tenant}\nconsumed vs limit\nthresholds: 50/70/90/100%" shape=box style="filled,rounded" fillcolor="#E1BEE7" color="#7B1FA2"]
+    }
+
+    // ── Edges: OSAC → Consumer ──
+    watch -> watcher [label="1. SSE event stream\n(sub-second delivery)" color="#1565C0" fontcolor="#1565C0"]
+    rest -> reconciler [label="2. periodic full sync\n(drift correction)" color="#1565C0" fontcolor="#1565C0"]
+
+    // ── Edges: Consumer → Storage ──
+    watcher -> raw_events [label="store event" color="#2E7D32" fontcolor="#2E7D32"]
+    watcher -> inventory [label="upsert / soft-delete" color="#2E7D32" fontcolor="#2E7D32"]
+    reconciler -> inventory [label="upsert / delete" color="#2E7D32" fontcolor="#2E7D32"]
+
+    // ── Edges: Pipeline ──
+    inventory -> metering [label="3. read billable\nresources (state=RUNNING)" color="#E65100" fontcolor="#E65100"]
+    metering -> metering_entries [label="insert 3 entries\nper resource per sweep" color="#E65100" fontcolor="#E65100"]
+    metering_entries -> rating [label="4. read unrated entries" color="#E65100" fontcolor="#E65100"]
+    rating -> cost_entries [label="insert cost entry\n(value × rate = $)" color="#E65100" fontcolor="#E65100"]
+
+    // ── External ──
+    operator [label="Operator / Admin\ncreate VM, order cluster,\nprovision bare metal" shape=box style="filled,rounded" fillcolor="#E1F5FE" color="#0277BD"]
+    splunk [label="Splunk\n(audit trail)" shape=box style="filled,rounded" fillcolor="#FFCDD2" color="#C62828"]
+
+    // ── Edges: APIs ──
+    cost_entries -> report_api [label="query + aggregate" color="#7B1FA2" fontcolor="#7B1FA2"]
+    cost_entries -> quota_api [label="SUM consumed" color="#7B1FA2" fontcolor="#7B1FA2"]
+
+    // ── Edges: Resource creation ──
+    operator -> osac_db [label="0. create resource\n(API / UI)" style=dashed color="#0277BD" fontcolor="#0277BD"]
+
+    // ── Edges: Audit export ──
+    raw_events -> splunk [label="HEC forwarder\n(REQ-7)" style=dashed color="#C62828" fontcolor="#C62828"]
+}
