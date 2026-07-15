@@ -404,6 +404,14 @@ OSAC events → cost-event-consumer → real-time queries (quota, balance)
 This gives the best of both worlds: real-time for OSAC-specific features,
 Koku-native for reporting and cost model management.
 
+**Note:** Strategy A's viability also depends on a question this document
+doesn't answer — *which* metric names/formulas OSAC-derived rows are
+allowed to use once they land in Koku's tables, and how to avoid Koku's
+cost model double-rating pre-rated OSAC costs. See
+[osac-rate-incorporation/osac-rate-incorporation-recommendation.md](osac-rate-incorporation/osac-rate-incorporation-recommendation.md)
+for that catalog/semantic-modeling decision — it's a separate axis from
+the pipeline choice made here, not an alternative to it.
+
 ### What to avoid
 
 - **Strategy C (full Koku provider)** — months of Koku work for diminishing
@@ -511,6 +519,16 @@ OSAC MaaS      → our API serves directly (Koku has no MaaS concept)
 processes the data. Cost models with `vm_cost_per_hour` etc. apply
 automatically.
 
+**Caveat verified metric-by-metric:** the "apply automatically" claim
+holds cleanly for `vm_cost_per_hour`/`vm_cost_per_month` and (once a
+catalog join lands) `vm_core_cost_per_hour`/`cpu_core_request_per_hour`,
+but not for `node_cost_per_month`/`cluster_cost_per_month` — Koku's
+formulas for those are ratio-based allocations of a shared resource,
+while OSAC's node/cluster metering is flat per-instance accrual, so they
+need a divergent formula rather than verbatim reuse. See
+[osac-rate-incorporation/osac-rate-incorporation-recommendation.md](osac-rate-incorporation/osac-rate-incorporation-recommendation.md) §6
+for the full per-metric classification.
+
 **Koku changes needed for MaaS:** Either a new table + SQL template
 (Strategy F variant), or no Koku change (MaaS served by our API).
 
@@ -614,6 +632,8 @@ production it's the right path — it uses Koku's proven VM cost model.
 | 3 | Which UI serves OSAC data — existing Koku UI or a new one? | Existing → must match Koku API format. New → more freedom. |
 | 4 | How are tenants mapped between OSAC and Koku? | OSAC tenant → Koku org → PostgreSQL schema mapping needed for any integration |
 | 5 | Is real-time reporting a requirement or nice-to-have? | If required, Koku's daily batch model is insufficient — our pipeline must serve real-time queries directly |
+| 6 | Should OSAC-derived rates be scoped into their own `source_type` catalog on Koku's `PriceList`, or reuse Koku's metric catalog unscoped? | Determines whether Prometheus-only metrics are structurally excludable and whether REQ-13 custom metrics get a clean home. See [osac-rate-incorporation/osac-rate-incorporation-recommendation.md](osac-rate-incorporation/osac-rate-incorporation-recommendation.md) |
+| 7 | If a tenant runs both OSAC and CMMO on the same resource, which pipeline's cost row wins? | Unresolved double-counting risk (Scenario B) — independent of the naming/catalog question in #6, needs its own precedence mechanism |
 
 ---
 
