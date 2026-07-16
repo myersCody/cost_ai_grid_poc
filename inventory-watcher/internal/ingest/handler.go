@@ -76,9 +76,8 @@ type MaaSEventData struct {
 	DurationSeconds float64 `json:"duration_seconds"`
 	RequestCount    int64   `json:"request_count"`
 	// IPP external-metering plugin fields (authoritative format).
-	// organization_id and cost_center are proposed additions to the IPP
-	// CloudEvent payload for tenant attribution without subscription parsing.
-	// See: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
+	// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go
+	// Tenant attribution fields: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
 	User                string `json:"user"`
 	Group               string `json:"group"`
 	Subscription        string `json:"subscription"`
@@ -89,9 +88,9 @@ type MaaSEventData struct {
 	PromptTokens        int64  `json:"prompt_tokens"`
 	CompletionTokens    int64  `json:"completion_tokens"`
 	TotalTokens         int64  `json:"total_tokens"`
-	CachedInputTokens   int64  `json:"cached_input_tokens"`
-	CacheCreationTokens int64  `json:"cache_creation_tokens"`
-	ReasoningTokens     int64  `json:"reasoning_tokens"`
+	CachedInputTokens   int64  `json:"cached_input_tokens"`   // subset of prompt_tokens — parsed for observability, not billed separately
+	CacheCreationTokens int64  `json:"cache_creation_tokens"` // subset of prompt_tokens
+	ReasoningTokens     int64  `json:"reasoning_tokens"`      // subset of completion_tokens (o1/o3/DeepSeek R1)
 	DurationMs          int64  `json:"duration_ms"`
 }
 
@@ -395,6 +394,7 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 		ModelID:             data.ModelID,
 		ModelName:           data.ModelName,
 		TenantID:            data.TenantID,
+		UserID:              data.User,
 		State:               data.State,
 		TokensIn:            data.TokensIn,
 		TokensOut:           data.TokensOut,
@@ -790,10 +790,10 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 	if format == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=breakdown.csv")
-		fmt.Fprintln(w, "date,tenant_id,project_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
+		fmt.Fprintln(w, "date,tenant_id,project_id,user_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
 		for _, row := range rows {
-			fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%.6f,%.10f,%s,%s\n",
-				row.Date, CsvSafe(row.TenantID), CsvSafe(row.ProjectID),
+			fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%s,%.6f,%.10f,%s,%s\n",
+				row.Date, CsvSafe(row.TenantID), CsvSafe(row.ProjectID), CsvSafe(row.UserID),
 				CsvSafe(row.ResourceType), CsvSafe(row.ResourceID),
 				CsvSafe(row.MeterName), row.MeteredValue, row.CostAmount,
 				CsvSafe(row.CostType), CsvSafe(row.Currency))

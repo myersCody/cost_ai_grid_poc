@@ -127,6 +127,8 @@ type MeteringEntry struct {
 	ResourceID   string    `json:"resource_id"`
 	TenantID     string    `json:"tenant_id"`
 	ProjectID    string    `json:"project_id"`
+	UserID       string    `json:"user_id"`
+	InstanceType string    `json:"instance_type"`
 	MeterName    string    `json:"meter_name"`
 	Value        float64   `json:"value"`
 	Unit         string    `json:"unit"`
@@ -143,6 +145,7 @@ type RateRecord struct {
 	ID            int64      `json:"id"`
 	TenantID      *string    `json:"tenant_id"`
 	ResourceType  string     `json:"resource_type"`
+	InstanceType  string     `json:"instance_type"`
 	MeterName     string     `json:"meter_name"`
 	KokuMetric    string     `json:"koku_metric"`
 	CostType      string     `json:"cost_type"`
@@ -160,6 +163,7 @@ type CostEntry struct {
 	RateID          int64     `json:"rate_id"`
 	TenantID        string    `json:"tenant_id"`
 	ProjectID       string    `json:"project_id"`
+	UserID          string    `json:"user_id"`
 	ResourceType    string    `json:"resource_type"`
 	ResourceID      string    `json:"resource_id"`
 	MeterName       string    `json:"meter_name"`
@@ -234,6 +238,7 @@ type CostBreakdownRow struct {
 	Date         string  `json:"date"`
 	TenantID     string  `json:"tenant_id"`
 	ProjectID    string  `json:"project_id"`
+	UserID       string  `json:"user_id"`
 	ResourceType string  `json:"resource_type"`
 	ResourceID   string  `json:"resource_id"`
 	MeterName    string  `json:"meter_name"`

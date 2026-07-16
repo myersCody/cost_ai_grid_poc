@@ -20,7 +20,7 @@ func TestComputeInstanceMeters(t *testing.T) {
 		Cores:      4,
 		MemoryGiB:  16,
 	}
-	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, nil, "default", 60.0, t0, t1)
 
 	if len(entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(entries))
@@ -66,9 +66,64 @@ func TestComputeInstanceMeters_ZeroCores(t *testing.T) {
 		Cores:      0,
 		MemoryGiB:  8,
 	}
-	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, nil, "default", 60.0, t0, t1)
 	if entries[1].Value != 0 {
 		t.Errorf("cpu_core_seconds should be 0 with 0 cores, got %v", entries[1].Value)
+	}
+}
+
+func TestComputeInstanceMeters_CatalogFallback(t *testing.T) {
+	inst := inventory.ComputeInstanceRecord{
+		InstanceID:   "vm-catalog",
+		Tenant:       "t",
+		InstanceType: "m5.xlarge",
+		Cores:        0,
+		MemoryGiB:    0,
+	}
+	catalog := map[string]*inventory.InstanceTypeRecord{
+		"m5.xlarge": {InstanceTypeID: "m5.xlarge", Cores: 4, MemoryGiB: 16},
+	}
+	entries := computeInstanceMeters(inst, catalog, "default", 60.0, t0, t1)
+
+	if entries[1].Value != 4*60.0 {
+		t.Errorf("vm_cpu_core_seconds: expected %v (catalog fallback), got %v", 4*60.0, entries[1].Value)
+	}
+	if entries[2].Value != 16*60.0 {
+		t.Errorf("vm_memory_gib_seconds: expected %v (catalog fallback), got %v", 16*60.0, entries[2].Value)
+	}
+	if entries[0].InstanceType != "m5.xlarge" {
+		t.Errorf("instance_type not propagated: got %q", entries[0].InstanceType)
+	}
+}
+
+func TestComputeInstanceMeters_CatalogMissStaysZero(t *testing.T) {
+	inst := inventory.ComputeInstanceRecord{
+		InstanceID:   "vm-unknown",
+		Tenant:       "t",
+		InstanceType: "unknown.type",
+		Cores:        0,
+		MemoryGiB:    0,
+	}
+	entries := computeInstanceMeters(inst, nil, "default", 60.0, t0, t1)
+
+	if entries[1].Value != 0 {
+		t.Errorf("expected 0 cpu_core_seconds when catalog miss, got %v", entries[1].Value)
+	}
+}
+
+func TestComputeInstanceMeters_InstanceTypePropagated(t *testing.T) {
+	inst := inventory.ComputeInstanceRecord{
+		InstanceID:   "vm-typed",
+		Tenant:       "t",
+		InstanceType: "c5.2xlarge",
+		Cores:        8,
+		MemoryGiB:    32,
+	}
+	entries := computeInstanceMeters(inst, nil, "default", 60.0, t0, t1)
+	for _, e := range entries {
+		if e.InstanceType != "c5.2xlarge" {
+			t.Errorf("%s: instance_type got %q, want c5.2xlarge", e.MeterName, e.InstanceType)
+		}
 	}
 }
 
@@ -143,16 +198,16 @@ func TestMaaSMeters_AllDimensions(t *testing.T) {
 	}
 	entries := maasMeters(usage, "default", t0, t1)
 
-	if len(entries) != 5 {
-		t.Fatalf("expected 5 entries, got %d", len(entries))
+	// Only tokens_in, tokens_out, and requests are metered.
+	// cached/reasoning are subsets of in/out — not separate billing meters.
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
 	expected := map[string]float64{
-		"maas_tokens_in":        1000,
-		"maas_tokens_out":       500,
-		"maas_tokens_cached":    200,
-		"maas_tokens_reasoning": 100,
-		"maas_requests":         1,
+		"maas_tokens_in":  1000,
+		"maas_tokens_out": 500,
+		"maas_requests":   1,
 	}
 	for _, e := range entries {
 		want, ok := expected[e.MeterName]
@@ -216,9 +271,43 @@ func TestMaaSMeters_Units(t *testing.T) {
 	}
 }
 
+func TestMaaSMeters_UserIDPropagation(t *testing.T) {
+	usage := MaaSUsage{
+		ModelID:  "model-user",
+		TenantID: "tenant-u",
+		UserID:   "alice@example.com",
+		TokensIn: 100,
+		Requests: 1,
+	}
+	entries := maasMeters(usage, "proj-1", t0, t1)
+	for _, e := range entries {
+		if e.UserID != "alice@example.com" {
+			t.Errorf("%s: user_id got %q, want alice@example.com", e.MeterName, e.UserID)
+		}
+		if e.ProjectID != "proj-1" {
+			t.Errorf("%s: project_id got %q, want proj-1", e.MeterName, e.ProjectID)
+		}
+	}
+}
+
+func TestMaaSMeters_EmptyUserID(t *testing.T) {
+	usage := MaaSUsage{
+		ModelID:  "model-no-user",
+		TenantID: "tenant-v",
+		TokensIn: 50,
+	}
+	entries := maasMeters(usage, "default", t0, t1)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].UserID != "" {
+		t.Errorf("expected empty user_id for non-MaaS, got %q", entries[0].UserID)
+	}
+}
+
 func TestComputeInstanceMeters_PeriodPropagation(t *testing.T) {
 	inst := inventory.ComputeInstanceRecord{InstanceID: "vm", Tenant: "t", Cores: 1, MemoryGiB: 1}
-	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)
+	entries := computeInstanceMeters(inst, nil, "default", 60.0, t0, t1)
 	for i, e := range entries {
 		if !e.PeriodStart.Equal(t0) || !e.PeriodEnd.Equal(t1) {
 			t.Errorf("[%d] period: got %v-%v, want %v-%v", i, e.PeriodStart, e.PeriodEnd, t0, t1)

@@ -161,13 +161,13 @@ func TestBuildRateIndex(t *testing.T) {
 	}
 
 	// Global rate (nil tenant → "")
-	r := idx[rateKey{tenant: "", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
+	r := idx[rateKey{tenant: "", instanceType: "", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
 	if r == nil || r.ID != 1 {
 		t.Error("expected global VM rate (ID=1)")
 	}
 
 	// Tenant-specific rate
-	r = idx[rateKey{tenant: "tenant-acme", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
+	r = idx[rateKey{tenant: "tenant-acme", instanceType: "", resourceType: "compute_instance", meterName: "vm_uptime_seconds"}]
 	if r == nil || r.ID != 2 {
 		t.Error("expected tenant-acme VM rate (ID=2)")
 	}
@@ -180,7 +180,7 @@ func TestMatchRate_TenantSpecificTakesPrecedence(t *testing.T) {
 	}
 	idx := buildRateIndex(rates)
 
-	r := matchRate(idx, "tenant-acme", "compute_instance", "vm_uptime_seconds")
+	r := matchRate(idx, "tenant-acme", "", "compute_instance", "vm_uptime_seconds")
 	if r == nil || r.ID != 2 {
 		t.Errorf("expected tenant-specific rate (ID=2), got %+v", r)
 	}
@@ -192,7 +192,7 @@ func TestMatchRate_FallsBackToGlobal(t *testing.T) {
 	}
 	idx := buildRateIndex(rates)
 
-	r := matchRate(idx, "tenant-unknown", "compute_instance", "vm_uptime_seconds")
+	r := matchRate(idx, "tenant-unknown", "", "compute_instance", "vm_uptime_seconds")
 	if r == nil || r.ID != 1 {
 		t.Errorf("expected global fallback rate (ID=1), got %+v", r)
 	}
@@ -204,7 +204,7 @@ func TestMatchRate_ReturnsNilWhenNoMatch(t *testing.T) {
 	}
 	idx := buildRateIndex(rates)
 
-	r := matchRate(idx, "any", "gpu_instance", "gpu_compute_seconds")
+	r := matchRate(idx, "any", "", "gpu_instance", "gpu_compute_seconds")
 	if r != nil {
 		t.Errorf("expected nil for unmatched meter, got %+v", r)
 	}
@@ -216,7 +216,7 @@ func TestMatchRate_EmptyStringTenantIsSameAsGlobal(t *testing.T) {
 	}
 	idx := buildRateIndex(rates)
 
-	r := matchRate(idx, "any-tenant", "model", "maas_tokens_in")
+	r := matchRate(idx, "any-tenant", "", "model", "maas_tokens_in")
 	if r == nil || r.ID != 1 {
 		t.Errorf("expected empty-string tenant to serve as global, got %+v", r)
 	}
@@ -229,8 +229,61 @@ func TestBuildRateIndex_FirstEntryWins(t *testing.T) {
 	}
 	idx := buildRateIndex(rates)
 
-	r := idx[rateKey{tenant: "", resourceType: "model", meterName: "maas_tokens_in"}]
+	r := idx[rateKey{tenant: "", instanceType: "", resourceType: "model", meterName: "maas_tokens_in"}]
 	if r == nil || r.ID != 1 {
 		t.Errorf("expected first rate to win (ID=1), got %+v", r)
+	}
+}
+
+func TestMatchRate_InstanceTypeSpecificTakesPrecedence(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, InstanceType: "", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+		{ID: 2, TenantID: nil, InstanceType: "m5.xlarge", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.50},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "any-tenant", "m5.xlarge", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 2 {
+		t.Errorf("expected instance-type-specific rate (ID=2), got %+v", r)
+	}
+}
+
+func TestMatchRate_FallsBackToGlobalWhenInstanceTypeNotFound(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, InstanceType: "", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+		{ID: 2, TenantID: nil, InstanceType: "m5.xlarge", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.50},
+	}
+	idx := buildRateIndex(rates)
+
+	r := matchRate(idx, "any-tenant", "c5.large", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 1 {
+		t.Errorf("expected global fallback (ID=1) for unknown instance type, got %+v", r)
+	}
+}
+
+func TestMatchRate_TenantAndInstanceTypeCombined(t *testing.T) {
+	rates := []inventory.RateRecord{
+		{ID: 1, TenantID: nil, InstanceType: "", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.01},
+		{ID: 2, TenantID: nil, InstanceType: "m5.xlarge", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.50},
+		{ID: 3, TenantID: strPtr("vip-tenant"), InstanceType: "m5.xlarge", ResourceType: "compute_instance", MeterName: "vm_uptime_seconds", PricePerUnit: 0.30},
+	}
+	idx := buildRateIndex(rates)
+
+	// VIP tenant with m5.xlarge gets the tenant+instance_type rate
+	r := matchRate(idx, "vip-tenant", "m5.xlarge", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 3 {
+		t.Errorf("expected tenant+instance_type rate (ID=3), got %+v", r)
+	}
+
+	// Regular tenant with m5.xlarge gets the global instance_type rate
+	r = matchRate(idx, "other-tenant", "m5.xlarge", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 2 {
+		t.Errorf("expected global instance_type rate (ID=2), got %+v", r)
+	}
+
+	// VIP tenant with unknown instance type gets global default
+	r = matchRate(idx, "vip-tenant", "c5.large", "compute_instance", "vm_uptime_seconds")
+	if r == nil || r.ID != 1 {
+		t.Errorf("expected global default (ID=1) for unknown instance type, got %+v", r)
 	}
 }

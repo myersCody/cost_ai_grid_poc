@@ -68,7 +68,7 @@ func (r *Rater) sweep(ctx context.Context) {
 	skippedMeters := make(map[string]bool)
 
 	for _, me := range entries {
-		rate := matchRate(rateIndex, me.TenantID, me.ResourceType, me.MeterName)
+		rate := matchRate(rateIndex, me.TenantID, me.InstanceType, me.ResourceType, me.MeterName)
 		if rate == nil {
 			skipped++
 			key := me.ResourceType + "/" + me.MeterName
@@ -85,6 +85,7 @@ func (r *Rater) sweep(ctx context.Context) {
 			RateID:          rate.ID,
 			TenantID:        me.TenantID,
 			ProjectID:       me.ProjectID,
+			UserID:          me.UserID,
 			ResourceType:    me.ResourceType,
 			ResourceID:      me.ResourceID,
 			MeterName:       me.MeterName,
@@ -116,6 +117,7 @@ func (r *Rater) sweep(ctx context.Context) {
 
 type rateKey struct {
 	tenant       string
+	instanceType string
 	resourceType string
 	meterName    string
 }
@@ -128,7 +130,7 @@ func buildRateIndex(rates []inventory.RateRecord) map[rateKey]*inventory.RateRec
 		if r.TenantID != nil {
 			tenant = *r.TenantID
 		}
-		key := rateKey{tenant: tenant, resourceType: r.ResourceType, meterName: r.MeterName}
+		key := rateKey{tenant: tenant, instanceType: r.InstanceType, resourceType: r.ResourceType, meterName: r.MeterName}
 		if _, exists := idx[key]; !exists {
 			idx[key] = r
 		}
@@ -136,13 +138,36 @@ func buildRateIndex(rates []inventory.RateRecord) map[rateKey]*inventory.RateRec
 	return idx
 }
 
-func matchRate(idx map[rateKey]*inventory.RateRecord, tenantID, resourceType, meterName string) *inventory.RateRecord {
-	if r, ok := idx[rateKey{tenant: tenantID, resourceType: resourceType, meterName: meterName}]; ok {
+// matchRate looks up a rate with 4-way fallback:
+//  1. tenant + instance_type specific
+//  2. instance_type specific (any tenant)
+//  3. tenant specific (any instance_type)
+//  4. global default (any tenant, any instance_type)
+func matchRate(idx map[rateKey]*inventory.RateRecord, tenantID, instanceType, resourceType, meterName string) *inventory.RateRecord {
+	base := rateKey{resourceType: resourceType, meterName: meterName}
+
+	base.tenant = tenantID
+	base.instanceType = instanceType
+	if r, ok := idx[base]; ok {
 		return r
 	}
-	if r, ok := idx[rateKey{tenant: "", resourceType: resourceType, meterName: meterName}]; ok {
+
+	base.tenant = ""
+	if r, ok := idx[base]; ok {
 		return r
 	}
+
+	base.tenant = tenantID
+	base.instanceType = ""
+	if r, ok := idx[base]; ok {
+		return r
+	}
+
+	base.tenant = ""
+	if r, ok := idx[base]; ok {
+		return r
+	}
+
 	return nil
 }
 
@@ -261,10 +286,8 @@ func SeedDefaultRates(ctx context.Context, store *inventory.Store, logger *slog.
 		{ResourceType: "compute_instance", MeterName: "vm_memory_gib_seconds", KokuMetric: "memory_gb_request_per_hour", CostType: "Supplementary", PricePerUnit: 0.002 / 3600, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "cluster", MeterName: "cluster_uptime_seconds", KokuMetric: "cluster_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.50 / 3600, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "cluster", MeterName: "cluster_worker_node_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.10 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_in", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", Description: "Prompt/input tokens", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_out", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", Description: "Completion/output tokens", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_cached", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.05 / 1_000_000, Currency: "USD", Description: "Cached input tokens (discounted)", EffectiveFrom: now},
-		{ResourceType: "model", MeterName: "maas_tokens_reasoning", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 2.00 / 1_000_000, Currency: "USD", Description: "Reasoning/thinking tokens", EffectiveFrom: now},
+		{ResourceType: "model", MeterName: "maas_tokens_in", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", Description: "Prompt/input tokens (includes cached)", EffectiveFrom: now},
+		{ResourceType: "model", MeterName: "maas_tokens_out", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", Description: "Completion/output tokens (includes reasoning)", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_requests", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 5.00 / 1_000_000, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "bare_metal", MeterName: "bm_uptime_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.05 / 3600, Currency: "USD", EffectiveFrom: now},
 	}

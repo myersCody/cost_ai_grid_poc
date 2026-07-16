@@ -102,7 +102,9 @@ Worker → `cluster_worker_node_seconds` (node_count × duration).
 ## MaaS — Inference Token Usage (IPP Plugin)
 
 **Type:** `inference.tokens.used`
-**Source:** IPP external-metering plugin ([PR #320](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/320), [client.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160e8b3c3172353d4c2740f11eb782fb5717/pkg/plugins/external-metering/client.go))
+**Source:** IPP external-metering plugin
+([plugin.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go),
+[client.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/client.go))
 **Our handler:** `internal/ingest/handler.go` → `handleModelEvent`
 
 ```json
@@ -130,15 +132,49 @@ Worker → `cluster_worker_node_seconds` (node_count × duration).
 }
 ```
 
-**Gap:** Our current handler expects `tokens_in`/`tokens_out`. The real
-IPP sends `prompt_tokens`/`completion_tokens` + `cached_input_tokens`/
-`cache_creation_tokens`/`reasoning_tokens`. We need to either:
-- Accept both naming conventions (backwards compat)
-- Or map: prompt→tokens_in, completion→tokens_out, add new meters for
-  cached/reasoning
+### Token field semantics
 
-**Note:** `subject` is the username (not tenant_id like VMaaS/CaaS events).
-Tenant attribution may need Keycloak lookup or event augmentation.
+The token fields follow the
+[OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/object)
+`usage` object structure. The IPP plugin extracts them from the
+vLLM/OpenAI-compatible response and forwards them verbatim in the
+CloudEvent `data` payload
+([source](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go)).
+
+| Field | OpenAI origin | Relationship | Metered? |
+|-------|--------------|--------------|----------|
+| `prompt_tokens` | `usage.prompt_tokens` | Total input tokens | Yes → `maas_tokens_in` |
+| `completion_tokens` | `usage.completion_tokens` | Total output tokens (includes reasoning) | Yes → `maas_tokens_out` |
+| `total_tokens` | `usage.total_tokens` | `prompt_tokens + completion_tokens` | No (redundant sum) |
+| `cached_input_tokens` | `usage.prompt_tokens_details.cached_tokens` | **Subset** of `prompt_tokens` served from KV cache | No (subset, would double-count) |
+| `cache_creation_tokens` | `usage.prompt_tokens_details.cache_creation_input_tokens` | Tokens used to populate the cache this request | No (subset of prompt_tokens) |
+| `reasoning_tokens` | `usage.completion_tokens_details.reasoning_tokens` | **Subset** of `completion_tokens` used for chain-of-thought (o1/o3/DeepSeek R1) | No (subset, would double-count) |
+
+**Why only 3 billing meters:** `cached_input_tokens` and
+`reasoning_tokens` are subsets of `prompt_tokens` and
+`completion_tokens` respectively — not additive quantities. Metering
+them as separate cost entries would double-bill. All 6 fields are
+parsed and stored in `raw_events` for observability and audit; only
+`tokens_in`, `tokens_out`, and `requests` produce `metering_entries`.
+
+See also:
+- [OpenAI usage object](https://platform.openai.com/docs/api-reference/chat/object) — canonical field definitions
+- [vLLM reasoning outputs](https://docs.vllm.ai/en/latest/features/reasoning_outputs/) — vLLM's reasoning token support
+- [Rate configuration guide](rate-configuration-guide.md) — MaaS rate setup
+
+### Identity fields
+
+| Field | Source | Used for |
+|-------|--------|----------|
+| `user` | Authorino/maas-api identity header | Per-user cost attribution (`user_id` on metering/cost entries) |
+| `group` | K8s group from auth | Parsed, not currently used for billing |
+| `subscription` | MaaSSubscription CR name | Tenant attribution fallback (namespace parsing) |
+| `organization_id` | Proposed addition ([PR #386](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386)) | Tenant attribution (`tenant_id`) |
+| `cost_center` | Proposed addition ([PR #386](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386)) | Project attribution (`project_id`) |
+
+**Note:** `subject` is the username (not `tenant_id` like VMaaS/CaaS
+events). Tenant is resolved from `organization_id` (preferred) or
+`subscription` namespace (fallback).
 
 ---
 
@@ -225,10 +261,11 @@ struct tag, not `has_access` (snake_case).
 |-------|----------|----------|
 | Event type | `osac.model.lifecycle` | `inference.tokens.used` |
 | Subject | `tenant_id` | `username` |
-| Token fields | `tokens_in`, `tokens_out` | `prompt_tokens`, `completion_tokens`, `cached_input_tokens`, `cache_creation_tokens`, `reasoning_tokens` |
-| Identity | `tenant_id` only | `user`, `group`, `subscription` |
+| Token fields | `tokens_in`, `tokens_out` | `prompt_tokens`, `completion_tokens` + detail fields |
+| Identity | `tenant_id` only | `user`, `group`, `subscription`, `organization_id` |
 | Duration | `duration_seconds` | `duration_ms` |
 | Model | `model_name` | `model` |
 
-These differences need to be reconciled when integrating with the real
-IPP plugin. Our handler should accept both formats during transition.
+**Status:** Handler accepts both formats — IPP fields take precedence
+when present, mock fields used as fallback. Both produce the same 3
+meters (`maas_tokens_in`, `maas_tokens_out`, `maas_requests`).

@@ -735,13 +735,11 @@ func TestIngestIPPAuthoritativeFormat(t *testing.T) {
 	}
 	rows.Close()
 
-	// prompt_tokens → maas_tokens_in, completion_tokens → maas_tokens_out,
-	// cached_input_tokens → maas_tokens_cached, reasoning_tokens → maas_tokens_reasoning
+	// prompt_tokens → maas_tokens_in, completion_tokens → maas_tokens_out.
+	// cached/reasoning tokens are subsets of in/out — not metered separately.
 	expectedMeters := map[string]float64{
-		"maas_tokens_in":        1500,
-		"maas_tokens_out":       800,
-		"maas_tokens_cached":    200,
-		"maas_tokens_reasoning": 150,
+		"maas_tokens_in":  1500,
+		"maas_tokens_out": 800,
 	}
 
 	for meter, expectedValue := range expectedMeters {
@@ -1455,5 +1453,51 @@ func TestReconcileNotConfigured(t *testing.T) {
 
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected 503 (no reconciler), got %d", resp.StatusCode)
+	}
+}
+
+func TestMaaSUserIDPropagation(t *testing.T) {
+	eventID := fmt.Sprintf("test-maas-user-%d", time.Now().UnixNano())
+	modelID := fmt.Sprintf("model-user-%d", time.Now().UnixNano())
+	event := map[string]interface{}{
+		"specversion": "1.0",
+		"type":        "osac.model.lifecycle",
+		"source":      "test",
+		"id":          eventID,
+		"time":        time.Now().UTC().Format(time.RFC3339),
+		"subject":     "test-tenant",
+		"data": map[string]interface{}{
+			"tenant_id":        "tenant-user-test",
+			"model_id":         modelID,
+			"model_name":       "llama-3-8b",
+			"state":            "MODEL_STATE_RUNNING",
+			"user":             "alice@example.com",
+			"tokens_in":        100,
+			"tokens_out":       50,
+			"requests":         1,
+			"duration_seconds":  30,
+		},
+	}
+
+	body, _ := json.Marshal(event)
+	resp, err := http.Post(testServer.URL+"/api/v1/events", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("event request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+
+	ctx := context.Background()
+	var userID string
+	err = testStore.Pool().QueryRow(ctx,
+		"SELECT user_id FROM metering_entries WHERE resource_id = $1 LIMIT 1", modelID).Scan(&userID)
+	if err != nil {
+		t.Fatalf("query metering_entries failed: %v", err)
+	}
+	if userID != "alice@example.com" {
+		t.Errorf("user_id on metering_entries: got %q, want alice@example.com", userID)
 	}
 }
