@@ -735,13 +735,11 @@ func TestIngestIPPAuthoritativeFormat(t *testing.T) {
 	}
 	rows.Close()
 
-	// prompt_tokens → maas_tokens_in, completion_tokens → maas_tokens_out,
-	// cached_input_tokens → maas_tokens_cached, reasoning_tokens → maas_tokens_reasoning
+	// prompt_tokens → maas_tokens_in, completion_tokens → maas_tokens_out.
+	// cached/reasoning tokens are subsets of in/out — not metered separately.
 	expectedMeters := map[string]float64{
-		"maas_tokens_in":        1500,
-		"maas_tokens_out":       800,
-		"maas_tokens_cached":    200,
-		"maas_tokens_reasoning": 150,
+		"maas_tokens_in":  1500,
+		"maas_tokens_out": 800,
 	}
 
 	for meter, expectedValue := range expectedMeters {

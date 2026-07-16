@@ -405,36 +405,6 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 		})
 	}
 
-	if usage.CachedInputTokens > 0 {
-		entries = append(entries, inventory.MeteringEntry{
-			ResourceType: "model",
-			ResourceID:   usage.ModelID,
-			TenantID:     usage.TenantID,
-			ProjectID:    projectID,
-			UserID:       usage.UserID,
-			MeterName:    "maas_tokens_cached",
-			Value:        float64(usage.CachedInputTokens),
-			Unit:         "tokens",
-			PeriodStart:  periodStart,
-			PeriodEnd:    periodEnd,
-		})
-	}
-
-	if usage.ReasoningTokens > 0 {
-		entries = append(entries, inventory.MeteringEntry{
-			ResourceType: "model",
-			ResourceID:   usage.ModelID,
-			TenantID:     usage.TenantID,
-			ProjectID:    projectID,
-			UserID:       usage.UserID,
-			MeterName:    "maas_tokens_reasoning",
-			Value:        float64(usage.ReasoningTokens),
-			Unit:         "tokens",
-			PeriodStart:  periodStart,
-			PeriodEnd:    periodEnd,
-		})
-	}
-
 	if usage.Requests > 0 {
 		entries = append(entries, inventory.MeteringEntry{
 			ResourceType: "model",

@@ -198,16 +198,16 @@ func TestMaaSMeters_AllDimensions(t *testing.T) {
 	}
 	entries := maasMeters(usage, "default", t0, t1)
 
-	if len(entries) != 5 {
-		t.Fatalf("expected 5 entries, got %d", len(entries))
+	// Only tokens_in, tokens_out, and requests are metered.
+	// cached/reasoning are subsets of in/out — not separate billing meters.
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 
 	expected := map[string]float64{
-		"maas_tokens_in":        1000,
-		"maas_tokens_out":       500,
-		"maas_tokens_cached":    200,
-		"maas_tokens_reasoning": 100,
-		"maas_requests":         1,
+		"maas_tokens_in":  1000,
+		"maas_tokens_out": 500,
+		"maas_requests":   1,
 	}
 	for _, e := range entries {
 		want, ok := expected[e.MeterName]

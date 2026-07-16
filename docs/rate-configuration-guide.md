@@ -84,17 +84,21 @@ pays $0.50/hr.
 ## MaaS Rates
 
 MaaS (token metering) rates don't use `instance_type` — they key on
-`meter_name` only:
+`meter_name` only. Three meters are billed:
 
 ```sql
 INSERT INTO rates (resource_type, meter_name, cost_type, price_per_unit, currency, description)
 VALUES
-  ('model', 'maas_tokens_in',        'Supplementary', 0.50 / 1000000, 'USD', 'Prompt tokens'),
-  ('model', 'maas_tokens_out',       'Supplementary', 1.50 / 1000000, 'USD', 'Completion tokens'),
-  ('model', 'maas_tokens_cached',    'Supplementary', 0.05 / 1000000, 'USD', 'Cached input tokens'),
-  ('model', 'maas_tokens_reasoning', 'Supplementary', 2.00 / 1000000, 'USD', 'Reasoning tokens'),
-  ('model', 'maas_requests',         'Supplementary', 5.00 / 1000000, 'USD', 'API requests');
+  ('model', 'maas_tokens_in',  'Supplementary', 0.50 / 1000000, 'USD', 'Prompt/input tokens (includes cached)'),
+  ('model', 'maas_tokens_out', 'Supplementary', 1.50 / 1000000, 'USD', 'Completion/output tokens (includes reasoning)'),
+  ('model', 'maas_requests',   'Supplementary', 5.00 / 1000000, 'USD', 'API requests');
 ```
+
+**Why only three meters:** `cached_input_tokens` and `reasoning_tokens`
+from the OpenAI-compatible API are *subsets* of `prompt_tokens` and
+`completion_tokens` respectively — not additive. Metering them
+separately would double-count. We parse them from CloudEvents for
+observability but don't create separate cost entries.
 
 ## Catalog Fallback
 
