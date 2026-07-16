@@ -216,6 +216,40 @@ func TestMaaSMeters_Units(t *testing.T) {
 	}
 }
 
+func TestMaaSMeters_UserIDPropagation(t *testing.T) {
+	usage := MaaSUsage{
+		ModelID:  "model-user",
+		TenantID: "tenant-u",
+		UserID:   "alice@example.com",
+		TokensIn: 100,
+		Requests: 1,
+	}
+	entries := maasMeters(usage, "proj-1", t0, t1)
+	for _, e := range entries {
+		if e.UserID != "alice@example.com" {
+			t.Errorf("%s: user_id got %q, want alice@example.com", e.MeterName, e.UserID)
+		}
+		if e.ProjectID != "proj-1" {
+			t.Errorf("%s: project_id got %q, want proj-1", e.MeterName, e.ProjectID)
+		}
+	}
+}
+
+func TestMaaSMeters_EmptyUserID(t *testing.T) {
+	usage := MaaSUsage{
+		ModelID:  "model-no-user",
+		TenantID: "tenant-v",
+		TokensIn: 50,
+	}
+	entries := maasMeters(usage, "default", t0, t1)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if entries[0].UserID != "" {
+		t.Errorf("expected empty user_id for non-MaaS, got %q", entries[0].UserID)
+	}
+}
+
 func TestComputeInstanceMeters_PeriodPropagation(t *testing.T) {
 	inst := inventory.ComputeInstanceRecord{InstanceID: "vm", Tenant: "t", Cores: 1, MemoryGiB: 1}
 	entries := computeInstanceMeters(inst, "default", 60.0, t0, t1)

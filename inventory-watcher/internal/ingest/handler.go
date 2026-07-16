@@ -395,6 +395,7 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 		ModelID:             data.ModelID,
 		ModelName:           data.ModelName,
 		TenantID:            data.TenantID,
+		UserID:              data.User,
 		State:               data.State,
 		TokensIn:            data.TokensIn,
 		TokensOut:           data.TokensOut,
@@ -790,10 +791,10 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 	if format == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=breakdown.csv")
-		fmt.Fprintln(w, "date,tenant_id,project_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
+		fmt.Fprintln(w, "date,tenant_id,project_id,user_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
 		for _, row := range rows {
-			fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%.6f,%.10f,%s,%s\n",
-				row.Date, CsvSafe(row.TenantID), CsvSafe(row.ProjectID),
+			fmt.Fprintf(w, "%s,%s,%s,%s,%s,%s,%s,%.6f,%.10f,%s,%s\n",
+				row.Date, CsvSafe(row.TenantID), CsvSafe(row.ProjectID), CsvSafe(row.UserID),
 				CsvSafe(row.ResourceType), CsvSafe(row.ResourceID),
 				CsvSafe(row.MeterName), row.MeteredValue, row.CostAmount,
 				CsvSafe(row.CostType), CsvSafe(row.Currency))

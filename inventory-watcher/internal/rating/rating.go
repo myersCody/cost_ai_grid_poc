@@ -85,6 +85,7 @@ func (r *Rater) sweep(ctx context.Context) {
 			RateID:          rate.ID,
 			TenantID:        me.TenantID,
 			ProjectID:       me.ProjectID,
+			UserID:          me.UserID,
 			ResourceType:    me.ResourceType,
 			ResourceID:      me.ResourceID,
 			MeterName:       me.MeterName,

@@ -13,7 +13,7 @@
 | GET | `/readyz` | Kubernetes readiness probe (pings DB) | `handleReadiness` | `TestReadinessProbe` |
 | POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS, IPP, custom) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestVMHeartbeat`, `TestIngestClusterHeartbeat`, `TestIngestIPPAuthoritativeFormat`, `TestIngestVMaaSAuthoritativeFormat`, `TestIngestCaaSAuthoritativeFormat`, `TestIngestCustomMetricEvent` |
 | GET | `/api/v1/quotas/{tenant_id}` | Quota status with alerts | `handleQuotaStatus` | `TestQuotaStatus`, `TestQuotaStatusMissingTenant`, `TestQuotaStatusWithConsumption` |
-| GET | `/api/v1/reports/costs` | Cost report (JSON/CSV, group by tenant/type/meter/resource) | `handleCostReport` | — |
+| GET | `/api/v1/reports/costs` | Cost report (JSON/CSV, group by tenant/type/meter/resource/project/user) | `handleCostReport` | — |
 | GET | `/api/v1/reports/summary` | Pipeline health counts | `handlePipelineSummary` | — |
 | GET | `/api/v1/customers/{id}/entitlements/{key}/value` | Balance check (IPP compatible) | `handleBalanceCheck` | `TestBalanceCheckResponseFormat` |
 | GET | `/api/v1/debug/config` | Diagnostic config (secrets masked) | `handleDebugConfig` | — |

@@ -319,6 +319,7 @@ type MaaSUsage struct {
 	ModelID             string
 	ModelName           string
 	TenantID            string
+	UserID              string
 	State               string
 	TokensIn            int64
 	TokensOut           int64
@@ -364,6 +365,7 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
 			ProjectID:    projectID,
+			UserID:       usage.UserID,
 			MeterName:    "maas_tokens_in",
 			Value:        float64(usage.TokensIn),
 			Unit:         "tokens",
@@ -378,6 +380,7 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
 			ProjectID:    projectID,
+			UserID:       usage.UserID,
 			MeterName:    "maas_tokens_out",
 			Value:        float64(usage.TokensOut),
 			Unit:         "tokens",
@@ -392,6 +395,7 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
 			ProjectID:    projectID,
+			UserID:       usage.UserID,
 			MeterName:    "maas_tokens_cached",
 			Value:        float64(usage.CachedInputTokens),
 			Unit:         "tokens",
@@ -406,6 +410,7 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
 			ProjectID:    projectID,
+			UserID:       usage.UserID,
 			MeterName:    "maas_tokens_reasoning",
 			Value:        float64(usage.ReasoningTokens),
 			Unit:         "tokens",
@@ -420,6 +425,7 @@ func maasMeters(usage MaaSUsage, projectID string, periodStart, periodEnd time.T
 			ResourceID:   usage.ModelID,
 			TenantID:     usage.TenantID,
 			ProjectID:    projectID,
+			UserID:       usage.UserID,
 			MeterName:    "maas_requests",
 			Value:        float64(usage.Requests),
 			Unit:         "requests",
