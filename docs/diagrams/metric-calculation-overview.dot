@@ -1,0 +1,103 @@
+// Metric Calculation Overview
+// Simplified view of the metering → rating → cost pipeline
+// for the metric-calculation-reference.md doc.
+
+digraph metric_calc {
+    graph [
+        rankdir=LR
+        fontname="Helvetica"
+        fontsize=14
+        label="Metric Calculation Pipeline"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+        nodesep=0.6
+        ranksep=1.0
+    ]
+    node [fontname="Helvetica" fontsize=10]
+    edge [fontname="Helvetica" fontsize=9 color="#555555"]
+
+    // ── Sources ──
+    subgraph cluster_sources {
+        label="Sources"
+        style=filled
+        fillcolor="#E8F5E9"
+        color="#2E7D32"
+        fontcolor="#2E7D32"
+        fontsize=11
+
+        capacity [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#A5D6A7">
+                <TR><TD BGCOLOR="#2E7D32"><FONT COLOR="white"><B>Inventory (capacity)</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">compute_instance (VMs)</TD></TR>
+                <TR><TD ALIGN="LEFT">cluster (node sets)</TD></TR>
+                <TR><TD ALIGN="LEFT">bare_metal</TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        catalog [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#C8E6C9">
+                <TR><TD BGCOLOR="#43A047"><FONT COLOR="white"><B>Instance Type Catalog</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">cores, memory_gib</TD></TR>
+                <TR><TD ALIGN="LEFT"><I>fallback when VM has 0</I></TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        maas [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#F3E5F5">
+                <TR><TD BGCOLOR="#7B1FA2"><FONT COLOR="white"><B>MaaS Events (consumption)</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">POST /api/v1/events</TD></TR>
+                <TR><TD ALIGN="LEFT">tokens_in, tokens_out</TD></TR>
+            </TABLE>
+        > shape=plain]
+    }
+
+    // ── Metering ──
+    metering [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF3E0">
+            <TR><TD BGCOLOR="#E65100"><FONT COLOR="white"><B>Metering (60s sweep / event-driven)</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT">vm_uptime_seconds = duration</TD></TR>
+            <TR><TD ALIGN="LEFT">vm_cpu_core_seconds = cores × duration</TD></TR>
+            <TR><TD ALIGN="LEFT">vm_memory_gib_seconds = mem × duration</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_uptime_seconds = duration</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_worker_node_seconds = Σ(size × dur)</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_worker_node_count = Σ(size)</TD></TR>
+            <TR><TD ALIGN="LEFT">bm_uptime_seconds = duration</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_in = prompt_tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_out = completion_tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_requests = 1 per event</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Rating ──
+    rating [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF9C4">
+            <TR><TD BGCOLOR="#F57F17"><FONT COLOR="white"><B>Rating (30s sweep)</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT"><B>Rate lookup (first match wins):</B></TD></TR>
+            <TR><TD ALIGN="LEFT">1. tenant + instance_type</TD></TR>
+            <TR><TD ALIGN="LEFT">2. instance_type only</TD></TR>
+            <TR><TD ALIGN="LEFT">3. tenant only</TD></TR>
+            <TR><TD ALIGN="LEFT">4. global default</TD></TR>
+            <TR><TD ALIGN="LEFT"> </TD></TR>
+            <TR><TD ALIGN="LEFT"><B>Apply:</B> flat (value × price)</TD></TR>
+            <TR><TD ALIGN="LEFT"><B>  or:</B> tiered (walk bands)</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Output ──
+    cost [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFCDD2">
+            <TR><TD BGCOLOR="#C62828"><FONT COLOR="white"><B>cost_entries</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT">cost_amount = value × rate</TD></TR>
+            <TR><TD ALIGN="LEFT">cost_type: Infrastructure</TD></TR>
+            <TR><TD ALIGN="LEFT">   or: Supplementary</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Edges ──
+    capacity -> metering [label="billable\nresources" color="#2E7D32" fontcolor="#2E7D32"]
+    catalog -> metering [label="cores/mem\nfallback" color="#43A047" fontcolor="#43A047" style=dashed]
+    maas -> metering [label="CloudEvent\n(per request)" color="#7B1FA2" fontcolor="#7B1FA2"]
+    metering -> rating [label="unrated entries" color="#E65100" fontcolor="#E65100"]
+    rating -> cost [label="cost = value × rate" color="#C62828" fontcolor="#C62828"]
+}

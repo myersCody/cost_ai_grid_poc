@@ -13,20 +13,9 @@ how to configure pricing models, per-SKU rates, and tenant overrides.
 
 ## Pipeline Overview
 
-```
-Inventory tables              metering_entries          rates            cost_entries
-┌─────────────────┐   60s   ┌──────────────────┐  30s  ┌──────┐  30s  ┌────────────┐
-│ compute_instance │──sweep─►│ vm_uptime_seconds│─sweep─│lookup│─────►│ cost_amount │
-│ cluster          │        │ vm_cpu_core_secs  │       │match │      │ = value     │
-│ bare_metal       │        │ cluster_uptime_s  │       │apply │      │   × rate    │
-└─────────────────┘        │ bm_uptime_seconds │       └──────┘      └────────────┘
-                            └──────────────────┘
-HTTP ingest (MaaS)           event-driven
-┌─────────────────┐        ┌──────────────────┐
-│ POST /api/v1/   │───────►│ maas_tokens_in   │──── same rating sweep ────►
-│   events        │        │ maas_tokens_out   │
-└─────────────────┘        └──────────────────┘
-```
+![Metric Calculation Pipeline](diagrams/metric-calculation-overview.svg)
+
+*Source: [`docs/diagrams/metric-calculation-overview.dot`](diagrams/metric-calculation-overview.dot)*
 
 ## Capacity-Based Meters (60s sweep)
 
