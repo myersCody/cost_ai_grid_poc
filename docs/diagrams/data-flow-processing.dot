@@ -75,7 +75,7 @@ digraph data_flow_processing {
                 <TR><TD ALIGN="LEFT">tenant override → global fallback</TD></TR>
                 <TR><TD ALIGN="LEFT">flat price_per_unit or tiered (JSONB)</TD></TR>
                 <TR><TD ALIGN="LEFT">cost_type: Infrastructure / Supplementary</TD></TR>
-                <TR><TD ALIGN="LEFT">koku_metric: external system mapping</TD></TR>
+                <TR><TD ALIGN="LEFT">koku_metric: mapping for Koku sync</TD></TR>
             </TABLE>
         > shape=plain]
     }

@@ -141,7 +141,7 @@
 <text xml:space="preserve" text-anchor="start" x="858.62" y="-1246" font-family="Helvetica,sans-Serif" font-size="10.00">tenant override → global fallback</text>
 <text xml:space="preserve" text-anchor="start" x="858.62" y="-1226.75" font-family="Helvetica,sans-Serif" font-size="10.00">flat price_per_unit or tiered (JSONB)</text>
 <text xml:space="preserve" text-anchor="start" x="858.62" y="-1207.5" font-family="Helvetica,sans-Serif" font-size="10.00">cost_type: Infrastructure / Supplementary</text>
-<text xml:space="preserve" text-anchor="start" x="858.62" y="-1188.25" font-family="Helvetica,sans-Serif" font-size="10.00">koku_metric: external system mapping</text>
+<text xml:space="preserve" text-anchor="start" x="858.62" y="-1188.25" font-family="Helvetica,sans-Serif" font-size="10.00">koku_metric: mapping for Koku sync</text>
 <polygon fill="none" stroke="black" points="853.62,-1180.25 853.62,-1300.75 1044.38,-1300.75 1044.38,-1180.25 853.62,-1180.25"/>
 </g>
 <!-- rating -->
