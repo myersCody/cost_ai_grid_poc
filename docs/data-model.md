@@ -52,14 +52,6 @@ sweep picks up unrated entries, applies pricing rules, and writes cost
 entries. Downstream: report API queries cost_entries directly; koku-sync
 aggregates daily costs for Koku.
 
-## Data Flow: Full Pipeline
-
-![Full Pipeline](diagrams/data-flow.svg)
-
-*Source: [`docs/diagrams/data-flow.dot`](diagrams/data-flow.dot)*
-
-Combined view of all event sources, goroutines, tables, and outputs.
-
 ## ERD: Inventory & Events
 
 ![Inventory & Events ERD](diagrams/erd-inventory.svg)

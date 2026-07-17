@@ -60,6 +60,14 @@ digraph data_flow_processing {
             </TABLE>
         > shape=plain]
 
+        quotas [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#B2EBF2">
+                <TR><TD BGCOLOR="#00838F"><FONT COLOR="white"><B>quotas</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">tenant_id + meter_name → limit</TD></TR>
+                <TR><TD ALIGN="LEFT">period: monthly / daily</TD></TR>
+            </TABLE>
+        > shape=plain]
+
         rates [label=<
             <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E1BEE7">
                 <TR><TD BGCOLOR="#7B1FA2"><FONT COLOR="white"><B>rates</B></FONT></TD></TR>
@@ -148,6 +156,7 @@ digraph data_flow_processing {
         fontsize=11
 
         report_api [label="Report API\nGET /api/v1/reports/costs\nGROUP BY tenant/type/meter" shape=box style="filled,rounded" fillcolor="#E3F2FD" color="#1565C0"]
+        balance_api [label="Balance Check API\nGET /customers/{id}/entitlements/.../value\nSUM(usage) vs quota limit → hasAccess" shape=box style="filled,rounded" fillcolor="#B2EBF2" color="#00838F"]
         kokusync [label="koku-sync (2m)\nSELECT daily costs\n→ Koku OSAC table" shape=box style="filled,rounded,dashed" fillcolor="#F3E5F5" color="#7B1FA2"]
     }
 
@@ -174,4 +183,8 @@ digraph data_flow_processing {
     // Consumers
     cost_entries -> report_api [label="query" color="#1565C0" fontcolor="#1565C0"]
     cost_entries -> kokusync [label="daily aggregate\n(excl. MaaS)" color="#7B1FA2" fontcolor="#7B1FA2"]
+
+    // Balance check flow
+    metering_entries -> balance_api [label="SUM(value)\nfor tenant+meter" color="#00838F" fontcolor="#00838F"]
+    quotas -> balance_api [label="limit_value" color="#00838F" fontcolor="#00838F"]
 }
