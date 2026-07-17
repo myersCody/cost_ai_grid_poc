@@ -144,8 +144,8 @@ func TestClusterMeters_WithNodeSets(t *testing.T) {
 	}
 	entries := clusterMeters(cl, "default", 60.0, t0, t1)
 
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries (uptime + worker_node), got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries (uptime + worker_node_seconds + worker_node_count), got %d", len(entries))
 	}
 
 	if entries[0].MeterName != "cluster_uptime_seconds" || entries[0].Value != 60.0 {
@@ -154,7 +154,12 @@ func TestClusterMeters_WithNodeSets(t *testing.T) {
 
 	// 3 workers + 2 infra = 5 nodes × 60s = 300 node_seconds
 	if entries[1].MeterName != "cluster_worker_node_seconds" || entries[1].Value != 300.0 {
-		t.Errorf("worker_node entry: got value %v, want 300.0", entries[1].Value)
+		t.Errorf("worker_node_seconds entry: got value %v, want 300.0", entries[1].Value)
+	}
+
+	// 3 workers + 2 infra = 5 nodes (snapshot)
+	if entries[2].MeterName != "cluster_worker_node_count" || entries[2].Value != 5.0 {
+		t.Errorf("worker_node_count entry: got value %v, want 5.0", entries[2].Value)
 	}
 }
 
