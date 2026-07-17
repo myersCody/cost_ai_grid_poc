@@ -1,0 +1,177 @@
+// Data Flow: Metering & Rating Pipeline
+// Shows the two processing sweeps and how they transform data
+// from inventory/metering tables into cost entries.
+//
+// Source: internal/metering/metering.go, internal/rating/rating.go
+
+digraph data_flow_processing {
+    graph [
+        rankdir=TB
+        fontname="Helvetica"
+        fontsize=14
+        label="Processing Pipeline — Metering & Rating Sweeps"
+        labelloc=t
+        bgcolor=white
+        pad=0.5
+        nodesep=0.7
+        ranksep=0.9
+        compound=true
+    ]
+    node [fontname="Helvetica" fontsize=10]
+    edge [fontname="Helvetica" fontsize=9 color="#555555"]
+
+    // ── Source Tables ──
+    subgraph cluster_source {
+        label="Source Tables (read by sweeps)"
+        style=filled
+        fillcolor="#E8F5E9"
+        color="#2E7D32"
+        fontcolor="#2E7D32"
+        fontsize=11
+
+        inv_ci [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#A5D6A7">
+                <TR><TD BGCOLOR="#2E7D32"><FONT COLOR="white"><B>inventory_compute_instance</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">state = RUNNING</TD></TR>
+                <TR><TD ALIGN="LEFT">last_metered_at → period_start</TD></TR>
+                <TR><TD ALIGN="LEFT">cores, memory_gib (or via instance_type)</TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        inv_cl [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#A5D6A7">
+                <TR><TD BGCOLOR="#2E7D32"><FONT COLOR="white"><B>inventory_cluster</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">state = READY / PROGRESSING</TD></TR>
+                <TR><TD ALIGN="LEFT">node_sets JSONB → worker node count</TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        inv_bm [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#A5D6A7">
+                <TR><TD BGCOLOR="#2E7D32"><FONT COLOR="white"><B>inventory_bare_metal</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">state = RUNNING</TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        inv_it [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#A5D6A7">
+                <TR><TD BGCOLOR="#2E7D32"><FONT COLOR="white"><B>inventory_instance_type</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">cores, memory_gib (enrichment)</TD></TR>
+            </TABLE>
+        > shape=plain]
+
+        rates [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#E1BEE7">
+                <TR><TD BGCOLOR="#7B1FA2"><FONT COLOR="white"><B>rates</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">resource_type + meter_name → rate</TD></TR>
+                <TR><TD ALIGN="LEFT">tenant override → global fallback</TD></TR>
+                <TR><TD ALIGN="LEFT">flat price_per_unit or tiered (JSONB)</TD></TR>
+                <TR><TD ALIGN="LEFT">cost_type: Infrastructure / Supplementary</TD></TR>
+                <TR><TD ALIGN="LEFT">koku_metric: mapping for Koku sync</TD></TR>
+            </TABLE>
+        > shape=plain]
+    }
+
+    // ── Metering Sweep ──
+    metering [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6" BGCOLOR="#FFCC80">
+            <TR><TD BGCOLOR="#E65100"><FONT COLOR="white"><B>metering sweep (60s)</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT">1. Query billable resources (state filter)</TD></TR>
+            <TR><TD ALIGN="LEFT">2. Enrich cores/mem from instance_type catalog</TD></TR>
+            <TR><TD ALIGN="LEFT">3. Calculate duration since last_metered_at</TD></TR>
+            <TR><TD ALIGN="LEFT">4. Emit meter entries (value = quantity × duration)</TD></TR>
+            <TR><TD ALIGN="LEFT">5. Update last_metered_at</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Metering Entries (intermediate) ──
+    metering_entries [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFF9C4">
+            <TR><TD COLSPAN="2" BGCOLOR="#F57F17"><FONT COLOR="white"><B>metering_entries</B></FONT></TD></TR>
+            <TR><TD COLSPAN="2" BGCOLOR="#FFFDE7"><I>Capacity-based (from sweep):</I></TD></TR>
+            <TR><TD ALIGN="LEFT">vm_uptime_seconds</TD><TD>duration</TD></TR>
+            <TR><TD ALIGN="LEFT">vm_cpu_core_seconds</TD><TD>cores × duration</TD></TR>
+            <TR><TD ALIGN="LEFT">vm_memory_gib_seconds</TD><TD>memory × duration</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_uptime_seconds</TD><TD>duration</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_worker_node_seconds</TD><TD>Σ(size × duration)</TD></TR>
+            <TR><TD ALIGN="LEFT">cluster_worker_node_count</TD><TD>Σ(size) snapshot</TD></TR>
+            <TR><TD ALIGN="LEFT">bm_uptime_seconds</TD><TD>duration</TD></TR>
+            <TR><TD COLSPAN="2" BGCOLOR="#FFFDE7"><I>Consumption-based (from HTTP ingest):</I></TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_in</TD><TD>prompt tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_out</TD><TD>completion tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_cached</TD><TD>cached tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_tokens_reasoning</TD><TD>reasoning tokens</TD></TR>
+            <TR><TD ALIGN="LEFT">maas_requests</TD><TD>request count</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Rating Sweep ──
+    rating [label=<
+        <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6" BGCOLOR="#FFCDD2">
+            <TR><TD BGCOLOR="#C62828"><FONT COLOR="white"><B>rating sweep (30s)</B></FONT></TD></TR>
+            <TR><TD ALIGN="LEFT">1. Query unrated entries (rated_at IS NULL, batch 500)</TD></TR>
+            <TR><TD ALIGN="LEFT">2. FindRate: tenant-specific → global fallback</TD></TR>
+            <TR><TD ALIGN="LEFT">3. Apply rate: flat (value × price) or tiered</TD></TR>
+            <TR><TD ALIGN="LEFT">4. Write cost entry with cost_type from rate</TD></TR>
+            <TR><TD ALIGN="LEFT">5. Mark metering entry as rated (set rated_at)</TD></TR>
+        </TABLE>
+    > shape=plain]
+
+    // ── Target Tables ──
+    subgraph cluster_target {
+        label="Target Tables (written by sweeps)"
+        style=filled
+        fillcolor="#FFEBEE"
+        color="#C62828"
+        fontcolor="#C62828"
+        fontsize=11
+
+        cost_entries [label=<
+            <TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4" BGCOLOR="#FFCDD2">
+                <TR><TD BGCOLOR="#C62828"><FONT COLOR="white"><B>cost_entries</B></FONT></TD></TR>
+                <TR><TD ALIGN="LEFT">metering_entry_id → source</TD></TR>
+                <TR><TD ALIGN="LEFT">rate_id → pricing rule applied</TD></TR>
+                <TR><TD ALIGN="LEFT">cost_amount = metered_value × rate</TD></TR>
+                <TR><TD ALIGN="LEFT">currency (USD)</TD></TR>
+                <TR><TD ALIGN="LEFT">period_start / period_end</TD></TR>
+            </TABLE>
+        > shape=plain]
+    }
+
+    // ── Downstream consumers ──
+    subgraph cluster_consumers {
+        label="Consumers"
+        style=filled
+        fillcolor="#FAFAFA"
+        color="#BDBDBD"
+        fontcolor="#616161"
+        fontsize=11
+
+        report_api [label="Report API\nGET /api/v1/reports/costs\nGROUP BY tenant/type/meter" shape=box style="filled,rounded" fillcolor="#E3F2FD" color="#1565C0"]
+        kokusync [label="koku-sync (2m)\nSELECT daily costs\n→ Koku OSAC table" shape=box style="filled,rounded,dashed" fillcolor="#F3E5F5" color="#7B1FA2"]
+    }
+
+    // ══════════════════════════════════
+    // Edges
+    // ══════════════════════════════════
+
+    // Source → metering sweep
+    inv_ci -> metering [label="billable VMs" color="#E65100" fontcolor="#E65100"]
+    inv_cl -> metering [label="billable clusters" color="#E65100" fontcolor="#E65100"]
+    inv_bm -> metering [label="billable BM" color="#E65100" fontcolor="#E65100"]
+    inv_it -> metering [label="cores/mem\nenrichment" color="#E65100" fontcolor="#E65100" style=dashed]
+
+    // Metering sweep → metering_entries
+    metering -> metering_entries [label="INSERT batch" color="#E65100" fontcolor="#E65100"]
+
+    // Metering entries → rating sweep
+    metering_entries -> rating [label="unrated entries\n(rated_at IS NULL)" color="#C62828" fontcolor="#C62828"]
+    rates -> rating [label="FindRate()\ntenant → global" color="#7B1FA2" fontcolor="#7B1FA2"]
+
+    // Rating sweep → cost_entries
+    rating -> cost_entries [label="INSERT\ncost = value × rate" color="#C62828" fontcolor="#C62828"]
+
+    // Consumers
+    cost_entries -> report_api [label="query" color="#1565C0" fontcolor="#1565C0"]
+    cost_entries -> kokusync [label="daily aggregate\n(excl. MaaS)" color="#7B1FA2" fontcolor="#7B1FA2"]
+}

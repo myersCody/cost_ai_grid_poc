@@ -40,13 +40,25 @@ reconciler handle capacity-based OSAC resources; the HTTP ingest
 handles consumption-based MaaS events. The splunk forwarder tails
 `raw_events` for audit export.
 
-## Data Flow: Processing Pipeline
+## Data Flow: Metering & Rating
 
-![Processing Pipeline](diagrams/data-flow.svg)
+![Processing Pipeline](diagrams/data-flow-processing.svg)
+
+*Source: [`docs/diagrams/data-flow-processing.dot`](diagrams/data-flow-processing.dot)*
+
+The two processing sweeps. The metering sweep reads billable inventory
+and produces usage entries (value = quantity x duration). The rating
+sweep picks up unrated entries, applies pricing rules, and writes cost
+entries. Downstream: report API queries cost_entries directly; koku-sync
+aggregates daily costs for Koku.
+
+## Data Flow: Full Pipeline
+
+![Full Pipeline](diagrams/data-flow.svg)
 
 *Source: [`docs/diagrams/data-flow.dot`](diagrams/data-flow.dot)*
 
-Full pipeline from event sources through all goroutines to outputs.
+Combined view of all event sources, goroutines, tables, and outputs.
 
 ## ERD: Inventory & Events
 
