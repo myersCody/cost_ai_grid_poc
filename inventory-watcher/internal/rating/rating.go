@@ -260,13 +260,13 @@ func SeedDefaultRates(ctx context.Context, store *inventory.Store, logger *slog.
 		{ResourceType: "compute_instance", MeterName: "vm_cpu_core_seconds", KokuMetric: "cpu_core_request_per_hour", CostType: "Supplementary", PricePerUnit: 0.005 / 3600, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "compute_instance", MeterName: "vm_memory_gib_seconds", KokuMetric: "memory_gb_request_per_hour", CostType: "Supplementary", PricePerUnit: 0.002 / 3600, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "cluster", MeterName: "cluster_uptime_seconds", KokuMetric: "cluster_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.50 / 3600, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "cluster", MeterName: "cluster_worker_node_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.10 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "cluster", MeterName: "cluster_worker_node_seconds", KokuMetric: "node_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.10 / 3600, Currency: "USD", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_tokens_in", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.50 / 1_000_000, Currency: "USD", Description: "Prompt/input tokens", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_tokens_out", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 1.50 / 1_000_000, Currency: "USD", Description: "Completion/output tokens", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_tokens_cached", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 0.05 / 1_000_000, Currency: "USD", Description: "Cached input tokens (discounted)", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_tokens_reasoning", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 2.00 / 1_000_000, Currency: "USD", Description: "Reasoning/thinking tokens", EffectiveFrom: now},
 		{ResourceType: "model", MeterName: "maas_requests", KokuMetric: "", CostType: "Supplementary", PricePerUnit: 5.00 / 1_000_000, Currency: "USD", EffectiveFrom: now},
-		{ResourceType: "bare_metal", MeterName: "bm_uptime_seconds", KokuMetric: "node_cost_per_month", CostType: "Infrastructure", PricePerUnit: 0.05 / 3600, Currency: "USD", EffectiveFrom: now},
+		{ResourceType: "bare_metal", MeterName: "bm_uptime_seconds", KokuMetric: "node_cost_per_hour", CostType: "Infrastructure", PricePerUnit: 0.05 / 3600, Currency: "USD", EffectiveFrom: now},
 	}
 
 	for _, rate := range defaults {

@@ -69,6 +69,10 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 		return
 	}
 
+	// Build instance-type lookup for enriching cores/memory when OSAC
+	// doesn't carry them on the ComputeInstance directly.
+	itCache := m.buildInstanceTypeCache(ctx)
+
 	metered := 0
 	for _, inst := range instances {
 		periodStart := inst.CreatedAt
@@ -80,6 +84,8 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 		if durationSeconds <= 0 {
 			continue
 		}
+
+		m.enrichFromInstanceType(&inst, itCache)
 
 		projectID := m.resolveProject(ctx, inst.Project, inst.Tenant)
 		entries := computeInstanceMeters(inst, projectID, durationSeconds, periodStart, now)
@@ -101,6 +107,36 @@ func (m *Meter) meterComputeInstances(ctx context.Context, now time.Time) {
 
 	if metered > 0 {
 		m.logger.Info("metering sweep complete", "compute_instances", metered)
+	}
+}
+
+func (m *Meter) buildInstanceTypeCache(ctx context.Context) map[string]inventory.InstanceTypeRecord {
+	cache := make(map[string]inventory.InstanceTypeRecord)
+	types, err := m.store.ListAllInstanceTypes(ctx)
+	if err != nil {
+		m.logger.Warn("failed to load instance types for enrichment", "error", err)
+		return cache
+	}
+	for _, it := range types {
+		cache[it.InstanceTypeID] = it
+		if it.Name != "" {
+			cache[it.Name] = it
+		}
+	}
+	return cache
+}
+
+func (m *Meter) enrichFromInstanceType(inst *inventory.ComputeInstanceRecord, cache map[string]inventory.InstanceTypeRecord) {
+	if (inst.Cores > 0 && inst.MemoryGiB > 0) || inst.InstanceType == "" {
+		return
+	}
+	if it, ok := cache[inst.InstanceType]; ok {
+		if inst.Cores == 0 {
+			inst.Cores = it.Cores
+		}
+		if inst.MemoryGiB == 0 {
+			inst.MemoryGiB = it.MemoryGiB
+		}
 	}
 }
 
@@ -126,6 +162,19 @@ func (m *Meter) MeterComputeInstanceFinal(ctx context.Context, instanceID string
 	durationSeconds := deletedAt.Sub(periodStart).Seconds()
 	if durationSeconds <= 0 {
 		return
+	}
+
+	if inst.Cores == 0 || inst.MemoryGiB == 0 {
+		if inst.InstanceType != "" {
+			if it, err := m.store.GetInstanceType(ctx, inst.InstanceType); err == nil {
+				if inst.Cores == 0 {
+					inst.Cores = it.Cores
+				}
+				if inst.MemoryGiB == 0 {
+					inst.MemoryGiB = it.MemoryGiB
+				}
+			}
+		}
 	}
 
 	projectID := m.resolveProject(ctx, inst.Project, inst.Tenant)
