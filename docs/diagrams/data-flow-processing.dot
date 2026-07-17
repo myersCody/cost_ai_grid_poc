@@ -75,7 +75,7 @@ digraph data_flow_processing {
                 <TR><TD ALIGN="LEFT">tenant override → global fallback</TD></TR>
                 <TR><TD ALIGN="LEFT">flat price_per_unit or tiered (JSONB)</TD></TR>
                 <TR><TD ALIGN="LEFT">cost_type: Infrastructure / Supplementary</TD></TR>
-                <TR><TD ALIGN="LEFT">koku_metric: mapping for Koku sync</TD></TR>
+                <TR><TD ALIGN="LEFT">koku_metric: external system mapping</TD></TR>
             </TABLE>
         > shape=plain]
     }
@@ -157,7 +157,6 @@ digraph data_flow_processing {
 
         report_api [label="Report API\nGET /api/v1/reports/costs\nGROUP BY tenant/type/meter" shape=box style="filled,rounded" fillcolor="#E3F2FD" color="#1565C0"]
         balance_api [label="Balance Check API\nGET /customers/{id}/entitlements/.../value\nSUM(usage) vs quota limit → hasAccess" shape=box style="filled,rounded" fillcolor="#B2EBF2" color="#00838F"]
-        kokusync [label="koku-sync (2m)\nSELECT daily costs\n→ Koku OSAC table" shape=box style="filled,rounded,dashed" fillcolor="#F3E5F5" color="#7B1FA2"]
     }
 
     // ══════════════════════════════════
@@ -182,7 +181,6 @@ digraph data_flow_processing {
 
     // Consumers
     cost_entries -> report_api [label="query" color="#1565C0" fontcolor="#1565C0"]
-    cost_entries -> kokusync [label="daily aggregate\n(excl. MaaS)" color="#7B1FA2" fontcolor="#7B1FA2"]
 
     // Balance check flow
     metering_entries -> balance_api [label="SUM(value)\nfor tenant+meter" color="#00838F" fontcolor="#00838F"]

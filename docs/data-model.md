@@ -26,7 +26,6 @@ Optional goroutines are activated by env vars.
 | **ingest** | HTTP server | Accepts CloudEvents via `POST /api/v1/events`. Serves report API, balance check, debug dashboard. | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) |
 | **metering** | 60s | Sweeps billable VMs/clusters/BM, produces time-based metering entries (uptime, CPU, memory). | [`internal/metering/metering.go`](../inventory-watcher/internal/metering/metering.go) |
 | **rating** | 30s | Picks up unrated metering entries, applies rates (flat or tiered), writes cost entries. | [`internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go) |
-| **koku-sync** | 2m | Syncs daily cost entries to Koku's OSAC table, triggers Masu pipeline. Opt-in via `KOKU_DB_URL`. | [`internal/kokusync/sync.go`](../inventory-watcher/internal/kokusync/sync.go) |
 | **splunk** | 10s | Forwards raw events to Splunk HEC (cursor-based). Opt-in via `SPLUNK_HEC_URL`. | [`internal/splunk/splunk.go`](../inventory-watcher/internal/splunk/splunk.go) |
 
 ## Data Flow: Event Ingestion
@@ -49,8 +48,7 @@ handles consumption-based MaaS events. The splunk forwarder tails
 The two processing sweeps. The metering sweep reads billable inventory
 and produces usage entries (value = quantity x duration). The rating
 sweep picks up unrated entries, applies pricing rules, and writes cost
-entries. Downstream: report API queries cost_entries directly; koku-sync
-aggregates daily costs for Koku.
+entries. The balance check API compares metering usage against quotas.
 
 ## ERD: Inventory & Events
 
