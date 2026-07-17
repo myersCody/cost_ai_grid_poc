@@ -148,11 +148,3 @@ applied in [`rating.go`](../inventory-watcher/internal/rating/rating.go) → `ap
 Algorithm: iterate tiers, consume units at each tier's price until value
 exhausted. `up_to: null` means "everything above the previous tier."
 
-## Rebuilding the Diagrams
-
-```bash
-dot -Tsvg docs/diagrams/erd-inventory.dot -o docs/diagrams/erd-inventory.svg
-dot -Tsvg docs/diagrams/erd-metering-cost.dot -o docs/diagrams/erd-metering-cost.svg
-```
-
-Requires `graphviz` (`brew install graphviz`).

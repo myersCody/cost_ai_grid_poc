@@ -102,6 +102,16 @@ SKIP_METERING=1 bash snippets/test-inventory-watcher.sh
 bash snippets/test-inventory-watcher.sh
 ```
 
+## Diagrams
+
+All diagrams live as Graphviz `.dot` sources in `docs/diagrams/` with
+pre-rendered `.svg` files alongside them. After editing any `.dot` file,
+rebuild SVGs (requires `graphviz`: `brew install graphviz`):
+
+```bash
+for f in docs/diagrams/*.dot; do dot -Tsvg "$f" -o "${f%.dot}.svg"; done
+```
+
 ## Documentation Maintenance Rules
 
 **Doc tree convention:** requirements-related docs (gap analyses,
@@ -128,10 +138,8 @@ When modifying source code, keep the corresponding docs in sync:
 
 ### When modifying `internal/inventory/store.go` (schema changes):
 - Update [docs/data-model.md](docs/data-model.md) — table list, ERD
-  diagrams, meter definitions
-- Rebuild ERDs if tables added/removed:
-  `dot -Tsvg docs/diagrams/erd-inventory.dot -o docs/diagrams/erd-inventory.svg`
-  `dot -Tsvg docs/diagrams/erd-metering-cost.dot -o docs/diagrams/erd-metering-cost.svg`
+  diagrams, meter definitions, data flow diagrams
+- Rebuild diagrams (see Diagrams section above)
 - Update [docs/api-reference.md](docs/api-reference.md) if new endpoints
   depend on new tables
 - Update [docs/grpc-messages-catalog.md](docs/grpc-messages-catalog.md) if
