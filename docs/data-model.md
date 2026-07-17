@@ -13,16 +13,40 @@ into two groups:
 **Go models:** [`inventory-watcher/internal/inventory/models.go`](../inventory-watcher/internal/inventory/models.go)
 **Rating logic:** [`inventory-watcher/internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go)
 
-## Data Flow
+## Goroutines
 
-![Data Flow](diagrams/data-flow.svg)
+All goroutines are managed via `errgroup` + `safeGo` in
+[`cmd/consumer/main.go`](../inventory-watcher/cmd/consumer/main.go).
+Optional goroutines are activated by env vars.
+
+| Goroutine | Interval | Purpose | Source |
+|-----------|----------|---------|--------|
+| **watcher** | continuous | Consumes OSAC Watch stream (gRPC). Upserts inventory on VM/cluster/BM lifecycle events. | [`internal/watcher/watcher.go`](../inventory-watcher/internal/watcher/watcher.go) |
+| **reconciler** | 1h | Periodic List calls to OSAC to catch missed events (drift correction). | [`internal/reconciler/reconciler.go`](../inventory-watcher/internal/reconciler/reconciler.go) |
+| **ingest** | HTTP server | Accepts CloudEvents via `POST /api/v1/events`. Serves report API, balance check, debug dashboard. | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) |
+| **metering** | 60s | Sweeps billable VMs/clusters/BM, produces time-based metering entries (uptime, CPU, memory). | [`internal/metering/metering.go`](../inventory-watcher/internal/metering/metering.go) |
+| **rating** | 30s | Picks up unrated metering entries, applies rates (flat or tiered), writes cost entries. | [`internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go) |
+| **koku-sync** | 2m | Syncs daily cost entries to Koku's OSAC table, triggers Masu pipeline. Opt-in via `KOKU_DB_URL`. | [`internal/kokusync/sync.go`](../inventory-watcher/internal/kokusync/sync.go) |
+| **splunk** | 10s | Forwards raw events to Splunk HEC (cursor-based). Opt-in via `SPLUNK_HEC_URL`. | [`internal/splunk/splunk.go`](../inventory-watcher/internal/splunk/splunk.go) |
+
+## Data Flow: Event Ingestion
+
+![Event Ingestion](diagrams/data-flow-ingestion.svg)
+
+*Source: [`docs/diagrams/data-flow-ingestion.dot`](diagrams/data-flow-ingestion.dot)*
+
+How events enter the system and land in tables. The watcher and
+reconciler handle capacity-based OSAC resources; the HTTP ingest
+handles consumption-based MaaS events. The splunk forwarder tails
+`raw_events` for audit export.
+
+## Data Flow: Processing Pipeline
+
+![Processing Pipeline](diagrams/data-flow.svg)
 
 *Source: [`docs/diagrams/data-flow.dot`](diagrams/data-flow.dot)*
 
-Shows how events enter the system (OSAC Watch, IPP gateway, HTTP POST),
-flow through goroutines (watcher, reconciler, ingest, metering sweep,
-rating sweep), and land in tables. Optional goroutines (koku-sync,
-splunk forwarder) are activated by env vars.
+Full pipeline from event sources through all goroutines to outputs.
 
 ## ERD: Inventory & Events
 
