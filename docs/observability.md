@@ -129,7 +129,7 @@ spec:
     matchLabels:
       app: cost-event-consumer
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       interval: 15s
 ```

@@ -151,7 +151,7 @@ it just needs: resource_type, resource_id, tenant_id, and meter values.
 1. **Model inventory** — `inventory_model` table tracking model deployments
    with model_name, tenant, project, template, state.
 
-2. **MaaS metering pipeline** — consumption-based metering with 4 meters:
+2. **MaaS metering pipeline** — consumption-based metering with 3 meters:
    `maas_tokens_in`, `maas_tokens_out`, `maas_requests`. Event-driven (no periodic sweep needed).
 
 3. **Ingest endpoint** — HTTP POST `/api/v1/events` accepts MaaS CloudEvents
@@ -200,7 +200,7 @@ it just needs: resource_type, resource_id, tenant_id, and meter values.
 |---|---|---|---|
 | Model inventory tracking | Yes | **Done** | `inventory_model` table |
 | MaaS event ingestion | Yes | **Done (mock)** | Ingest endpoint + simulator; blocked on real OSAC events |
-| Token/request metering | Yes | **Done** | 4 meters, consumption-based |
+| Token/request metering | Yes | **Done** | 3 meters, consumption-based |
 | Rate engine | Yes | **Done** | Flat + tiered pricing, default rates seeded, 30s rating sweep |
 | Cost computation within 60s | Yes | **Met** | <1ms per event at 1700 events/s; rated within 30s |
 | MaaS CloudEvents schema | Yes | **Proposed only** | Not confirmed by OSAC |

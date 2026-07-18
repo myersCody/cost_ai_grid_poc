@@ -98,7 +98,7 @@ source snippets/env.sh && cd inventory-watcher && ./inventory-watcher
 ```
 
 **Point out in the logs:**
-- `seeded default rates count=8`
+- `seeded default rates count=9`
 - `seeded default quotas count=24`
 - `reconciled compute instances osac_count=N created=N`
 - `watch stream connected`

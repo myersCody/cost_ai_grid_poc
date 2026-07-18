@@ -1,5 +1,7 @@
 # Open Questions: Cost Management × OSAC — 2026-07-07
 
+> **Note:** This document is a snapshot from the 2026-07-07 meeting. For current status, see [implementation-status.md](implementation-status.md).
+
 > Topics for discussion with OSAC team. Walk through each topic, get
 > answers or alignment, note decisions.
 

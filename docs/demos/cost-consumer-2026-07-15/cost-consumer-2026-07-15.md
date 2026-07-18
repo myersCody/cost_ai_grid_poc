@@ -113,7 +113,7 @@ dashboard with MaaS traffic, per-tenant pricing, and CSV export.
 
 ---
 
-## What Was Implemented — 12 done / 5 partial / 1 TBD of 18 requirements
+## What Was Implemented — 12 done / 5 partial / 1 TBD of 18 requirements (as of 2026-07-15)
 
 | Area | Description |
 |---|---|

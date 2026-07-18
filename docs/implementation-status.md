@@ -216,7 +216,7 @@ resolution (see [OSAC open questions](requirements/osac-open-questions.md#bare-m
 | Sub-second latency | Done | Single SUM query with indexes |
 | OSAC can query quota status | Done | [`GET /api/v1/quotas/{tenant_id}`](api-reference.md#get-apiv1quotastenant_id) |
 | Threshold checks (50/70/90/100%) | Done | `thresholds` map in response |
-| Source of truth agreed | Partial | RHCM provides data; enforcement is OSAC's responsibility |
+| Source of truth agreed | Partial | RHCM provides data; enforcement is OSAC's responsibility (non-blocking for Done status — ownership agreed in principle) |
 
 ---
 
@@ -276,7 +276,9 @@ OSAC provides a CloudEvent spec for what they want to receive.
 
 ### REQ-4 — Token Metering (MaaS)
 **Status:** Done (mock)
-**Spec:** [poc_requirements_overview.md#req-4](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-4--token-metering-maas)
+**Spec:** [poc_requirements_overview.md#req-2a](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-2a-cloud-events-from-openshift-ai-maas--token-metering)
+
+> **Note:** REQ-4 is tracked as part of REQ-2a in the spec v1.4 and the main status table above. This detailed section is kept for reference.
 
 > **Note:** Previously deferred from PoC; now in-scope per v1.1 spec.
 

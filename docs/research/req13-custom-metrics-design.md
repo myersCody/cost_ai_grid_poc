@@ -1,5 +1,7 @@
 # REQ-13: Config-Driven Custom Metric Extraction
 
+> **Status:** Implemented and merged. The design below was built as described.
+
 ## Context
 
 **Jira:** [COST-3549](https://redhat.atlassian.net/browse/COST-3549) —

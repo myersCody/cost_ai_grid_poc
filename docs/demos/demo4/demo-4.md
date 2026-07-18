@@ -58,7 +58,7 @@ and tooling.
 | **Adversarial review** | v4 — 72 findings, 46 fixed, 0 critical/high open |
 | **Tooling** | Bruno collection + Grafana dashboard |
 
-**Score: 13 done / 4 partial / 1 TBD** (of 18 requirements)
+**Score: 13 done / 4 partial / 1 TBD** (of 18 requirements, as of 2026-07-07)
 
 <!--
 Narration: Since demo 3 we shipped custom metrics, full observability,

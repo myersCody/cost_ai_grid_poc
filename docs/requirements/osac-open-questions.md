@@ -97,6 +97,7 @@
     `tokens_in` and `tokens_out`. Should we match the 4-dimension model,
     or map prompt→in, completion→out and add cached+reasoning as separate
     meters? Pricing may differ per dimension (e.g., cached tokens cheaper).
+    > **Update (Jul 18, 2026):** Decision made — only `maas_tokens_in`, `maas_tokens_out`, and `maas_requests` are metered. `cached_input_tokens` and `reasoning_tokens` are subsets of input/output tokens (per OpenAI API spec); billing them separately would double-count. They are parsed from CloudEvents for observability but do not produce metering entries.
 
 ## Threshold Notifications (REQ-10)
 
@@ -251,3 +252,4 @@
     purely from instance type and doesn't break when CPU/memory fields
     disappear. Martin asked Moti for a pointer to the relevant PR/
     discussion to track this.
+    > **Update (Jul 18, 2026):** Catalog fallback implemented in the metering sweep (PR #59) — when `cores == 0`, specs resolved from InstanceType catalog. Per-SKU pricing via `instance_type` rate dimension also implemented. See [req3b gap analysis](req3b-instance-type-only-gap-analysis.md).

@@ -50,9 +50,9 @@ From `openshift_on_prem_cost_model.json`:
 | Concept | Koku (`cost_model_rate`) | Ours (`rates`) | Alignment needed? |
 |---|---|---|---|
 | Primary key | `uuid` | `id` BIGSERIAL | No — internal |
-| Metric name | `metric` VARCHAR | `meter_name` TEXT | Add `koku_metric` column for mapping |
+| Metric name | `metric` VARCHAR | `meter_name` TEXT | **Done** — `koku_metric` column added |
 | Metric type | `metric_type` VARCHAR | `resource_type` TEXT | Compatible |
-| Cost type | `cost_type` VARCHAR | — | **Add** `cost_type` TEXT |
+| Cost type | `cost_type` VARCHAR | `cost_type` TEXT | **Done** |
 | Rate value | `default_rate` NUMERIC | `price_per_unit` NUMERIC | Compatible |
 | Tiered pricing | `tiered_rates` JSONB (on cost_model) | `tiers` JSONB | Different format — see below |
 | Currency | on parent `cost_model` | `currency` TEXT | Compatible |
@@ -61,7 +61,7 @@ From `openshift_on_prem_cost_model.json`:
 | Effective dates | via `price_list` | `effective_from`/`to` | Compatible |
 | Markup | separate `markup` JSONB | — | **Add later** if needed |
 | Custom name | `custom_name` VARCHAR | — | Optional |
-| Description | `description` TEXT | — | Optional |
+| Description | `description` TEXT | `description` TEXT | **Done** |
 
 ## Tiered Pricing Format
 

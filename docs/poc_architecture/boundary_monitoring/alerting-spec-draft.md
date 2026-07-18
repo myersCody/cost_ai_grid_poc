@@ -148,6 +148,8 @@ Read-only, idempotent, sub-second. Not an alerting channel.
 GET /api/cost/v1/tenants/{tenant_id}/quota-status
 ```
 
+> **Current implementation:** `GET /api/v1/quotas/{tenant_id}` (see [api-reference.md](../../api-reference.md))
+
 Query params: `project_id`, `meter_name`, `limit_kind` (`quota` | `budget` | both).
 
 Single-quota shortcut for OPA: `GET .../tenants/{tenant_id}/quotas/{quota_id}/status` → one object or `404`.

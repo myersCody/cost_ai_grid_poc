@@ -271,7 +271,6 @@ Emitted periodically for each running VM (ComputeInstance).
 |---|---|---|
 | `maas_tokens_in` | `SUM(tokens_in)` | `tenant_id`, `model_name` |
 | `maas_tokens_out` | `SUM(tokens_out)` | `tenant_id`, `model_name` |
-| `maas_inference_tokens` | `SUM(inference_tokens)` | `tenant_id`, `model_name` |
 | `maas_requests` | `SUM(requests)` | `tenant_id`, `model_name` |
 
 ---

@@ -10,7 +10,7 @@ MaaS ingest endpoint → inventory_model → metering → rating → cost entrie
 Quota status API → SUM(metering) vs limits → threshold checks
 ```
 
-9 of 16 requirements done, 4 partial, 3 not started.
+15 of 18 requirements done, 2 partial, 1 TBD — see [implementation-status.md](implementation-status.md) for current tracking.
 
 ## Next Steps (PoC — by July 31)
 
@@ -130,7 +130,7 @@ for the full format comparison.
 
 **Effort:** Medium — new handler, query builder, CSV serializer.
 
-### 5. REQ-13 — Custom rate dimensions (HIGH)
+### 8. REQ-13 — Custom rate dimensions (HIGH)
 
 **Why:** New in v1.1 spec. Allow arbitrary CloudEvent fields to become meters.
 

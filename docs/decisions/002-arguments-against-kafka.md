@@ -19,7 +19,7 @@ unnecessary for production, given the current architecture.
 | **Missed events** | Replay from offset | Reconciler diffs against List endpoints |
 | **Ordering** | Per-partition ordering | Single stream, in-order |
 | **Restart recovery** | Resume from committed offset | `last_metered_at` tracks exactly where metering left off |
-| **Deduplication** | Consumer-side (still needed) | `raw_events` table with UNIQUE on `event_id` |
+| **Deduplication** | Consumer-side (still needed) | `raw_events` table with UNIQUE on `event_id` (Note: the unique index was later dropped for throughput — see [ADR-004](004-raw-events-no-unique-index.md)) |
 | **At-least-once delivery** | Built-in with offset management | Reconciler guarantees eventual consistency |
 
 The Watch stream + reconciler achieves the same delivery guarantees as Kafka

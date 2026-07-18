@@ -122,12 +122,11 @@ Source: [MaaS simulators and metering endpoints](../inputs/2026-06-30-maas-simul
 
 **Transport:** The IPP plugin fires HTTP POST to our
 `POST /api/v1/events` endpoint (fire-and-forget). Kafka transport
-discussed but not decided. The IPP also calls `POST /api/v1/check`
+discussed but not decided. The IPP also calls `GET /api/v1/customers/{id}/entitlements/{key}/value`
 synchronously on every request for balance checks (<500ms SLA).
 
-**Event structure:** Each event carries 4 token dimensions (prompt,
-completion, cached, reasoning) + request count + model + user identity.
-Produces up to 5 metering entries per event.
+**Event structure:** Each event carries 2 token dimensions (prompt, completion) + request count + model + user identity.
+Produces up to 3 metering entries per event.
 
 #### MaaS load scenarios
 
@@ -152,7 +151,7 @@ and above.
 - Transport is HTTP POST (no backpressure) — if we're slow, events queue
   at the sender or get dropped (fire-and-forget)
 
-#### Balance check load (POST /api/v1/check)
+#### Balance check load (GET /api/v1/customers/{id}/entitlements/{key}/value)
 
 The IPP calls this **on every inference request** before forwarding to
 the model. Must respond in <500ms. At 1,000 req/s, that's 1,000 balance
@@ -187,7 +186,7 @@ CloudEvent → HTTP handler → InsertRawEvent → Classify → Process → Inse
 
 | # | Bottleneck | Impact | Evidence |
 |---|---|---|---|
-| 1 | **Single-row INSERTs** | Each event = 1 raw_event + 2-5 metering_entries = 3-6 INSERTs. At 1,700 events/s = ~8,500 INSERTs/s. Approaching PostgreSQL single-connection limit. | `store.go:InsertMeteringEntry` — individual INSERT per call |
+| 1 | **Single-row INSERTs** | Each event = 1 raw_event + 2-3 metering_entries = 3-4 INSERTs. At 1,700 events/s = ~8,500 INSERTs/s. Approaching PostgreSQL single-connection limit. | `store.go:InsertMeteringEntry` — individual INSERT per call |
 | 2 | **No batching** | Events processed and committed one at a time. Batch INSERTs would reduce round trips 10-100x. | `handler.go:handleEvent` — synchronous per-event processing |
 | 3 | **Synchronous processing** | HTTP handler waits for all DB writes before responding. Decoupling would improve ingest throughput. | `handler.go:240-246` — sequential INSERT loop |
 | 4 | **Single goroutine sweeps** | Metering and rating sweeps run sequentially per resource type. | `metering.go:sweep` — serial sweep of compute, cluster, bare metal |
@@ -221,13 +220,13 @@ Ordered by effort and impact:
 
 ### MaaS-Specific Scaling Techniques
 
-The current per-event path does 6 sequential PostgreSQL round trips:
+The current per-event path does 4 sequential PostgreSQL round trips:
 
 ```
-1× InsertRawEvent + 5× InsertMeteringEntry = 6 INSERTs per inference event
+1× InsertRawEvent + 3× InsertMeteringEntry = 4 INSERTs per inference event
 ```
 
-At ~1ms per round trip = 6ms per event = ~166 events/s per DB connection.
+At ~1ms per round trip = 4ms per event = ~250 events/s per DB connection.
 pgxpool parallelizes across connections to reach 1,700, but the per-event
 overhead is the fundamental limit.
 
@@ -281,7 +280,7 @@ table.
 
 #### Technique 3: Balance Check Caching
 
-The `POST /api/v1/check` endpoint reads `quota + consumption` on every
+The `GET /api/v1/customers/{id}/entitlements/{key}/value` endpoint reads `quota + consumption` on every
 inference request. At 1,000 req/s, that's 1,000 DB reads/s concurrent
 with write load.
 
@@ -387,8 +386,8 @@ header + alignment). Indexes add ~50-100% overhead for write-heavy tables.
 | Table | Columns | Est. row size (data) | Est. row size (with indexes) |
 |---|---|---|---|
 | `raw_events` | 11 cols, JSONB data (~500B avg for MaaS, ~200B for capacity) | ~600-800B | ~1-1.5KB |
-| `metering_entries` | 10 cols, all scalar | ~150B | ~300B |
-| `cost_entries` | 12 cols, all scalar | ~180B | ~350B |
+| `metering_entries` | 14 cols, all scalar | ~150B | ~300B |
+| `cost_entries` | 14 cols, all scalar | ~180B | ~350B |
 
 ### Row counts per day
 
@@ -564,7 +563,7 @@ dependencies, no architectural changes.
 |---|---|---|---|
 | 1 | **10 VMs per cluster is "conservative"** | Many OSAC deployments may have 0 VMs (clusters only) or 100+ VMs. The 35K VM number could be off by 10x in either direction. | Capacity load estimate could be 10x too high or 10x too low |
 | 2 | **1,700 events/s benchmark is representative** | Measured on a laptop with Docker PostgreSQL. Production PG on SSD with tuned `shared_buffers` could do 3-5x better. Or worse, if PG is on shared storage (ODF/Ceph). | Headroom estimates could be significantly off |
-| 3 | **Each MaaS event produces exactly 5 metering entries** | Depends on which token dimensions are non-zero. Most requests produce 2-3 (prompt + completion + sometimes reasoning). Rarely all 5. | MaaS entries/s overestimated by ~2x |
+| 3 | **Each MaaS event produces up to 3 metering entries** | Depends on which token dimensions are non-zero. Most requests produce 2-3 (prompt + completion + sometimes reasoning). Rarely all 5. | MaaS entries/s overestimated by ~2x |
 | 4 | **Balance check hits DB every time** | The `MeteringSum` query may already be fast enough (<1ms with warm cache) that caching isn't needed until very high concurrency. | T3 may be premature optimization |
 | 5 | **Pre-aggregation loses only per-request granularity** | If billing disputes require per-request cost breakdown, pre-aggregation is unacceptable without the raw_events fallback. But raw_events at 1,000/s is its own scaling problem. | T2 may not be viable without T4 (raw_events handling) |
 | 6 | **Capacity events arrive as HTTP heartbeats** | With our current architecture, capacity metering comes from the local sweep — NOT from inbound events. The sweep bulk-inserts all metering entries at once every 60s. This is a fundamentally different load profile from 1,284 HTTP events/s. | Capacity throughput concern is overstated — the sweep handles 35K resources comfortably |

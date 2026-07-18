@@ -63,8 +63,8 @@ Every meter currently in `SeedDefaultRates` falls into one of two tier semantics
 | `bm_uptime_seconds` | `bare_metal` | seconds | **Cumulative** | Capacity reservation; bare metal is leased, not consumed per-request |
 | `maas_tokens_in` | `model` | tokens | **Per-Event** | Per-request pricing; matches cloud AI provider model (OpenAI, Anthropic) |
 | `maas_tokens_out` | `model` | tokens | **Per-Event** | Per-request pricing; same rationale as `maas_tokens_in` |
-| `maas_tokens_cached` | `model` | tokens | **Per-Event** | Per-request discount tier; tiers = contract level, not accumulation |
-| `maas_tokens_reasoning` | `model` | tokens | **Per-Event** | Per-request pricing for thinking tokens |
+| `maas_tokens_cached` | `model` | tokens | **Per-Event** | Per-request discount tier; tiers = contract level, not accumulation (rate seeded but not currently metered — no entries produced) |
+| `maas_tokens_reasoning` | `model` | tokens | **Per-Event** | Per-request pricing for thinking tokens (rate seeded but not currently metered — no entries produced) |
 | `maas_requests` | `model` | requests | **Per-Event** | Per-request pricing; each API call is independent |
 
 **Summary:** All capacity meters (VM, cluster, bare metal) require cumulative tier semantics. All MaaS meters are correctly handled by the existing per-event implementation.
