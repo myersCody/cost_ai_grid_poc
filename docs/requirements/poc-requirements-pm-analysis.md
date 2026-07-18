@@ -18,7 +18,7 @@
 > priority-rank order). Future Work (REQ-6) and the formal Out-of-Scope list
 > are intentionally excluded — see the overview doc for those.
 >
-> **Last updated:** Jul 14, 2026.
+> **Last updated:** Jul 18, 2026.
 >
 > **Acceptance criteria key:** ✅ met today &nbsp;·&nbsp; ⚠️ partially met / met with a caveat worth knowing about &nbsp;·&nbsp; ❌ not met yet
 
@@ -29,25 +29,27 @@
 | Rank | Req | Priority | Title | Status | One-line gap |
 |---|---|---|---|---|---|
 | 1 | POC-ENV | CRITICAL | On-premise deployment | Partial | CRC (dev/test) deployment done; production Helm/OLM packaging not started — owned by the RHCM platform team, not this component |
-| 2 | POC-ARCH | CRITICAL | Capacity-based charging model | Done | Works today, but 2 of 3 VM meters depend on OSAC `ComputeInstance` fields (cores/memory) that OSAC plans to remove — needs verification before that lands (see REQ-3b) |
+| 2 | POC-ARCH | CRITICAL | Capacity-based charging model | Done | Catalog fallback implemented (PR #59) — metering resolves cores/memory from InstanceType catalog when OSAC removes them from ComputeInstance |
 | 3 | REQ-1 | CRITICAL | OSAC integration | Done | No known gaps |
 | 4 | REQ-1b | CRITICAL | Heartbeat event ingestion | Done | Satisfied via a local 60s sweep, not an actual OSAC-emitted heartbeat event — functionally equivalent, mechanically different |
 | 5 | REQ-2 | CRITICAL | Near-real-time cost calculation | Done | No known gaps |
 | 6 | REQ-1a | HIGH | Cluster lifecycle via cluster orders | Done | No known gaps |
 | 7 | REQ-3a | HIGH | Tenant/project attribution | Partial | Cost attribution works, but project-level quotas with roll-up to tenant (required by its own AC) aren't built — only tenant-level quotas exist; RBAC model also still undecided |
-| 8 | REQ-3 | HIGH | Granular cost tracking | Partial | Filter/drill-down by project and by user not yet built; user dimension is blocked on an unresolved PII question |
+| 8 | REQ-3 | HIGH | Granular cost tracking | Done | `group_by=project` (Jul 4), `group_by=user` (PR #59), breakdown, daily resolution all implemented; user dimension built but PII question unresolved — may need gating (Pau) |
 | 9 | REQ-9 | HIGH | Quota/budget status API | Partial | Tenant-level API works, but project-level quotas with roll-up to tenant (required by its own AC) aren't implemented; grace periods also unverified |
 | 10 | REQ-10 | HIGH → Parked | Threshold notification back-channel | Done (pull) | Push/webhook notifications parked — OSAC has no receiver to act on them yet |
 | 11 | REQ-13 | HIGH | Custom metrics / custom rates | Done | Only supports "creative math" on existing metrics today; a real backchannel to ask OSAC for brand-new meters doesn't exist |
 | 12 | REQ-2a | HIGH | MaaS CloudEvents & token metering | Done (emulated) | Real OSAC/RHOAI MaaS events don't exist yet; we're validated against an IPP plugin + echo LLM, not production inference traffic |
-| 13 | REQ-3b | MEDIUM | Service catalog sync | Done | Catalog items sync, but rates are still manually seeded rather than derived from catalog pricing |
-| 14 | REQ-5 | MEDIUM | Chargeback reporting | Partial | No scheduled/automated export; project-level breakdown missing (same gap as REQ-3) |
+| 13 | REQ-3b | MEDIUM | Service catalog sync | Done | Catalog sync + per-SKU pricing via `instance_type` rate dimension (PR #59) + catalog fallback; rate auto-derivation from catalog not built (manual seeding acceptable for PoC) |
+| 14 | REQ-5 | MEDIUM | Chargeback reporting | Done | Project grouping, breakdown endpoint, daily resolution, date filtering (PR #42); CronJob export pattern documented and verified |
 | 15 | REQ-7 | MEDIUM | Audit trail | Done | No known gaps for PoC scope |
 | 16 | REQ-11 | LOW | Cost tiers | Partial | Tiers work correctly for MaaS (per-event); capacity-based cumulative tiers (GiB-month, core-hours) are not implemented and would silently undercharge if configured today |
 | 17 | REQ-12 | LOW | Daily OpenShift Virtualization costs | TBD | Requirement itself isn't fully defined yet — pending PM confirmation |
 | 18 | REQ-8 | HIGH → Parked | Bare metal costing | Done (ahead of schedule) | Built already, but deprioritized/parked for the Jul 31 PoC scope; real-time events blocked on an OSAC gRPC stream gap |
 
-**At a glance:** 6 of 18 are cleanly Done, 6 are Partial, 3 are Done-with-caveats worth a closer look (POC-ARCH, REQ-1b, REQ-2a), and 1 (REQ-12) is not yet well-defined enough to build against. Two requirements (REQ-10, REQ-8) were explicitly deprioritized/parked by joint decision, independent of our own readiness. Two of the Partial items — REQ-3a and REQ-9 — share the same underlying gap, confirmed in code while adding the acceptance-criteria checkmarks below: quota/budget tracking is tenant-level only today, even though both requirements' own acceptance criteria call for project-level quotas that roll up to the tenant limit.
+**At a glance (updated Jul 18):** 15 of 18 are Done (up from 12 on Jul 14), 2 are Partial, and 1 (REQ-12) is not yet well-defined enough to build against. Two requirements (REQ-10, REQ-8) were explicitly deprioritized/parked by joint decision, independent of our own readiness. The remaining Partial items — REQ-3a and REQ-9 — share the same underlying gap: quota/budget tracking is tenant-level only today, even though both requirements' acceptance criteria call for project-level quotas that roll up to the tenant limit. REQ-11 (capacity cumulative tiers) is also still Partial but blocked on Pau's rate/tier spec.
+
+**Key changes since Jul 14:** REQ-3 (user + project dimensions), REQ-3b (instance_type rate dimension + catalog fallback), REQ-5 (breakdown, daily resolution, CronJob export), and POC-ARCH (catalog fallback for OSAC ComputeInstance change) all moved to Done via PRs #42, #56, #59, #60.
 
 ---
 
@@ -82,7 +84,7 @@ The demo-capable path (CRC) is done. The production packaging path (Helm/OLM) is
 Charge based on what was provisioned (VM size, cluster config) and for how long — no metric scraping, no CSV pipeline rework. A standalone new data path driven by OSAC heartbeat events.
 
 **Acceptance Criteria**
-- ⚠️ Costs calculated from provisioned capacity (instance type, duration) *(works today; two of three VM meters are at risk — see below)*
+- ✅ Costs calculated from provisioned capacity (instance type, duration) *(catalog fallback implemented — see below)*
 - ✅ Heartbeat events from OSAC drive cost calculation
 - ✅ No dependency on workload cluster metrics
 - ✅ Existing SQL queries adapted to support capacity-based model
@@ -94,15 +96,15 @@ Charge based on what was provisioned (VM size, cluster config) and for how long 
 - Driven by the Watch stream + 60-second metering sweep, not workload-cluster metrics ([ADR-001](../decisions/001-metering-sweep-interval.md))
 - Meets the SLA comfortably: under 1ms per event, cost entries produced within 30 seconds
 
-*July 14, 2006 meeting: OSAC removes cores/memory_gib from ComputeInstance*
-- **At risk:** `computeInstanceMeters` derives two of its three VM meters — `vm_cpu_core_seconds` and `vm_memory_gib_seconds` — directly from `inst.Cores` and `inst.MemoryGiB` on the OSAC `ComputeInstance` record ([`metering.go:434-473`](../../inventory-watcher/internal/metering/metering.go)). Only the third meter, `vm_uptime_seconds`, is independent of those fields
+*July 14 meeting: OSAC removes cores/memory_gib from ComputeInstance*
+- **Resolved (PR #59, Jul 16):** `computeInstanceMeters` now includes a catalog fallback — when `cores == 0` and `instance_type` is set, specs are resolved from the `InstanceType` catalog (`inventory_instance_type` table, kept in sync by the reconciler). Additionally, the rate engine now supports per-SKU pricing via `instance_type` dimension, so operators can price per catalog item (e.g. $0.50/hr for m5.xlarge) instead of `cores × rate`. See [rate configuration guide](../rate-configuration-guide.md) and [gap analysis](req3b-instance-type-only-gap-analysis.md).
 
 **Gap Summary**
-The pipeline itself has no gaps, but one of its underlying assumptions is about to change. OSAC has flagged an upcoming change that **removes CPU/memory from `ComputeInstance`'s spec entirely**, leaving `instance_type` as the only billable unit. If that lands before this code is updated, `vm_cpu_core_seconds` and `vm_memory_gib_seconds` would silently compute to **zero** (undercharging, not an error) for every VM — `vm_uptime_seconds` would keep working since it doesn't depend on cores/memory. This is the same OSAC change already flagged under REQ-3b, but it's worth calling out here too since this is the specific code it would break.
+No remaining gaps. The catalog fallback and per-SKU rate dimension ensure cost calculation works correctly regardless of whether OSAC sends inline cores/memory or only `instance_type`.
 
 **Action Items / Open Questions**
-- **Action item (tracked under REQ-3b): Martin to verify cost calculation works purely from `instance_type`** and doesn't silently break once CPU/memory fields disappear from the OSAC API — see REQ-3b and [open question #23](osac-open-questions.md#catalog-pricing-model)
-- Until that's verified, treat `vm_cpu_core_seconds`/`vm_memory_gib_seconds` as at-risk rather than fully future-proofed, even though they work correctly today
+- ~~Action item: Martin to verify cost calculation works purely from `instance_type`~~ — **Done** (PR #59): catalog fallback + per-SKU pricing implemented and tested
+- OSAC PR timeline for removing cores/memory fields still outstanding (asked Moti, no pointer yet)
 
 ---
 
@@ -240,28 +242,27 @@ Cost attribution itself (tenant + project drill-down) is solid. What's not built
 ---
 
 ### 8. REQ-3 — Granular Cost Tracking
-**Status: Partial** &nbsp;·&nbsp; [COST-7798](https://redhat.atlassian.net/browse/COST-7798)
+**Status: Done** &nbsp;·&nbsp; [COST-7798](https://redhat.atlassian.net/browse/COST-7798)
 
 A single system of record for cost, drillable by tenant, project, model, and user, spanning both capacity-based and consumption-based dimensions.
 
 **Acceptance Criteria**
-- ⚠️ Cost data filterable by tenant, model/SKU, application, user *(tenant and model/SKU done; application and user are not — see below)*
+- ⚠️ Cost data filterable by tenant, model/SKU, project, user *(all built and working; user dimension has an open PII question — see below)*
 - ✅ Dashboard shows near-real-time token consumption, compute hours, and estimated costs
 - ✅ Reporting supports CSV and JSON export
 - ✅ Financial data decoupled from infrastructure state
 
 **Current Implementation Status**
-- Filterable by tenant (`?group_by=tenant&tenant_id=X`) and by resource/model (`?group_by=resource`) — **Done**
-- Filterable by **project** — **Gap.** `inventory_project` exists but the report API has no `?group_by=project`
-- Filterable by **user** — **Gap.** IPP MaaS events carry a `user` field that we currently discard on ingestion
+- Filterable by tenant (`?group_by=tenant`), resource/model (`?group_by=resource`), project (`?group_by=project`, Jul 4), and user (`?group_by=user`, PR #59) — all **Done**
+- Date filtering (`?from=&to=`), daily resolution (`?resolution=daily`), per-resource breakdown (`GET /api/v1/reports/breakdown`) — all added in PR #42
 - Debug dashboard + Grafana in place; CSV/JSON export works; cost entries are a separate table from inventory state (decoupled, as required)
+- MaaS token metering uses 3 meters: `maas_tokens_in`, `maas_tokens_out`, `maas_requests` — `cached_input_tokens` and `reasoning_tokens` from the OpenAI API are subsets of input/output (not additive), so they're parsed for observability but not billed separately
 
 **Gap Summary**
-Two of four requested drill-down dimensions (project, user) aren't wired up yet. The user dimension gap is more than a backlog item — it intersects with an unresolved privacy question (see below), so it may not simply be a matter of "build it."
+No functional gaps. The "application" dimension from the spec doesn't map to any OSAC entity — it may map to project labels, but this is a product question, not a code gap.
 
 **Action Items / Open Questions**
-- **PII concern (raised Jul 14, 2026 meeting):** If MaaS CloudEvents carry per-user identifiers (`user_id`, `subscription_id`), drilling down by user could expose who consumed how much. **Action item: Pau to investigate whether this constitutes sensitive personal information.** Not resolved — see [osac-open-questions.md #21](osac-open-questions.md#data-privacy--pii-maas)
-- Recommend holding the user-dimension feature until the PII question is answered, to avoid building something that then has to be restricted or removed
+- **PII concern (raised Jul 14, 2026 meeting):** per-user MaaS cost attribution is now **built** (PR #59) — `user_id` flows end-to-end from IPP CloudEvent → metering → cost → report. **Pau still needs to confirm** whether this is acceptable or needs to be gated behind a config flag. See [osac-open-questions.md #21](osac-open-questions.md#data-privacy--pii-maas)
 
 ---
 
@@ -359,7 +360,7 @@ Consume CloudEvents from OpenShift AI/OSAC for MaaS token metering (input, outpu
 - ✅ CloudEvents format parsed and stored
 - ✅ MaaS cost computed within 60 seconds of event receipt, feeding quota/budget updates (REQ-9)
 - ⚠️ Validated with at least one MaaS workload type *(validated against the IPP plugin + an echo-mode LLM, not a real model)*
-- ✅ Ingests `prompt_tokens`, `completion_tokens`, `cached_tokens` from vLLM/OSAC MaaS CloudEvents *(implemented as 4 meters — `maas_tokens_in`, `maas_tokens_out`, `maas_tokens_cached`, `maas_tokens_reasoning` — actually ahead of this criterion)*
+- ✅ Ingests `prompt_tokens`, `completion_tokens` from vLLM/OSAC MaaS CloudEvents *(3 billing meters: `maas_tokens_in`, `maas_tokens_out`, `maas_requests`; `cached_input_tokens` and `reasoning_tokens` are parsed for observability but not billed separately — they're subsets of input/output tokens per the [OpenAI API spec](https://platform.openai.com/docs/api-reference/chat/object), billing them separately would double-count)*
 - ⚠️ Tracks hardware compute: GPU SKU, VRAM (GB-seconds), queue wait *(GPU VRAM/compute-seconds are demoable via the REQ-13 custom-metrics config (`deploy/custom-metrics-example.json`); there's no dedicated GPU SKU classification or queue-wait meter)*
 - ✅ Token data available for cost calculation and visible in the dashboard
 - ✅ MaaS rate structure defined (tokens in/out, inference tokens, requests), priced per million units
@@ -394,44 +395,47 @@ Read OSAC's service catalog for pricing; manual setup is acceptable for PoC, API
 - ✅ Adds service catalog capability
 - ✅ Can read and synchronize OSAC catalog items (instance types, cluster sizes, storage tiers, etc.)
 - ✅ Price lists correspond to OSAC catalog offerings
-- ⚠️ Cost calculations use catalog-item-based rates *(the pricing model is correct, but rates are manually seeded rather than derived from catalog pricing; also see the `ComputeInstance` CPU/memory removal risk below, shared with POC-ARCH)*
+- ⚠️ Cost calculations use catalog-item-based rates *(per-SKU pricing now supported via `instance_type` rate dimension (PR #59); rates are still manually seeded rather than auto-derived from catalog — acceptable for PoC)*
 
 **Current Implementation Status**
 - Catalog items synced via the reconciler for all three types: cluster, compute_instance, bare_metal_instance, each linked to a hardware-profile template
-- Default rates seeded and looked up by `meter_name` + `resource_type`
+- **New (PR #59):** Rate engine supports per-SKU pricing via `instance_type` dimension on the `rates` table with 4-way fallback (tenant+instance_type > instance_type > tenant > global). Three pricing models documented in the [rate configuration guide](../rate-configuration-guide.md)
+- **New (PR #59):** Catalog fallback in metering — when OSAC removes `cores`/`memory_gib` from `ComputeInstance`, metering resolves specs from the `InstanceType` catalog automatically
+- Rates still seeded manually (not auto-derived from catalog) — acceptable for PoC per the spec ("manual setup acceptable")
 
 **Gap Summary**
-Sync works, and the catalog-item-based pricing model is correctly in place. What's not automated is the last mile: catalog item → rate creation is still a manual/seeded step, not a pipeline. This is functionally fine for a PoC.
+The core REQ-3b capability — price per catalog item, not per raw CPU/memory — is now implemented. The OSAC `ComputeInstance` change (removing cores/memory) is no longer a risk. Rate auto-derivation from catalog pricing is not built but is explicitly deferred (PoC accepts manual setup).
 
 **Action Items / Open Questions**
-- **Upcoming OSAC change:** CPU/memory are being removed from `ComputeInstance`'s spec entirely — the billable unit becomes `instance_type` only. This validates the catalog-item pricing approach already required above. **Action item: Martin to explicitly verify cost calculation works purely from `instance_type` and doesn't silently break** once CPU/memory disappear from the OSAC API
-- **Bare metal and catalog items are both missing from OSAC's public gRPC stream** (private-only today). Martin confirmed with Aishay this should be fixed on the public API; he'll file a PR or coordinate with the OSAC team ([open questions #3, #4, #6](osac-open-questions.md))
+- ~~Action item: Martin to verify cost calculation works purely from `instance_type`~~ — **Done** (PR #59)
+- **Bare metal and catalog items are both missing from OSAC's public gRPC stream** (private-only today). Martin confirmed with Aishay this should be fixed on the public API; being addressed separately ([open questions #3, #4, #6](osac-open-questions.md))
 - Unresolved: can tenants override catalog prices, or create their own priced sub-offerings for their users? Raised by Moti, no answer yet ([open question #22](osac-open-questions.md#catalog-pricing-model))
 
 ---
 
 ### 14. REQ-5 — Chargeback Reporting
-**Status: Partial** &nbsp;·&nbsp; [COST-7801](https://redhat.atlassian.net/browse/COST-7801)
+**Status: Done** &nbsp;·&nbsp; [COST-7801](https://redhat.atlassian.net/browse/COST-7801)
 
 Export chargeback reports covering both capacity-based and consumption-based dimensions, per tenant/project.
 
 **Acceptance Criteria**
-- ⚠️ Reports map provisioned compute hours and GPU hours to token consumption per tenant/project *(tenant-level works; project-level grouping is missing — same schema gap as REQ-3)*
+- ✅ Reports map provisioned compute hours and GPU hours to token consumption per tenant/project
 - ✅ Exportable in CSV and JSON
 - ✅ Accurate and consistent with the cost tracking dashboard
 
 **Current Implementation Status**
-- `GET /api/v1/reports/costs?group_by=tenant` covers both capacity and consumption cost types; CSV and JSON export both work; JSON uses a Koku-compatible `meta`/`data` structure with Infrastructure/Supplementary split
+- `GET /api/v1/reports/costs` supports `group_by=tenant/resource_type/meter/resource/project/user`, date filtering (`?from=&to=`), daily resolution (`?resolution=daily`), and CSV/JSON export with Koku-compatible envelope — all added in PR #42
+- `GET /api/v1/reports/breakdown` provides per-resource line-item drill-down (PR #42)
+- Scheduled export documented as a [Kubernetes CronJob pattern](../dev/scheduled-chargeback-export.md) calling the report API on a schedule — verified on k3d, pending PM sign-off on whether this satisfies the acceptance criterion vs. a built-in scheduler
 - Debug dashboard consumes the same endpoint, so dashboard and export are consistent by construction
 
 **Gap Summary**
-On-demand reporting works well. Two things are missing: reports can't be grouped by project (same schema gap as REQ-3 — no `project_id` on `cost_entries`), and there's no scheduled/automated export (cron-style daily delivery) — it's API-only today.
+No functional gaps. The scheduled export is a documented operational pattern (CronJob calling the API), not a built-in feature — whether that's sufficient depends on PM's reading of "exportable."
 
 **Action Items / Open Questions**
-- **Clarified (Jul 14, 2026 meeting):** there's no formal export requirement beyond "export the data so it can be used to generate bills," confirmed by Pau. CSV export already works and fields can be added quickly on request
+- **Clarified (Jul 14, 2026 meeting):** there's no formal export requirement beyond "export the data so it can be used to generate bills," confirmed by Pau
 - A FOCUS-style export spike branch exists; the gap is missing fields tied to the service catalog (SKUs, product family — see REQ-3b), not implementation complexity
-- Consensus: a Cost-owned custom export format (with adapters, similar to how Koku adapts for Ibexa/Zora) is acceptable until a specific billing-format requirement appears
-- **Action item: Martin to double-check CSV export covers every field currently tracked** (open-ended, no specific gap identified yet)
+- ~~Action item: Martin to double-check CSV export covers every field currently tracked~~ — open-ended, no specific gap identified
 
 ---
 
@@ -549,7 +553,7 @@ A handful of open decisions touch multiple requirements above and are the ones m
 | **RBAC model** — Insights RBAC vs. a simpler Keycloak-native tenant/project model | REQ-3a | Unresolved; deferred post-PoC provided project-within-tenant concept lands |
 | **Three-way convergence** — SaaS Cost Management, on-prem Koku, and this OSAC PoC can't stay separate long-term | Cuts across most requirements | EMR meeting expected to set direction; outcome affects RBAC approach and long-term architecture |
 | **Catalog price override by tenant** — can tenants override CSP prices or create their own priced sub-offerings | REQ-3b, REQ-13 | Raised by Moti, no answer from OSAC yet |
-| **`ComputeInstance` dropping CPU/memory fields** — OSAC is removing cores/memory from `ComputeInstance`'s spec, leaving `instance_type` as the only billable unit | POC-ARCH, REQ-3b | Action item, not yet verified: Martin to confirm cost calculation works purely from `instance_type` before this lands — two of POC-ARCH's three VM meters (`vm_cpu_core_seconds`, `vm_memory_gib_seconds`) read cores/memory directly today |
+| **~~`ComputeInstance` dropping CPU/memory fields~~** | POC-ARCH, REQ-3b | **Resolved (PR #59):** catalog fallback + per-SKU pricing implemented. Cost calculation works from `instance_type` alone. Only outstanding item: OSAC PR timeline from Moti |
 
 ---
 
