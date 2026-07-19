@@ -138,7 +138,7 @@ fail-open). For production, events cannot be lost. Options discussed:
 The consensus is to align with whatever infrastructure OSAC/cost-mgmt
 already runs rather than introduce new components. Our assessment: Kafka
 consumer is ~150 lines of Go on our side (see
-[roadmap — Kafka](../roadmap.md#kafka-as-cloudevents-transport)).
+[ADR-002](../decisions/002-arguments-against-kafka.md)).
 
 ## Event Augmentation
 
