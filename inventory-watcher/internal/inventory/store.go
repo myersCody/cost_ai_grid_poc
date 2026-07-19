@@ -191,25 +191,6 @@ CREATE TABLE IF NOT EXISTS inventory_instance_type (
     last_updated     TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS daily_usage_summary (
-    id              BIGSERIAL PRIMARY KEY,
-    usage_date      DATE NOT NULL,
-    cluster_id      TEXT NOT NULL DEFAULT '',
-    tenant          TEXT NOT NULL DEFAULT '',
-    project         TEXT NOT NULL DEFAULT '',
-    resource_id     TEXT NOT NULL,
-    resource_type   TEXT NOT NULL,
-    instance_type   TEXT NOT NULL DEFAULT '',
-    cores           INTEGER NOT NULL DEFAULT 0,
-    memory_gib      INTEGER NOT NULL DEFAULT 0,
-    cpu_core_hours  NUMERIC(18,6) NOT NULL DEFAULT 0,
-    memory_gb_hours NUMERIC(18,6) NOT NULL DEFAULT 0,
-    duration_hours  NUMERIC(18,6) NOT NULL DEFAULT 0
-);
-
-CREATE INDEX IF NOT EXISTS idx_dus_date_tenant ON daily_usage_summary (usage_date, tenant);
-CREATE INDEX IF NOT EXISTS idx_dus_date_resource ON daily_usage_summary (usage_date, resource_id);
-
 CREATE TABLE IF NOT EXISTS metering_entries (
     id             BIGSERIAL PRIMARY KEY,
     raw_event_id   BIGINT,

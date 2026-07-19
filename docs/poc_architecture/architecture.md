@@ -222,7 +222,6 @@ Schema is auto-migrated on inventory-watcher startup (inline SQL in `inventory-w
 | `quotas` | Per-tenant quota limits; seeded on startup for demo tenants |
 | `alerts` | Threshold alerts (50/70/90/100%); fired by the Rater |
 | `splunk_cursor` | Splunk HEC forwarding cursor |
-| `daily_usage_summary` | Daily rollups (schema defined; worker not yet implemented) |
 
 ---
 
