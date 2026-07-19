@@ -1,5 +1,8 @@
 # Demo 4 — Slide Ideas
 
+> **Note:** This is a draft from 2026-07-03. The final slides are in
+> [demo-4.md](demo-4.md). Counts below reflect the state at that date.
+>
 > Covering work since demo 3 (July 1 evening → July 3).
 > Mix of live demo, terminal screenshots, and slides.
 

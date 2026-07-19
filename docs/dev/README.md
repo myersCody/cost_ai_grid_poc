@@ -66,8 +66,8 @@ Documentation for running the cost-event-consumer in different environments.
 **How to start:**
 ```bash
 # From GitHub UI: Code → Codespaces → Create codespace
-# Or from CLI:
-gh codespace create --repo martinpovolny/cost_ai_grid_poc --machine premiumLinux
+# Or from CLI (use whichever fork/upstream you work from):
+gh codespace create --repo myersCody/cost_ai_grid_poc --machine premiumLinux
 ```
 
 Once inside the codespace, deploy and test:

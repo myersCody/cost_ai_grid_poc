@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | GET | `/healthz` | Kubernetes liveness probe | `handleLiveness` | `TestLivenessProbe` |
 | GET | `/readyz` | Kubernetes readiness probe (pings DB) | `handleReadiness` | `TestReadinessProbe` |
-| POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS, IPP, custom) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestVMHeartbeat`, `TestIngestClusterHeartbeat`, `TestIngestIPPAuthoritativeFormat`, `TestIngestVMaaSAuthoritativeFormat`, `TestIngestCaaSAuthoritativeFormat`, `TestIngestCustomMetricEvent` |
+| POST | `/api/v1/events` | Ingest CloudEvents (VM, Cluster, MaaS, IPP, custom) | `handleEvent` | `TestIngestMaaSEvent`, `TestIngestVMHeartbeat`, `TestIngestClusterHeartbeat`, `TestIngestIPPAuthoritativeFormat`, `TestIngestVMaaSAuthoritativeFormat`, `TestIngestCaaSAuthoritativeFormat`, `TestIngestCustomMetricEvent`, `TestTenantAttribution_OrganizationID`, `TestMaaSUserIDPropagation`, `TestEventIngestResponseCode`, `TestIngestNegativeDurationRejected` |
 | GET | `/api/v1/quotas/{tenant_id}` | Quota status with alerts | `handleQuotaStatus` | `TestQuotaStatus`, `TestQuotaStatusMissingTenant`, `TestQuotaStatusWithConsumption` |
 | GET | `/api/v1/reports/costs` | Cost report (JSON/CSV, group by tenant/type/meter/resource/project/user) | `handleCostReport` | `TestCostReport_GroupByTenant`, `TestCostReport_DailyResolution`, `TestCostReport_FromToParams`, `TestCostReport_CSV` |
 | GET | `/api/v1/reports/breakdown` | Per-resource cost line items (JSON/CSV) | `handleCostBreakdown` | `TestCostBreakdown`, `TestCostBreakdown_CSV` |

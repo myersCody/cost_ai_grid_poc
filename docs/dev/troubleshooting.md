@@ -51,5 +51,5 @@ for the pattern.
 **Related:**
 - go-migrate issue: https://github.com/golang-migrate/migrate/issues/283
 - Our CRC deployment used CloudNativePG which handles this correctly
-- The testfarm script (`deploy-full-k3s.sh`) uses an init container
-  to work around this
+- The k3s full-stack script ([`snippets/k3s-full-stack.sh`](../../snippets/k3s-full-stack.sh))
+  uses an init container to work around this

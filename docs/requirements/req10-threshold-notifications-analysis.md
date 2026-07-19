@@ -9,6 +9,12 @@
 > **Depends on:** REQ-9 (Quota status API) — **Done**
 >
 > **Cody's design:** [boundary_monitoring/](https://github.com/myersCody/cost_ai_grid_poc/tree/main/docs/poc_architecture/boundary_monitoring)
+>
+> **Implementation progress:** Pull model is Done — quota API returns
+> `thresholds` flags at 50/70/90/100%. Threshold evaluation is wired
+> into the rating sweep (`evaluateThresholds` runs after each rating
+> cycle, fires alerts to the `alerts` table). Push/webhook model is
+> parked per Jul 2, 2026 decision — OSAC has no receiver.
 
 ## What We Have
 
