@@ -1,20 +1,20 @@
 # Implementation Status
 
 > Cross-referenced with the
-> [consolidated requirements spec v1.4](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
+> [consolidated requirements spec v1.5](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md)
 > (replaces both the csv_poc_requirements_summary and the original brief).
 >
-> Last updated: 2026-07-15
+> Last updated: 2026-07-20
 
 ## Summary
 
-| Priority | Total | Done | Partial | TBD |
+| Priority | Total | Done | Partial | Not started |
 |---|---|---|---|---|
 | CRITICAL | 5 | 4 | 1 | 0 |
-| HIGH | 8 | 8 | 0 | 0 |
+| HIGH | 9 | 7 | 1 | 1 |
 | MEDIUM | 3 | 3 | 0 | 0 |
 | LOW | 2 | 0 | 1 | 1 |
-| **Total** | **18** | **15** | **2** | **1** |
+| **Total** | **19** | **14** | **3** | **2** |
 
 ## Full Requirements Status
 
@@ -28,16 +28,17 @@
 | 6 | REQ-1a | [COST-7794](https://redhat.atlassian.net/browse/COST-7794) | HIGH | Cluster lifecycle | **Done** | ClusterOrder is the ordering workflow; we track the resulting Cluster (verified) |
 | 7 | REQ-3a | [COST-7799](https://redhat.atlassian.net/browse/COST-7799) | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open |
 | 8 | REQ-3 | [COST-7798](https://redhat.atlassian.net/browse/COST-7798) | HIGH | Granular cost tracking | **Done** | Report API with tenant/project/user/resource dimensions, breakdown, daily resolution |
-| 9 | REQ-9 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | HIGH | Quota/budget status API | **Done** | `GET /api/v1/quotas/{tenant_id}` |
+| 9 | REQ-9 | [COST-7805](https://redhat.atlassian.net/browse/COST-7805) | HIGH | Quota/budget status API | Partial | Status API done; CRUD, project roll-up, fleet status, budgets, configurable thresholds — [gap analysis](requirements/req9-quota-budget-gap-analysis.md) |
 | 10 | REQ-10 | [COST-7807](https://redhat.atlassian.net/browse/COST-7807) | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred |
 | 11 | REQ-13 | [COST-7810](https://redhat.atlassian.net/browse/COST-7810) | HIGH | Custom rate dimensions | **Done** | [Design](research/req13-custom-metrics-design.md) |
 | 12 | REQ-2a | [COST-7797](https://redhat.atlassian.net/browse/COST-7797) | HIGH | MaaS CloudEvents + tokens | **Done** (emulator) | IPP verified with real plugin + echo LLM. [Stress test](dev/ipp-stress-test-2026-07-05.md) |
 | 13 | REQ-3b | [COST-7800](https://redhat.atlassian.net/browse/COST-7800) | MEDIUM | Service catalog sync | **Done** | Catalog sync + per-SKU pricing + catalog fallback — [rate guide](rate-configuration-guide.md) |
 | 14 | REQ-5 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | MEDIUM | Chargeback reporting | **Done** | Report API with project dimension, breakdown, daily resolution, date filtering; [CronJob export](dev/scheduled-chargeback-export.md) |
 | 15 | REQ-7 | [COST-7802](https://redhat.atlassian.net/browse/COST-7802) | MEDIUM | Audit trail | **Done** | `raw_events` + [Splunk forwarding](splunk-audit-forwarding.md) |
-| 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | [req11 gap analysis](requirements/req11-cost-tiers-gap-analysis.md) — MaaS tiers done; capacity cumulative tiers gap |
+| 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | Per-event done; capacity cumulative + time-windowed MaaS + decimal money = gaps — [gap analysis](requirements/req11-cost-tiers-gap-analysis.md) |
 | 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | TBD | PM definition pending |
 | 18 | REQ-8 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
+| 19 | REQ-14 | [COST-7939](https://redhat.atlassian.net/browse/COST-7939) | HIGH | Wallets (prepaid balance) | Not started | New in v1.5 — top-up, deduct metered spend, low-balance alerts |
 
 **Post-PoC:**
 
@@ -208,15 +209,27 @@ resolution (see [OSAC open questions](requirements/osac-open-questions.md#bare-m
 ---
 
 ### REQ-9 — Quota/Budget Status API
-**Status:** Done
+**Status:** Partial
 **Spec:** [poc_requirements_overview.md#req-9](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-9--quotabudget-status-api)
+**Gap Analysis:** [req9-quota-budget-gap-analysis.md](requirements/req9-quota-budget-gap-analysis.md)
+
+> **Scope expanded in v1.5 (Jul 20):** REQ-9 now requires fleet-level
+> status, CRUD API, project→tenant roll-up with no limit overcommit,
+> monetary budgets, configurable thresholds, and non-monthly windows.
+> All are in scope for Jul 31. See gap analysis for full breakdown.
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
+| Read-only quota status per tenant | Done | `GET /api/v1/quotas/{tenant_id}` with threshold flags and alerts |
 | Sub-second latency | Done | Single SUM query with indexes |
-| OSAC can query quota status | Done | [`GET /api/v1/quotas/{tenant_id}`](api-reference.md#get-apiv1quotastenant_id) |
-| Threshold checks (50/70/90/100%) | Done | `thresholds` map in response |
-| Source of truth agreed | Partial | RHCM provides data; enforcement is OSAC's responsibility (non-blocking for Done status — ownership agreed in principle) |
+| Threshold checks (50/70/90/100%) | Done | `thresholds` map in response; `evaluateThresholds` in rating sweep |
+| CRUD API for quota/budget management | **Gap** | `UpsertQuota` in store only; no POST/PUT/DELETE HTTP |
+| Project-scoped quotas + roll-up to tenant | **Gap** | `project_id` column exists but unused; sums are tenant-only |
+| Σ(project limits) ≤ tenant limit | **Gap** | No overcommit validation (Jul 20 decision) |
+| Fleet-level status for OSAC | **Gap** | No list-all / cross-tenant endpoint |
+| Monetary budgets (cost-based limits) | **Gap** | Only usage quotas today; no cost-sum path |
+| Non-monthly quota periods (5h, 24h) | **Gap** | Hardcoded to calendar month |
+| Configurable thresholds | **Gap** | Fixed `[50, 70, 90, 100]` compile-time constant |
 
 ---
 
@@ -320,13 +333,22 @@ full evaluation.
 ### REQ-11 — Cost Tiers
 **Status:** Partial
 **Gap Analysis:** [req11-cost-tiers-gap-analysis.md](requirements/req11-cost-tiers-gap-analysis.md)
+**Design Proposal:** [req11-cumulative-tiers-design-proposal.md](requirements/req11-cumulative-tiers-design-proposal.md)
 **Spec:** [poc_requirements_overview.md#req-11](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-11--cost-tiers)
+
+> **Scope expanded in v1.5 (Jul 20):** Three tier modes needed, not two.
+> MaaS examples now include time-windowed tiers (e.g. "1M tokens free
+> every 5 hours then charge"). Pau confirmed: graduated for PoC,
+> monthly accumulation for PoC, per-tenant scope.
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
-| Multiple pricing tiers per resource type | Done | `rates.tiers` JSONB column; [`internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go) → `applyTieredRate` |
-| Tiers apply to capacity and MaaS rates | **Gap** | Per-event logic is correct for MaaS; capacity meters require cumulative/period-accumulating tier logic — not yet implemented |
+| Multiple pricing tiers per resource type | Done | `rates.tiers` JSONB column; `applyTieredRate` waterfall |
+| Per-event tiers (within a single MaaS event) | Done | Graduated waterfall works for large events crossing boundaries |
+| Capacity cumulative tiers (GiB-month, core-hours) | **Gap** | Monthly accumulation needed; [design proposal](requirements/req11-cumulative-tiers-design-proposal.md) ready |
+| Time-windowed MaaS tiers (e.g. every 5h/24h) | **Gap** | New in v1.5 — no `window`/`period` field on `Tier`; no windowed accumulation |
 | Tier config without code changes | Done | JSON in `rates` table; no recompile needed |
+| Exact decimal money (not float64) | **Gap** | New in v1.5 — `float64` used for prices/costs; need `shopspring/decimal` or similar |
 
 ---
 
@@ -422,7 +444,9 @@ See also: [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queri
 | [Rate Configuration Guide](rate-configuration-guide.md) | Per-SKU, CPU/memory, and per-tenant pricing models |
 | [req3b Gap Analysis](requirements/req3b-instance-type-only-gap-analysis.md) | Instance-type-only costing — metering fallback + catalog-item pricing |
 | [req8 Gap Analysis](requirements/req8-bare-metal-gap-analysis.md) | Bare metal costing — OSAC blockers and implementation plan |
+| [req9 Gap Analysis](requirements/req9-quota-budget-gap-analysis.md) | Quota/budget — CRUD, project roll-up, fleet status, monetary budgets |
 | [req10 Analysis](requirements/req10-threshold-notifications-analysis.md) | Threshold notifications — delivery models, open questions |
+| [req11 Design Proposal](requirements/req11-cumulative-tiers-design-proposal.md) | Cumulative tier pricing — design + Pau's answers |
 | [Requirements Comparison](requirements/requirements-comparison.md) | Updated spec vs original brief |
 | [Demo Scenario 1](demos/demo-scenario-1.md) | Infrastructure metering demo |
 | [Demo Scenario 2](demos/demo-scenario-2-maas.md) | MaaS metering + cost demo |
