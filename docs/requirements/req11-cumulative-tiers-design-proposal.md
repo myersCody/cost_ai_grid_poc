@@ -146,29 +146,38 @@ Total billed over the month:                               $13.60 ✓
 
 **Total effort:** Medium (2–3 sessions)
 
-## Questions for Pau (confirmation, not open-ended)
+## Pau's Answers (Jul 20, 2026)
 
-We propose the defaults above. If any are wrong, we adjust before
-implementing.
+1. **Monthly billing period** — confirmed for the PoC. However, PR #64
+   introduces non-monthly windows as a Jul 31 requirement (e.g. "first
+   1M tokens free every 5 hours", "first 1,000 requests free every 24
+   hours"). Monthly is the starting point; configurable windows are
+   needed for the full requirement.
 
-1. **Monthly billing period** — we propose calendar month. Are there
-   scenarios where a different period is needed for the PoC? (We can
-   make it configurable post-PoC.)
+2. **Per-tenant accumulation** — confirmed OK for now. Pau: "I wouldn't
+   be surprised if in the future we need to do this per-project, or
+   support both." Design should not preclude per-project later.
 
-2. **Per-tenant accumulation** — we propose tiers accumulate per
-   tenant, not per project. If two projects under tenant-acme each
-   use 15 GiB/month, they share the 20 GiB free tier (total 30 GiB,
-   10 GiB billable). Is that correct?
+3. **MaaS cumulative tiers** — yes, MaaS needs cumulative/windowed
+   tiers. MaaS is charged per tokens in/out and sometimes per request.
+   **Important:** OpenShift AI MaaS will probably not support CloudEvents
+   until RHOAI 3.6 (November 2026); RHOAI 3.5 supports only Loki
+   structured logs. Moti will gather MaaS metrics from Loki and send
+   CloudEvents for now — but this also matters for the non-OSAC world
+   (per Jonathan Zarecki and Myriam Fentanes).
 
-3. **MaaS cumulative tiers** — should MaaS token rates also support
-   cumulative tiers (e.g. "first 1M tokens/month free")? We're
-   building the infrastructure either way; this is about whether to
-   configure any MaaS rates as cumulative for the demo.
+4. **Graduated pricing** — confirmed for PoC and MVP. Pau: "In the
+   final product both possibilities should exist" (graduated and
+   volume). For the PoC, graduated is sufficient.
 
-4. **Graduated pricing** — we use graduated/marginal pricing (only
-   excess above tier boundary is charged at higher rate). Confirm this
-   is correct vs. volume pricing (all usage repriced at highest tier
-   reached).
+The tier structures themselves (concrete numbers, refresh cycles) are
+defined in Pau's PR #64, which also introduces:
+- **Time-windowed tiers** as a third mode (beyond per-event and
+  cumulative/monthly) — e.g. "every 5h", "every 24h"
+- **REQ-14 (Wallets)** — prepaid balance, distinct from budgets
+- **REQ-9 expansion** — CRUD, project roll-up, fleet-level status,
+  monetary budgets, configurable thresholds — all Jul 31 scope
+- **float64 → decimal** flagged as a billing-correctness gap
 
 ## Related Documents
 
