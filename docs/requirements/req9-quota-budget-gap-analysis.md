@@ -239,16 +239,30 @@ and hour durations (`”5h”`, `”24h”`, etc.). The rating sweep and quota
 status handlers use per-quota/per-rate periods instead of hardcoded
 monthly (PR #68).
 
-**Still needed:** `”Nd”` day durations (e.g. `”7d”` for Pau's cycle
-model) — `ResolvePeriod` currently supports `”Nh”` but not `”Nd”`.
-Adding it is a small extension.
+**Still needed:** `”Nd”` day durations (e.g. `”7d”` = 7 days, for
+Pau’s cycle model) — `ResolvePeriod` currently supports `”Nh”` (N
+hours) but not `”Nd”` (N days). Adding it is a small extension.
+
+**Concrete example — Codex rolling window (from Pau’s feedback):**
+OpenAI Codex uses a **dual-window** model: a rolling 5-hour window
+(tokens used are added back 5h later as they roll out) AND a weekly
+allowance that fully resets on a fixed 7-day cycle. This maps to two
+quota records on the same meter: one with `period: “5h”` (rolling) and
+one with `period: “7d”` (fixed reset). The rolling semantics require
+`MeteringSum` to use a sliding window (`now - 5h` to `now`) rather
+than a calendar-aligned period start. The fixed weekly reset uses
+`ResolvePeriod(“7d”)` which snaps to a 7-day boundary.
 
 A REQ-9-style limit such as “1,000 requests every 24 hours then deny”
 now works with `period: “24h”` on the quota record. Remaining gap is
-
-plus `MeteringSum` bounds matching that window. This is the quota-side
+`MeteringSum` bounds matching that window. This is the quota-side
 counterpart to REQ-11’s windowed **pricing** bands — same clock idea,
 different question (ceiling vs rate).
+
+**PoC scope note (Pau, Jul 20):** “remember this is a PoC. We don’t
+need to implement every single case.” The mechanism (configurable
+periods on quota records) is the deliverable — not exhaustive coverage
+of every window type.
 
 ### 5. Fleet-level status
 
