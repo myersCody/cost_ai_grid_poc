@@ -37,7 +37,7 @@
 | 15 | REQ-7 | [COST-7802](https://redhat.atlassian.net/browse/COST-7802) | MEDIUM | Audit trail | **Done** | `raw_events` + [Splunk forwarding](splunk-audit-forwarding.md) |
 | 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | Per-event done; capacity cumulative + time-windowed MaaS + decimal money = gaps — [gap analysis](requirements/req11-cost-tiers-gap-analysis.md) |
 | 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | TBD | PM definition pending |
-| 18 | REQ-8 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
+| 18 | REQ-8 | [COST-7811](https://redhat.atlassian.net/browse/COST-7811) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
 | 19 | REQ-14 | [COST-7939](https://redhat.atlassian.net/browse/COST-7939) | HIGH | Wallets (prepaid balance) | Not started | New in v1.5 — top-up, deduct metered spend, low-balance alerts |
 
 **Post-PoC:**
