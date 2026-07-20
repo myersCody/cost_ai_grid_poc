@@ -183,6 +183,27 @@ Store layer can insert (`UpsertQuota`); ingest API cannot. Operators today
 rely on `SeedDefaultQuotas` or direct SQL. Blocker for non-demo tenants and
 for Professional Services sync from a third system.
 
+**Pau's quota model (Jul 20, 2026):** A quota is created with 5 values:
+
+| Field | Example | Maps to |
+|-------|---------|---------|
+| **Name** | "MaaS token allowance" | Display name (new field) |
+| **Amount** | 20 | `limit_value` on `QuotaRecord` |
+| **Metric** | Mtoken | `meter_name` + `unit` |
+| **Cycle** | 5 hours, 24 hours, 7 days | `period` on `QuotaRecord` — parsed by `billing.ResolvePeriod` |
+| **Policy** | "deny" or "charge extra" | "deny" = REQ-9 quota (OSAC enforces via status API); "charge extra" = REQ-11 cumulative tier (free band then paid overage) |
+
+The **Policy** field is the key insight: quotas and tiers are the same
+concept with different enforcement. An admin creates one "quota" and
+chooses what happens when exceeded — deny (OSAC checks status and blocks)
+or charge (rating applies overage tiers). Both use the same meter, the
+same cycle/period, and the same amount as the free-tier boundary.
+
+**Implementation note:** The CRUD API should accept this 5-field model.
+Internally, "deny" creates a `QuotaRecord`; "charge extra" creates both
+a `QuotaRecord` (for status reporting) and a `RateRecord` with
+`tier_mode="cumulative"` and a free tier matching the amount.
+
 ### 2. Project → tenant roll-up (no limit overcommit)
 
 Overview: quotas/budgets scoped to tenants and projects; projects roll up.
@@ -212,11 +233,18 @@ budget consumed” is not yet available end-to-end — **Jul 31 gap**.
 
 ### 4. Period / window flexibility
 
-Seeded and evaluated periods are **calendar month**. A REQ-9-style limit
-such as “1,000 requests every 24 hours then deny” needs either:
+~~Seeded and evaluated periods are **calendar month**.~~ **Updated (Jul 20):**
+`billing.ResolvePeriod` now handles `”monthly”`, `”weekly”`, `”daily”`,
+and hour durations (`”5h”`, `”24h”`, etc.). The rating sweep and quota
+status handlers use per-quota/per-rate periods instead of hardcoded
+monthly (PR #68).
 
-- `period` values that the status handler interprets (`daily`, `24h`, …), or
-- explicit `window_start` / `window_duration` on the quota row,
+**Still needed:** `”Nd”` day durations (e.g. `”7d”` for Pau's cycle
+model) — `ResolvePeriod` currently supports `”Nh”` but not `”Nd”`.
+Adding it is a small extension.
+
+A REQ-9-style limit such as “1,000 requests every 24 hours then deny”
+now works with `period: “24h”` on the quota record. Remaining gap is
 
 plus `MeteringSum` bounds matching that window. This is the quota-side
 counterpart to REQ-11’s windowed **pricing** bands — same clock idea,
