@@ -236,7 +236,11 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 
 			pct := (consumed / q.LimitValue) * 100
 
-			for _, threshold := range ThresholdLevels {
+			levels := ThresholdLevels
+			if len(q.Thresholds) > 0 {
+				levels = q.Thresholds
+			}
+			for _, threshold := range levels {
 				if pct >= threshold {
 					inserted, err := r.store.InsertAlert(ctx, inventory.AlertRecord{
 						TenantID:     tenantID,

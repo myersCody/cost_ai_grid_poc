@@ -1501,3 +1501,125 @@ func TestMaaSUserIDPropagation(t *testing.T) {
 		t.Errorf("user_id on metering_entries: got %q, want alice@example.com", userID)
 	}
 }
+
+// ── Quota CRUD Tests ──
+
+func TestCreateQuota(t *testing.T) {
+	body := `{"name":"test quota","tenant_id":"crud-tenant","meter_name":"maas_tokens_in","limit_value":5000000,"unit":"tokens","period":"monthly"}`
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, b)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["name"] != "test quota" {
+		t.Errorf("name: got %v", result["name"])
+	}
+	if result["policy"] != "deny" {
+		t.Errorf("policy should default to deny: got %v", result["policy"])
+	}
+	if result["id"] == nil || result["id"].(float64) == 0 {
+		t.Error("expected non-zero id")
+	}
+}
+
+func TestCreateQuota_MissingFields(t *testing.T) {
+	body := `{"meter_name":"x"}`
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing tenant_id, got %d", resp.StatusCode)
+	}
+}
+
+func TestCreateQuota_InvalidPeriod(t *testing.T) {
+	body := `{"tenant_id":"t","meter_name":"m","limit_value":1,"unit":"u","period":"banana"}`
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid period, got %d", resp.StatusCode)
+	}
+}
+
+func TestListQuotas(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	quotas, ok := result["quotas"].([]interface{})
+	if !ok {
+		t.Fatal("expected quotas array")
+	}
+	if len(quotas) == 0 {
+		t.Error("expected at least one quota")
+	}
+}
+
+func TestListQuotas_TenantFilter(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas?tenant_id=nonexistent-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	quotas := result["quotas"].([]interface{})
+	if len(quotas) != 0 {
+		t.Errorf("expected 0 quotas for nonexistent tenant, got %d", len(quotas))
+	}
+}
+
+func TestDeleteQuota(t *testing.T) {
+	// Create a quota to delete
+	body := `{"tenant_id":"del-tenant","meter_name":"del_meter","limit_value":100,"unit":"units","period":"monthly"}`
+	createResp, _ := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	var created map[string]interface{}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	createResp.Body.Close()
+	id := int64(created["id"].(float64))
+
+	// Delete it
+	req, _ := http.NewRequest("DELETE", fmt.Sprintf("%s/api/v1/quotas/%d", testServer.URL, id), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("expected 204, got %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteQuota_NotFound(t *testing.T) {
+	req, _ := http.NewRequest("DELETE", testServer.URL+"/api/v1/quotas/999999", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+}

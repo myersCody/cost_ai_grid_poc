@@ -315,6 +315,11 @@ CREATE INDEX IF NOT EXISTS idx_me_unrated ON metering_entries (id) WHERE rated_a
 ALTER TABLE rates ADD COLUMN IF NOT EXISTS tier_mode TEXT NOT NULL DEFAULT 'per_event';
 ALTER TABLE rates ADD COLUMN IF NOT EXISTS tier_period TEXT NOT NULL DEFAULT '';
 
+-- quota CRUD fields (REQ-9)
+ALTER TABLE quotas ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+ALTER TABLE quotas ADD COLUMN IF NOT EXISTS policy TEXT NOT NULL DEFAULT 'deny';
+ALTER TABLE quotas ADD COLUMN IF NOT EXISTS thresholds JSONB;
+
 CREATE TABLE IF NOT EXISTS splunk_cursor (
     id             INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     last_sent_id   BIGINT NOT NULL DEFAULT 0,
@@ -1153,14 +1158,23 @@ func (s *Store) RateCount(ctx context.Context) (int, error) {
 
 // UpsertQuota inserts a quota definition.
 func (s *Store) UpsertQuota(ctx context.Context, q QuotaRecord) (int64, error) {
+	var thresholdsJSON []byte
+	if q.Thresholds != nil {
+		var err error
+		thresholdsJSON, err = json.Marshal(q.Thresholds)
+		if err != nil {
+			return 0, err
+		}
+	}
+
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO quotas
-			(tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(name, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, policy, thresholds, effective_from, effective_to)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id
-	`, q.TenantID, q.ProjectID, q.ResourceType, q.MeterName, q.LimitValue,
-		q.Unit, q.Period, q.EffectiveFrom, q.EffectiveTo).Scan(&id)
+	`, q.Name, q.TenantID, q.ProjectID, q.ResourceType, q.MeterName, q.LimitValue,
+		q.Unit, q.Period, q.Policy, thresholdsJSON, q.EffectiveFrom, q.EffectiveTo).Scan(&id)
 
 	if err != nil {
 		return 0, fmt.Errorf("upsert quota: %w", err)
@@ -1171,7 +1185,7 @@ func (s *Store) UpsertQuota(ctx context.Context, q QuotaRecord) (int64, error) {
 // QuotasForTenant returns all active quotas for a tenant.
 func (s *Store) QuotasForTenant(ctx context.Context, tenantID string, at time.Time) ([]QuotaRecord, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, effective_from, effective_to
+		SELECT id, name, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, policy, thresholds, effective_from, effective_to
 		FROM quotas
 		WHERE tenant_id = $1
 		  AND effective_from <= $2
@@ -1186,13 +1200,105 @@ func (s *Store) QuotasForTenant(ctx context.Context, tenantID string, at time.Ti
 	var results []QuotaRecord
 	for rows.Next() {
 		var r QuotaRecord
-		if err := rows.Scan(&r.ID, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
-			&r.LimitValue, &r.Unit, &r.Period, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+		var thresholdsJSON []byte
+		if err := rows.Scan(&r.ID, &r.Name, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
+			&r.LimitValue, &r.Unit, &r.Period, &r.Policy, &thresholdsJSON, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
 			return nil, err
+		}
+		if thresholdsJSON != nil {
+			json.Unmarshal(thresholdsJSON, &r.Thresholds)
 		}
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// GetQuota returns a single quota by ID.
+func (s *Store) GetQuota(ctx context.Context, id int64) (*QuotaRecord, error) {
+	var r QuotaRecord
+	var thresholdsJSON []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, name, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, policy, thresholds, effective_from, effective_to
+		FROM quotas WHERE id = $1
+	`, id).Scan(&r.ID, &r.Name, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
+		&r.LimitValue, &r.Unit, &r.Period, &r.Policy, &thresholdsJSON, &r.EffectiveFrom, &r.EffectiveTo)
+	if err != nil {
+		return nil, err
+	}
+	if thresholdsJSON != nil {
+		json.Unmarshal(thresholdsJSON, &r.Thresholds)
+	}
+	return &r, nil
+}
+
+// ListQuotas returns all active quotas, optionally filtered by tenant.
+func (s *Store) ListQuotas(ctx context.Context, tenantID string) ([]QuotaRecord, error) {
+	now := time.Now().UTC()
+	query := `SELECT id, name, tenant_id, project_id, resource_type, meter_name, limit_value, unit, period, policy, thresholds, effective_from, effective_to
+		FROM quotas WHERE effective_from <= $1 AND (effective_to IS NULL OR effective_to > $1)`
+	args := []any{now}
+	if tenantID != "" {
+		query += " AND tenant_id = $2"
+		args = append(args, tenantID)
+	}
+	query += " ORDER BY tenant_id, meter_name"
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []QuotaRecord
+	for rows.Next() {
+		var r QuotaRecord
+		var thresholdsJSON []byte
+		if err := rows.Scan(&r.ID, &r.Name, &r.TenantID, &r.ProjectID, &r.ResourceType, &r.MeterName,
+			&r.LimitValue, &r.Unit, &r.Period, &r.Policy, &thresholdsJSON, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+			return nil, err
+		}
+		if thresholdsJSON != nil {
+			json.Unmarshal(thresholdsJSON, &r.Thresholds)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// UpdateQuota updates a quota by ID.
+func (s *Store) UpdateQuota(ctx context.Context, id int64, q QuotaRecord) error {
+	var thresholdsJSON []byte
+	if q.Thresholds != nil {
+		var err error
+		thresholdsJSON, err = json.Marshal(q.Thresholds)
+		if err != nil {
+			return err
+		}
+	}
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE quotas SET name=$1, tenant_id=$2, project_id=$3, resource_type=$4, meter_name=$5,
+			limit_value=$6, unit=$7, period=$8, policy=$9, thresholds=$10
+		WHERE id = $11
+	`, q.Name, q.TenantID, q.ProjectID, q.ResourceType, q.MeterName,
+		q.LimitValue, q.Unit, q.Period, q.Policy, thresholdsJSON, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("quota %d not found", id)
+	}
+	return nil
+}
+
+// SoftDeleteQuota sets effective_to to now, making the quota inactive.
+func (s *Store) SoftDeleteQuota(ctx context.Context, id int64) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE quotas SET effective_to = NOW() WHERE id = $1 AND effective_to IS NULL`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("quota %d not found or already deleted", id)
+	}
+	return nil
 }
 
 // MeteringSum returns the total metered value for a tenant + meter in a time range.

@@ -178,6 +178,7 @@ type CostEntry struct {
 
 type QuotaRecord struct {
 	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
 	TenantID      string     `json:"tenant_id"`
 	ProjectID     string     `json:"project_id"`
 	ResourceType  string     `json:"resource_type"`
@@ -185,6 +186,8 @@ type QuotaRecord struct {
 	LimitValue    float64    `json:"limit_value"`
 	Unit          string     `json:"unit"`
 	Period        string     `json:"period"`
+	Policy        string     `json:"policy"`
+	Thresholds    []float64  `json:"thresholds,omitempty"`
 	EffectiveFrom time.Time  `json:"effective_from"`
 	EffectiveTo   *time.Time `json:"effective_to"`
 }

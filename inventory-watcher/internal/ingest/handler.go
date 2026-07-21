@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -135,6 +136,10 @@ func (h *Handler) SetReconciler(r Reconciler) {
 func (h *Handler) ServeMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/events", h.handleEvent)
+	mux.HandleFunc("POST /api/v1/quotas", h.handleCreateQuota)
+	mux.HandleFunc("GET /api/v1/quotas", h.handleListQuotas)
+	mux.HandleFunc("PUT /api/v1/quotas/", h.handleUpdateQuota)
+	mux.HandleFunc("DELETE /api/v1/quotas/", h.handleDeleteQuota)
 	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
 	mux.HandleFunc("GET /api/v1/reports/breakdown", h.handleCostBreakdown)
@@ -531,8 +536,12 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			pct = (consumed / q.LimitValue) * 100
 		}
 
-		thresholds := make(map[string]bool, len(rating.ThresholdLevels))
-		for _, t := range rating.ThresholdLevels {
+		levels := rating.ThresholdLevels
+		if len(q.Thresholds) > 0 {
+			levels = q.Thresholds
+		}
+		thresholds := make(map[string]bool, len(levels))
+		for _, t := range levels {
 			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
 		}
 
@@ -560,6 +569,122 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, resp)
+}
+
+// ── Quota CRUD ──
+
+func (h *Handler) handleCreateQuota(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var q inventory.QuotaRecord
+	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if q.TenantID == "" || q.MeterName == "" || q.Unit == "" {
+		writeErrorJSON(w, "tenant_id, meter_name, and unit are required", http.StatusBadRequest)
+		return
+	}
+	if q.LimitValue <= 0 {
+		writeErrorJSON(w, "limit_value must be positive", http.StatusBadRequest)
+		return
+	}
+	if q.Period == "" {
+		q.Period = "monthly"
+	}
+	if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
+		writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if q.Policy == "" {
+		q.Policy = "deny"
+	}
+	if q.EffectiveFrom.IsZero() {
+		q.EffectiveFrom = time.Now().UTC()
+	}
+
+	id, err := h.store.UpsertQuota(r.Context(), q)
+	if err != nil {
+		h.logger.Error("create quota failed", "error", err)
+		writeErrorJSON(w, "failed to create quota", http.StatusInternalServerError)
+		return
+	}
+	q.ID = id
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, q)
+}
+
+func (h *Handler) handleListQuotas(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	tenantID := r.URL.Query().Get("tenant_id")
+
+	quotas, err := h.store.ListQuotas(r.Context(), tenantID)
+	if err != nil {
+		writeErrorJSON(w, "failed to list quotas", http.StatusInternalServerError)
+		return
+	}
+	if quotas == nil {
+		quotas = []inventory.QuotaRecord{}
+	}
+	writeJSON(w, map[string]any{"quotas": quotas})
+}
+
+func (h *Handler) handleUpdateQuota(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeErrorJSON(w, "invalid quota ID", http.StatusBadRequest)
+		return
+	}
+
+	var q inventory.QuotaRecord
+	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if q.Period != "" {
+		if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
+			writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.store.UpdateQuota(r.Context(), id, q); err != nil {
+		writeErrorJSON(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	updated, _ := h.store.GetQuota(r.Context(), id)
+	if updated != nil {
+		writeJSON(w, updated)
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (h *Handler) handleDeleteQuota(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		writeErrorJSON(w, "invalid quota ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.SoftDeleteQuota(r.Context(), id); err != nil {
+		writeErrorJSON(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── Cost Report ──
