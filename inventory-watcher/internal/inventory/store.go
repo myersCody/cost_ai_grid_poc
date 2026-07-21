@@ -1384,6 +1384,18 @@ func (s *Store) CostSum(ctx context.Context, tenantID, meterName string, from, t
 	return sum, err
 }
 
+// TenantCostSum returns the total cost across all meters for a tenant.
+func (s *Store) TenantCostSum(ctx context.Context, tenantID string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_amount), 0)
+		FROM cost_entries
+		WHERE tenant_id = $1
+		  AND period_start >= $2 AND period_end <= $3
+	`, tenantID, from, to).Scan(&sum)
+	return sum, err
+}
+
 // QuotaCount returns the number of quotas in the table.
 func (s *Store) QuotaCount(ctx context.Context) (int, error) {
 	var count int

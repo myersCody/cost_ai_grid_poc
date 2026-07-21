@@ -529,7 +529,13 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var consumed float64
-		if q.ProjectID != "" {
+		if isBudget(q.Unit) {
+			if q.MeterName == "" || q.MeterName == "*" {
+				consumed, _ = h.store.TenantCostSum(ctx, tenantID, periodStart, periodEnd)
+			} else {
+				consumed, _ = h.store.CostSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+			}
+		} else if q.ProjectID != "" {
 			consumed, _ = h.store.MeteringSumByProject(ctx, tenantID, q.ProjectID, q.MeterName, periodStart, periodEnd)
 		} else {
 			consumed, _ = h.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
@@ -761,6 +767,14 @@ func (h *Handler) handleDeleteQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func isBudget(unit string) bool {
+	switch unit {
+	case "USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD", "AUD":
+		return true
+	}
+	return false
 }
 
 func (h *Handler) validateProjectOvercommit(ctx context.Context, q inventory.QuotaRecord, excludeID int64) error {
