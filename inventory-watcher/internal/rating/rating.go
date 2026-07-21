@@ -229,7 +229,16 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 			}
 			period := billing.PeriodLabel(qPeriod, now)
 
-			consumed, err := r.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+			var consumed float64
+			if isBudgetUnit(q.Unit) {
+				if q.MeterName == "" || q.MeterName == "*" {
+					consumed, err = r.store.TenantCostSum(ctx, tenantID, periodStart, periodEnd)
+				} else {
+					consumed, err = r.store.CostSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+				}
+			} else {
+				consumed, err = r.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
+			}
 			if err != nil || consumed == 0 || q.LimitValue <= 0 {
 				continue
 			}
@@ -268,6 +277,14 @@ func (r *Rater) evaluateThresholds(ctx context.Context) {
 	if fired > 0 {
 		r.logger.Info("threshold evaluation complete", "new_alerts", fired)
 	}
+}
+
+func isBudgetUnit(unit string) bool {
+	switch unit {
+	case "USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD", "AUD":
+		return true
+	}
+	return false
 }
 
 // ApplyRate computes cost for a metered value using flat or tiered pricing.
@@ -389,6 +406,7 @@ func SeedDefaultQuotas(ctx context.Context, store *inventory.Store, logger *slog
 		{"maas_tokens_in", 10_000_000, "tokens"},
 		{"maas_tokens_out", 5_000_000, "tokens"},
 		{"maas_requests", 100_000, "requests"},
+		{"*", 5000, "USD"},
 	}
 
 	seeded := 0

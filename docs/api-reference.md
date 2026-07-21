@@ -247,6 +247,10 @@ Returns quota consumption status for a tenant. Each quota uses its own period (m
 - **Source of truth:** Consumption is computed from `metering_entries` in real-time
 - **Alerts scaling:** At most 4 alerts per meter per period (one per threshold
   level). With 6 meters, max 24 alerts per tenant per month — trivially small.
+- **Monetary budgets:** When a quota's `unit` is a currency (e.g. `USD`),
+  the `consumed` field reports total cost from `cost_entries` instead of
+  metered usage from `metering_entries`. A quota with `meter_name="*"`
+  covers all meters for the tenant, creating a tenant-wide spend budget.
 - **Performance note:** The threshold evaluation runs every 30s in the rating
   sweep and queries `SUM(value)` per tenant × per meter. With the current
   implementation this is O(tenants × meters) SQL queries per sweep. For >100

@@ -610,3 +610,56 @@ func TestSweep_CumulativeTiers_DifferentTenants(t *testing.T) {
 		t.Errorf("tenant B: expected $0 (all free), got $%.4f", costB)
 	}
 }
+
+// TestEvaluateThresholds_MonetaryBudget verifies that monetary budgets
+// (unit=USD) fire threshold alerts based on cost_entries, not metering_entries.
+func TestEvaluateThresholds_MonetaryBudget(t *testing.T) {
+	ctx := context.Background()
+
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("budget-thresh-tenant-%d", ts)
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	// Create a $1000/month budget
+	if _, err := testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		Name:          "Monthly budget",
+		TenantID:      tenantID,
+		MeterName:     "*",
+		LimitValue:    1000.0,
+		Unit:          "USD",
+		Period:        "monthly",
+		EffectiveFrom: monthStart,
+	}); err != nil {
+		t.Fatalf("upsert budget: %v", err)
+	}
+
+	// Insert $800 of cost entries (80% — should fire 50% and 70% thresholds)
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		TenantID: tenantID, ResourceType: "compute_instance",
+		ResourceID: "vm-budget-thresh", MeterName: "vm_uptime_seconds",
+		MeteredValue: 86400, CostAmount: 800.0, Currency: "USD",
+		PeriodStart: monthStart, PeriodEnd: now,
+	})
+
+	rater := New(testStore, 30*time.Second, testLogger)
+	rater.evaluateThresholds(ctx)
+
+	var alert50, alert70, alert90 int
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM alerts WHERE tenant_id = $1 AND threshold_pct = 50", tenantID).Scan(&alert50)
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM alerts WHERE tenant_id = $1 AND threshold_pct = 70", tenantID).Scan(&alert70)
+	testStore.Pool().QueryRow(ctx,
+		"SELECT count(*) FROM alerts WHERE tenant_id = $1 AND threshold_pct = 90", tenantID).Scan(&alert90)
+
+	if alert50 == 0 {
+		t.Error("expected 50% budget threshold to fire at $800/$1000")
+	}
+	if alert70 == 0 {
+		t.Error("expected 70% budget threshold to fire at $800/$1000")
+	}
+	if alert90 != 0 {
+		t.Error("90% budget threshold should NOT fire at $800/$1000")
+	}
+}

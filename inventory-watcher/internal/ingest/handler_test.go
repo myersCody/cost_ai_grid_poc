@@ -1851,3 +1851,90 @@ func TestCreateQuota_NoOvercommitWithoutTenantLimit(t *testing.T) {
 		t.Errorf("should succeed without tenant limit: got %d", resp.StatusCode)
 	}
 }
+
+// ── Monetary Budget Tests ──
+
+func TestQuotaStatus_MonetaryBudget(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("budget-tenant-%d", ts)
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	// Create a monetary budget: $5000/month across all meters
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		Name:     "Monthly spend limit",
+		TenantID: tenantID, MeterName: "*",
+		LimitValue: 5000, Unit: "USD", Period: "monthly",
+		Policy: "deny", EffectiveFrom: monthStart,
+	})
+
+	// Insert a cost entry (simulating rated metering)
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		TenantID: tenantID, ResourceType: "compute_instance",
+		ResourceID: "vm-budget", MeterName: "vm_uptime_seconds",
+		MeteredValue: 3600, CostAmount: 1500.00, Currency: "USD",
+		PeriodStart: monthStart, PeriodEnd: now,
+	})
+
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas/" + tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Quotas []struct {
+			MeterName  string  `json:"meter_name"`
+			Unit       string  `json:"unit"`
+			Limit      float64 `json:"limit"`
+			Consumed   float64 `json:"consumed"`
+			Percentage float64 `json:"percentage"`
+		} `json:"quotas"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	if len(result.Quotas) == 0 {
+		t.Fatal("expected at least one quota")
+	}
+
+	budgetQuota := result.Quotas[0]
+	if budgetQuota.MeterName != "*" {
+		t.Errorf("meter_name: got %q, want *", budgetQuota.MeterName)
+	}
+	if budgetQuota.Unit != "USD" {
+		t.Errorf("unit: got %q, want USD", budgetQuota.Unit)
+	}
+	if budgetQuota.Consumed < 1499 || budgetQuota.Consumed > 1501 {
+		t.Errorf("consumed: got %.2f, want ~1500", budgetQuota.Consumed)
+	}
+	if budgetQuota.Percentage < 29 || budgetQuota.Percentage > 31 {
+		t.Errorf("percentage: got %.2f, want ~30%%", budgetQuota.Percentage)
+	}
+}
+
+func TestCreateQuota_MonetaryBudget(t *testing.T) {
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("budget-create-%d", ts)
+
+	body := fmt.Sprintf(`{"name":"Spend cap","tenant_id":"%s","meter_name":"*","limit_value":10000,"unit":"USD","period":"monthly","policy":"deny"}`, tenantID)
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, b)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["unit"] != "USD" {
+		t.Errorf("unit: got %v", result["unit"])
+	}
+	if result["meter_name"] != "*" {
+		t.Errorf("meter_name: got %v", result["meter_name"])
+	}
+}

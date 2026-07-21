@@ -199,6 +199,30 @@ accept these values:
 | `"Nh"` (e.g. `"5h"`, `"8h"`) | N-hour slots | Midnight UTC; last slot truncated if N doesn't divide 24 |
 | `"Nd"` (e.g. `"7d"`, `"10d"`) | N-day slots | 1st of month; last slot truncated if N doesn't divide the month |
 
+## Monetary Budgets
+
+A budget is a quota with `unit` set to a currency code (`USD`, `EUR`,
+etc.). Instead of tracking metered usage from `metering_entries`, the
+quota status API reports consumed cost from `cost_entries` for that
+tenant and period.
+
+Setting `meter_name="*"` creates a tenant-wide spend budget that
+covers all meters. This lets you set a single monthly (or any period)
+spending cap regardless of which resources drive the cost.
+
+```sql
+-- Monthly $5,000 spend cap for tenant-acme across all meters
+INSERT INTO quotas (name, tenant_id, meter_name, limit_value, unit, period)
+VALUES ('Monthly spend cap', 'tenant-acme', '*', 5000, 'USD', 'monthly');
+```
+
+When the quota status API evaluates a budget quota:
+- It queries `CostSum` / `TenantCostSum` (summing `cost_entries`) instead
+  of `MeteringSum`
+- Threshold checks and alerts work identically to usage quotas
+- The `consumed` field in the response is the total cost in the quota's
+  currency for the current period
+
 ## Rate Table Schema
 
 ```

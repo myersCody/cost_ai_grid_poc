@@ -11,10 +11,10 @@
 | Priority | Total | Done | Partial | Not started |
 |---|---|---|---|---|
 | CRITICAL | 5 | 4 | 1 | 0 |
-| HIGH | 9 | 7 | 1 | 1 |
+| HIGH | 9 | 8 | 0 | 1 |
 | MEDIUM | 3 | 3 | 0 | 0 |
 | LOW | 2 | 0 | 1 | 1 |
-| **Total** | **19** | **14** | **3** | **2** |
+| **Total** | **19** | **15** | **2** | **2** |
 
 ## Full Requirements Status
 
@@ -28,7 +28,7 @@
 | 6 | REQ-1a | [COST-7794](https://redhat.atlassian.net/browse/COST-7794) | HIGH | Cluster lifecycle | **Done** | ClusterOrder is the ordering workflow; we track the resulting Cluster (verified) |
 | 7 | REQ-3a | [COST-7799](https://redhat.atlassian.net/browse/COST-7799) | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open |
 | 8 | REQ-3 | [COST-7798](https://redhat.atlassian.net/browse/COST-7798) | HIGH | Granular cost tracking | **Done** | Report API with tenant/project/user/resource dimensions, breakdown, daily resolution |
-| 9 | REQ-9 | [COST-7805](https://redhat.atlassian.net/browse/COST-7805) | HIGH | Quota/budget status API | Partial | Status + non-monthly periods + CRUD + configurable thresholds done; project roll-up, fleet status, budgets — [gap analysis](requirements/req9-quota-budget-gap-analysis.md) |
+| 9 | REQ-9 | [COST-7805](https://redhat.atlassian.net/browse/COST-7805) | HIGH | Quota/budget status API | **Done** | Status API, CRUD, non-monthly periods, configurable thresholds, project roll-up, fleet status, monetary budgets — all done |
 | 10 | REQ-10 | [COST-7807](https://redhat.atlassian.net/browse/COST-7807) | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred |
 | 11 | REQ-13 | [COST-7810](https://redhat.atlassian.net/browse/COST-7810) | HIGH | Custom rate dimensions | **Done** | [Design](research/req13-custom-metrics-design.md) |
 | 12 | REQ-2a | [COST-7797](https://redhat.atlassian.net/browse/COST-7797) | HIGH | MaaS CloudEvents + tokens | **Done** (emulator) | IPP verified with real plugin + echo LLM. [Stress test](dev/ipp-stress-test-2026-07-05.md) |
@@ -227,7 +227,7 @@ resolution (see [OSAC open questions](requirements/osac-open-questions.md#bare-m
 | Project-scoped quotas + roll-up to tenant | **Gap** | `project_id` column exists but unused; sums are tenant-only |
 | Σ(project limits) ≤ tenant limit | **Gap** | No overcommit validation (Jul 20 decision) |
 | Fleet-level status for OSAC | **Gap** | No list-all / cross-tenant endpoint |
-| Monetary budgets (cost-based limits) | **Gap** | Only usage quotas today; no cost-sum path |
+| Monetary budgets (cost-based limits) | Done | Budget quotas (unit=USD) use CostSum/TenantCostSum for spend-based limits |
 | Non-monthly quota periods (5h, 24h, 7d) | Done | `billing.ResolvePeriod` supports monthly/weekly/daily/Nh/Nd; quota status + threshold evaluation use per-quota period (PRs #68, #74, #76) |
 | Configurable thresholds | Done | Per-quota JSONB `thresholds` column; defaults to `[50, 70, 90, 100]` if not set |
 
