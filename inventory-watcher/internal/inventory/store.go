@@ -1301,6 +1301,51 @@ func (s *Store) SoftDeleteQuota(ctx context.Context, id int64) error {
 	return nil
 }
 
+// ProjectLimitSum returns the sum of active project-level quota limits
+// for a given tenant and meter. Used for overcommit validation.
+func (s *Store) ProjectLimitSum(ctx context.Context, tenantID, meterName string, excludeID int64) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(limit_value), 0)
+		FROM quotas
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND project_id != '' AND project_id IS NOT NULL
+		  AND (effective_to IS NULL OR effective_to > NOW())
+		  AND id != $3
+	`, tenantID, meterName, excludeID).Scan(&sum)
+	return sum, err
+}
+
+// TenantQuotaLimit returns the tenant-level (non-project) limit for a meter.
+func (s *Store) TenantQuotaLimit(ctx context.Context, tenantID, meterName string) (float64, error) {
+	var limit float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(limit_value, 0)
+		FROM quotas
+		WHERE tenant_id = $1 AND meter_name = $2
+		  AND (project_id = '' OR project_id IS NULL)
+		  AND (effective_to IS NULL OR effective_to > NOW())
+		ORDER BY effective_from DESC
+		LIMIT 1
+	`, tenantID, meterName).Scan(&limit)
+	if err != nil {
+		return 0, nil
+	}
+	return limit, nil
+}
+
+// MeteringSumByProject returns the metered value for a tenant + project + meter.
+func (s *Store) MeteringSumByProject(ctx context.Context, tenantID, projectID, meterName string, from, to time.Time) (float64, error) {
+	var sum float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(value), 0)
+		FROM metering_entries
+		WHERE tenant_id = $1 AND project_id = $2 AND meter_name = $3
+		  AND period_start >= $4 AND period_end <= $5
+	`, tenantID, projectID, meterName, from, to).Scan(&sum)
+	return sum, err
+}
+
 // MeteringSum returns the total metered value for a tenant + meter in a time range.
 func (s *Store) MeteringSum(ctx context.Context, tenantID, meterName string, from, to time.Time) (float64, error) {
 	var sum float64

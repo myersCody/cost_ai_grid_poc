@@ -475,9 +475,10 @@ func writeErrorJSON(w http.ResponseWriter, msg string, status int) {
 }
 
 type quotaStatusResponse struct {
-	TenantID string                 `json:"tenant_id"`
-	Period   string                 `json:"period"`
-	Quotas   []inventory.QuotaStatus `json:"quotas"`
+	TenantID string                            `json:"tenant_id"`
+	Period   string                            `json:"period"`
+	Quotas   []inventory.QuotaStatus           `json:"quotas"`
+	Projects map[string][]inventory.QuotaStatus `json:"projects,omitempty"`
 }
 
 
@@ -508,8 +509,10 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var statuses []inventory.QuotaStatus
+	var tenantStatuses []inventory.QuotaStatus
+	projectStatuses := make(map[string][]inventory.QuotaStatus)
 	var firstPeriodLabel string
+
 	for _, q := range quotas {
 		qPeriod := q.Period
 		if qPeriod == "" {
@@ -525,10 +528,11 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			firstPeriodLabel = periodLabel
 		}
 
-		consumed, err := h.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
-		if err != nil {
-			h.logger.Error("failed to sum metering", "tenant", tenantID, "meter", q.MeterName, "error", err)
-			continue
+		var consumed float64
+		if q.ProjectID != "" {
+			consumed, _ = h.store.MeteringSumByProject(ctx, tenantID, q.ProjectID, q.MeterName, periodStart, periodEnd)
+		} else {
+			consumed, _ = h.store.MeteringSum(ctx, tenantID, q.MeterName, periodStart, periodEnd)
 		}
 
 		pct := 0.0
@@ -547,7 +551,7 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 
 		meterAlerts, _ := h.store.AlertsForTenantMeter(ctx, tenantID, q.MeterName, periodLabel)
 
-		statuses = append(statuses, inventory.QuotaStatus{
+		status := inventory.QuotaStatus{
 			MeterName:  q.MeterName,
 			Unit:       q.Unit,
 			Limit:      q.LimitValue,
@@ -555,7 +559,13 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 			Percentage: math.Round(pct*100) / 100,
 			Thresholds: thresholds,
 			Alerts:     meterAlerts,
-		})
+		}
+
+		if q.ProjectID != "" {
+			projectStatuses[q.ProjectID] = append(projectStatuses[q.ProjectID], status)
+		} else {
+			tenantStatuses = append(tenantStatuses, status)
+		}
 	}
 
 	if firstPeriodLabel == "" {
@@ -565,7 +575,10 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 	resp := quotaStatusResponse{
 		TenantID: tenantID,
 		Period:   firstPeriodLabel,
-		Quotas:   statuses,
+		Quotas:   tenantStatuses,
+	}
+	if len(projectStatuses) > 0 {
+		resp.Projects = projectStatuses
 	}
 
 	writeJSON(w, resp)
@@ -605,6 +618,13 @@ func (h *Handler) handleCreateQuota(w http.ResponseWriter, r *http.Request) {
 		q.EffectiveFrom = time.Now().UTC()
 	}
 
+	if q.ProjectID != "" {
+		if err := h.validateProjectOvercommit(r.Context(), q, 0); err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	id, err := h.store.UpsertQuota(r.Context(), q)
 	if err != nil {
 		h.logger.Error("create quota failed", "error", err)
@@ -617,19 +637,68 @@ func (h *Handler) handleCreateQuota(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, q)
 }
 
+type quotaWithStatus struct {
+	inventory.QuotaRecord
+	Consumed   float64         `json:"consumed"`
+	Percentage float64         `json:"percentage"`
+	Thresholds map[string]bool `json:"thresholds"`
+}
+
 func (h *Handler) handleListQuotas(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	tenantID := r.URL.Query().Get("tenant_id")
+	withStatus := r.URL.Query().Get("status") == "true"
 
 	quotas, err := h.store.ListQuotas(r.Context(), tenantID)
 	if err != nil {
 		writeErrorJSON(w, "failed to list quotas", http.StatusInternalServerError)
 		return
 	}
-	if quotas == nil {
-		quotas = []inventory.QuotaRecord{}
+
+	if !withStatus {
+		if quotas == nil {
+			quotas = []inventory.QuotaRecord{}
+		}
+		writeJSON(w, map[string]any{"quotas": quotas})
+		return
 	}
-	writeJSON(w, map[string]any{"quotas": quotas})
+
+	now := time.Now().UTC()
+	ctx := r.Context()
+	var results []quotaWithStatus
+	for _, q := range quotas {
+		qPeriod := q.Period
+		if qPeriod == "" {
+			qPeriod = "monthly"
+		}
+		periodStart, periodEnd, err := billing.ResolvePeriod(qPeriod, now)
+		if err != nil {
+			continue
+		}
+		consumed, _ := h.store.MeteringSum(ctx, q.TenantID, q.MeterName, periodStart, periodEnd)
+		pct := 0.0
+		if q.LimitValue > 0 {
+			pct = (consumed / q.LimitValue) * 100
+		}
+		levels := rating.ThresholdLevels
+		if len(q.Thresholds) > 0 {
+			levels = q.Thresholds
+		}
+		thresholds := make(map[string]bool, len(levels))
+		for _, t := range levels {
+			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
+		}
+		results = append(results, quotaWithStatus{
+			QuotaRecord: q,
+			Consumed:    consumed,
+			Percentage:  math.Round(pct*100) / 100,
+			Thresholds:  thresholds,
+		})
+	}
+	if results == nil {
+		results = []quotaWithStatus{}
+	}
+	writeJSON(w, map[string]any{"quotas": results})
 }
 
 func (h *Handler) handleUpdateQuota(w http.ResponseWriter, r *http.Request) {
@@ -652,6 +721,13 @@ func (h *Handler) handleUpdateQuota(w http.ResponseWriter, r *http.Request) {
 	if q.Period != "" {
 		if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
 			writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if q.ProjectID != "" && q.LimitValue > 0 {
+		if err := h.validateProjectOvercommit(r.Context(), q, id); err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -685,6 +761,22 @@ func (h *Handler) handleDeleteQuota(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) validateProjectOvercommit(ctx context.Context, q inventory.QuotaRecord, excludeID int64) error {
+	tenantLimit, err := h.store.TenantQuotaLimit(ctx, q.TenantID, q.MeterName)
+	if err != nil || tenantLimit == 0 {
+		return nil
+	}
+	projectSum, err := h.store.ProjectLimitSum(ctx, q.TenantID, q.MeterName, excludeID)
+	if err != nil {
+		return nil
+	}
+	if projectSum+q.LimitValue > tenantLimit {
+		return fmt.Errorf("project limits would exceed tenant limit: %.2f + %.2f > %.2f",
+			projectSum, q.LimitValue, tenantLimit)
+	}
+	return nil
 }
 
 // ── Cost Report ──
