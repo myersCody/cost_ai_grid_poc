@@ -165,6 +165,85 @@ func TestResolvePeriod_24h(t *testing.T) {
 	}
 }
 
+func TestResolvePeriod_7d(t *testing.T) {
+	// July has 31 days. 7d slots: 1-7, 8-14, 15-21, 22-28, 29-31 (3-day stub)
+	tests := []struct {
+		ref   string
+		start string
+		end   string
+	}{
+		{"2026-07-03T12:00:00Z", "2026-07-01T00:00:00Z", "2026-07-08T00:00:00Z"},
+		{"2026-07-10T12:00:00Z", "2026-07-08T00:00:00Z", "2026-07-15T00:00:00Z"},
+		{"2026-07-20T12:00:00Z", "2026-07-15T00:00:00Z", "2026-07-22T00:00:00Z"},
+		{"2026-07-25T12:00:00Z", "2026-07-22T00:00:00Z", "2026-07-29T00:00:00Z"},
+	}
+	for _, tc := range tests {
+		start, end, err := ResolvePeriod("7d", ts(tc.ref))
+		if err != nil {
+			t.Fatalf("ref=%s: %v", tc.ref, err)
+		}
+		if start != ts(tc.start) {
+			t.Errorf("ref=%s: start got %v, want %v", tc.ref, start, tc.start)
+		}
+		if end != ts(tc.end) {
+			t.Errorf("ref=%s: end got %v, want %v", tc.ref, end, tc.end)
+		}
+	}
+}
+
+func TestResolvePeriod_7d_LastSlotTruncated(t *testing.T) {
+	// July 30 falls in the last slot: 29-31 (3 days, not 7)
+	start, end, err := ResolvePeriod("7d", ts("2026-07-30T12:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start != ts("2026-07-29T00:00:00Z") {
+		t.Errorf("start: got %v, want Jul 29", start)
+	}
+	if end != ts("2026-08-01T00:00:00Z") {
+		t.Errorf("end: got %v, want Aug 1 (truncated to month end)", end)
+	}
+}
+
+func TestResolvePeriod_10d(t *testing.T) {
+	// July: 10d slots: 1-10, 11-20, 21-30, 31 (1-day stub)
+	start, end, err := ResolvePeriod("10d", ts("2026-07-15T12:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start != ts("2026-07-11T00:00:00Z") {
+		t.Errorf("start: got %v, want Jul 11", start)
+	}
+	if end != ts("2026-07-21T00:00:00Z") {
+		t.Errorf("end: got %v, want Jul 21", end)
+	}
+}
+
+func TestResolvePeriod_1d_SameAsDaily(t *testing.T) {
+	start, end, err := ResolvePeriod("1d", ts("2026-07-20T14:30:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startDaily, endDaily, _ := ResolvePeriod("daily", ts("2026-07-20T14:30:00Z"))
+	if start != startDaily || end != endDaily {
+		t.Errorf("1d should equal daily: got %v-%v, want %v-%v", start, end, startDaily, endDaily)
+	}
+}
+
+func TestResolvePeriod_0d_Error(t *testing.T) {
+	_, _, err := ResolvePeriod("0d", ts("2026-07-20T14:00:00Z"))
+	if err == nil {
+		t.Error("expected error for 0d")
+	}
+}
+
+func TestPeriodLabel_7d(t *testing.T) {
+	label := PeriodLabel("7d", ts("2026-07-10T12:00:00Z"))
+	if label != "2026-07-08/2026-07-14" {
+		t.Errorf("got %q, want 2026-07-08/2026-07-14", label)
+	}
+}
+
 func TestResolvePeriod_InvalidPeriod(t *testing.T) {
 	_, _, err := ResolvePeriod("banana", ts("2026-07-20T14:00:00Z"))
 	if err == nil {
