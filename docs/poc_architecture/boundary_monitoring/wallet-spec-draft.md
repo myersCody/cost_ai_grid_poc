@@ -24,6 +24,8 @@ This spec defines how Cost Management supports **prepaid wallets** for AI Grid /
 
 Settlement happens at **top-up** (money already collected). Metered usage then **draws down** that balance. That is commercially distinct from a budget (a ceiling on usage that will still be billed).
 
+**Hybrid funding (MB-005):** a single enterprise profile must concurrently track **postpaid monthly corporate invoices** alongside **dedicated prepaid wallets for experimental teams**. Cost therefore supports scoped wallets and **selective** deduction — only spend that matches a wallet is drawn down; other spend stays on the postpaid / invoice path.
+
 ---
 
 ## 2. Scope
@@ -33,17 +35,19 @@ Settlement happens at **top-up** (money already collected). Metered usage then *
 | Item | Notes |
 |---|---|
 | Wallet ledger | Create wallet, top up, adjust, query balance |
-| Spend deduction | Deduct from wallet as `cost_entries` accrue |
-| Status API | Remaining balance, % remaining, threshold flags (REQ-9 latency class) |
+| Tenant + project wallets | Project wallet = “experimental team” prepaid; tenant wallet optional |
+| Selective spend deduction | Only `cost_entries` matching a wallet scope are deducted; unmatched = postpaid |
+| Status API | Remaining balance, % remaining, threshold flags (REQ-9 latency class); filterable by project |
 | Low-balance alerts | Reuse REQ-10 alert lifecycle / push-or-pull pattern |
-| Audit trail | Immutable ledger entries for top-ups, deductions, adjustments |
-| Coexistence with budgets | Tenant may have wallet *and* budget/quota; evaluate independently |
+| Audit trail | Immutable ledger entries for top-ups, deductions, adjustments (= Cost audit for PoC) |
+| Coexistence with budgets / postpaid | Tenant may have wallet *and* budget/quota; hybrid postpaid + prepaid concurrently |
 
 ### Out of Scope (PoC)
 
 | Item | Owner / reason |
 |---|---|
 | Payment gateway / card capture | External billing (Lago, Zuora, etc.) or OSAC UX |
+| Postpaid corporate invoice generation | Billing system — Cost still rates `cost_entries` for reporting |
 | Hard stop on zero balance | OSAC enforcement (OPA / check-balance), same as REQ-9 |
 | Reserved allocations / billing multipliers | Customer billing system per MB-005 |
 | Cost UI for wallet management | Post-PoC unless needed for demo |
@@ -67,6 +71,12 @@ Both wallet and budget may exist for the same tenant:
 - Budget: “do not spend more than $5,000 this month” (ceiling; unused amount is not cash)
 - Wallet: “$1,000 was prepaid; deduct until balance hits zero / floor”
 
+Hybrid funding example (same enterprise / tenant):
+
+- Corporate projects: no wallet → metered cost accrues for **postpaid monthly invoice** (billing system)
+- Experimental team project: dedicated project wallet → that project’s metered cost **draws down** prepaid balance
+- Enterprise may still have a tenant-level budget/quota ceiling evaluated independently (REQ-9)
+
 ### 3.2 Why not “budget with no time limit”?
 
 Reusing budgets for wallets is tempting (a shrinking monetary number) but is a poor product fit:
@@ -80,9 +90,11 @@ Shared machinery under the hood (threshold evaluator, alert table, pull status A
 
 | Term | Meaning |
 |---|---|
-| **Wallet** | Prepaid balance account scoped to tenant (optionally project) |
+| **Wallet** | Prepaid balance account scoped to tenant or project (`project_id` null = tenant-scoped) |
+| **Experimental team wallet** | PoC: project-scoped wallet for a team under an enterprise tenant |
 | **Top-up** | Credit that increases available balance (settlement external) |
-| **Deduction** | Debit equal to newly rated `cost_entries` (or a reserved amount) |
+| **Deduction** | Debit equal to newly rated `cost_entries` that match wallet scope |
+| **Postpaid path** | Cost with no matching wallet — remains in `cost_entries` for invoicing; no ledger debit |
 | **Adjustment** | Manual credit/debit for disputes, corrections, promotions |
 | **Available balance** | `balance` after deductions; never below configured floor (default `0`) |
 | **Reference balance** | Amount used as denominator for “% remaining” (see §6.3) |
@@ -97,11 +109,12 @@ Mirrors the REQ-9 / REQ-10 split: Cost owns money math and status; OSAC owns gat
 | Concern | Owner | Notes |
 |---|---|---|
 | Payment capture / invoice at top-up | **Billing system** (or OSAC UX calling it) | Lago/Zuora/etc. — OUT of Cost |
-| Wallet create / top-up / adjust API | **Cost** | Ledger source of truth for remaining balance |
-| Top-up UX | **TBD** — OSAC or billing console | Cost may expose API only for PoC |
-| Metering + rating → cost amount | **Cost** | Existing sweeps → `cost_entries` |
-| Deduct cost from wallet | **Cost** | Post-rating debit into ledger |
-| Wallet status API (pull) | **Cost** → **OSAC** | Same latency class as REQ-9 (`< 500 ms` target) |
+| Postpaid corporate monthly invoice | **Billing system** | Uses rated cost; Cost does not issue invoices |
+| Wallet create / top-up / adjust API | **Cost** | Ledger source of truth for remaining balance (unlike quotas, where OSAC owns limit CRUD) |
+| Top-up UX | **TBD** — OSAC or billing console | Cost exposes API only for PoC |
+| Metering + rating → cost amount | **Cost** | Existing sweeps → `cost_entries` (all spend, prepaid or not) |
+| Deduct cost from wallet | **Cost** | Post-rating debit **only** for wallet-matched scope |
+| Wallet status API (pull) | **Cost** → **OSAC** | Same latency class as REQ-9 (`< 500 ms` target); project-aware |
 | Low-balance alerts (push) | **Cost** → **OSAC** | Pairs with REQ-10 (parked); pull flags sufficient for PoC |
 | Hard stop / deny provisioning | **OSAC** | Uses pull status; Cost never enforces |
 | Audit of payment side | **Billing system** | Cost audits ledger ops only |
@@ -144,7 +157,7 @@ flowchart LR
 
 **3 — Low-balance alert:** After deduction, `% remaining` crosses threshold → alert state `firing` (REQ-10 pattern) → visible on pull status; optional push to OSAC.
 
-**4 — Pre-create / inference gate (OSAC):** OSAC pulls wallet status → `within_balance: false` or `status: depleted` → OPA denies / throttles. Cost does not block.
+**4 — Pre-create / inference gate (OSAC):** OSAC pulls wallet status → `within_balance: false` or `balance_status: depleted` → OPA denies / throttles. Cost does not block.
 
 ```mermaid
 sequenceDiagram
@@ -196,7 +209,7 @@ wallets
   balance            DECIMAL NOT NULL   -- available funds (projection)
   balance_floor      DECIMAL NOT NULL DEFAULT 0
   reference_balance  DECIMAL NOT NULL   -- denominator for % remaining (see §6.3)
-  status             TEXT NOT NULL      -- active | frozen | closed
+  lifecycle_state    TEXT NOT NULL      -- active | frozen | closed
   thresholds         JSONB              -- e.g. [50, 25, 10, 0] (% remaining)
   created_at         TIMESTAMPTZ
   updated_at         TIMESTAMPTZ
@@ -258,26 +271,42 @@ cost_entries (existing)
   → marks cost_entry as wallet_applied (column or join table)
 ```
 
-**Proposed:** nullable `wallet_ledger_entry_id` on `cost_entries`, or a small `wallet_cost_applications (cost_entry_id, ledger_entry_id)` table for a clean FK without altering rating semantics.
+**Proposed:** `wallet_cost_applications (cost_entry_id, ledger_entry_id, amount_applied)` (or `applied_amount` on `cost_entries`) so a cost row can be **partially** applied across multiple ledger debits after a later top-up. Do **not** use a unique `cost_entry_id` alone for idempotency — idempotency is `sum(amount_applied) ≤ cost_amount`.
 
-Insufficient balance: deduct down to `balance_floor`; leave remainder of cost **unapplied** and surface `insufficient_funds` on status (OSAC decides hard stop). Do **not** silently drop cost — financial record stays in `cost_entries`.
+Insufficient balance: deduct down to `balance_floor`; leave remainder of cost **unapplied** and surface `insufficient_funds` / `unapplied_cost_amount` on status (OSAC decides hard stop). Do **not** silently drop cost — financial record stays in `cost_entries` for postpaid reporting and later wallet resume after top-up.
+
+**Currency:** only deduct when `cost_entries.currency` matches `wallets.currency`; otherwise skip with a metric/log (PoC is single-currency `USD`).
 
 ---
 
 ## 7. APIs (proposed)
 
-Paths follow the aspirational Cost API style in [alerting-spec-draft.md](alerting-spec-draft.md) / [ai-grid-reporting-api.md](../reporting/ai-grid-reporting-api.md). PoC may mount under inventory-watcher `INGEST_LISTEN_ADDR` (e.g. `:8020`) as `/api/v1/...`.
+Paths follow the existing PoC HTTP API under inventory-watcher `INGEST_LISTEN_ADDR` (e.g. `:8020`), same `/api/v1/...` prefix as quotas and reports (see [api-reference.md](../../api-reference.md)).
 
 ### 7.1 Manage wallet
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/api/cost/v1/tenants/{tenant_id}/wallets` | Create wallet (optional `project_id`, `thresholds`, `currency`) |
-| `GET` | `/api/cost/v1/tenants/{tenant_id}/wallets` | List wallets for tenant |
-| `GET` | `/api/cost/v1/tenants/{tenant_id}/wallets/{wallet_id}` | Get wallet + balance |
-| `POST` | `/api/cost/v1/tenants/{tenant_id}/wallets/{wallet_id}/top-ups` | Credit balance |
-| `POST` | `/api/cost/v1/tenants/{tenant_id}/wallets/{wallet_id}/adjustments` | Manual credit/debit |
-| `GET` | `/api/cost/v1/tenants/{tenant_id}/wallets/{wallet_id}/ledger` | Audit trail (paginated) |
+| `POST` | `/api/v1/wallets` | Create wallet (`tenant_id` in body; optional `project_id`, `thresholds`, `currency`) |
+| `GET` | `/api/v1/wallets/{tenant_id}` | List wallets + status for tenant (OSAC gate) |
+| `GET` | `/api/v1/wallets/{tenant_id}/{wallet_id}` | Get wallet + balance |
+| `POST` | `/api/v1/wallets/{tenant_id}/{wallet_id}/top-ups` | Credit balance |
+| `POST` | `/api/v1/wallets/{tenant_id}/{wallet_id}/adjustments` | Manual credit/debit |
+| `GET` | `/api/v1/wallets/{tenant_id}/{wallet_id}/ledger` | Audit trail (paginated) |
+
+**Create body (experimental team / project wallet):**
+
+```json
+{
+  "tenant_id": "tenant-acme",
+  "project_id": "project-skunkworks",
+  "currency": "USD",
+  "thresholds": [50, 25, 10],
+  "balance_floor": 0
+}
+```
+
+`project_id: null` creates a tenant-scoped wallet (optional whole-enterprise prepaid). Hybrid demos typically create **only** project wallets and leave corporate projects on postpaid.
 
 **Top-up body:**
 
@@ -293,10 +322,10 @@ Paths follow the aspirational Cost API style in [alerting-spec-draft.md](alertin
 ### 7.2 Status pull (OSAC gate) — REQ-14 ↔ REQ-9 latency
 
 ```
-GET /api/cost/v1/tenants/{tenant_id}/wallet-status
+GET /api/v1/wallets/{tenant_id}
 ```
 
-Query: optional `project_id`, `wallet_id`.
+Parallel to `GET /api/v1/quotas/{tenant_id}`. Query: optional `project_id`, `wallet_id`.
 
 **Hard latency target:** same as REQ-9 — **`< 500 ms`**, served from `wallets` projection (not raw ledger scan).
 
@@ -309,14 +338,17 @@ Query: optional `project_id`, `wallet_id`.
   "wallets": [
     {
       "wallet_id": "019f0123-abcd-7890-abcd-ef1234567890",
-      "project_id": null,
+      "project_id": "project-skunkworks",
       "currency": "USD",
       "balance": 88.00,
       "reference_balance": 100.00,
       "remaining_pct": 88.0,
       "balance_floor": 0,
-      "status": "ok",
+      "lifecycle_state": "active",
+      "balance_status": "ok",
       "within_balance": true,
+      "insufficient_funds": false,
+      "unapplied_cost_amount": 0,
       "thresholds_breached": [],
       "highest_threshold_fired": null
     }
@@ -324,7 +356,14 @@ Query: optional `project_id`, `wallet_id`.
 }
 ```
 
-| `status` | Condition (proposed) |
+OSAC gates for an experimental team should query with `?project_id=...` (or use the matching wallet in the list). Projects with no wallet are postpaid — absence of a wallet is not an error.
+
+| Field | Values (proposed) |
+|---|---|
+| `lifecycle_state` | `active` \| `frozen` \| `closed` (wallet policy) |
+| `balance_status` | `ok` \| `warning` / `approaching` / `critical` \| `depleted` |
+
+| `balance_status` | Condition (proposed) |
 |---|---|
 | `ok` | `remaining_pct` above first warning threshold |
 | `warning` / `approaching` / `critical` | Crossed configured low-balance bands |
@@ -336,7 +375,7 @@ Query: optional `project_id`, `wallet_id`.
 
 Reuse alert lifecycle from [alerting-spec-draft.md](alerting-spec-draft.md):
 
-- Pull flags on wallet-status (PoC minimum; REQ-10 parked)
+- Pull flags on `GET /api/v1/wallets/{tenant_id}` (PoC minimum; REQ-10 parked)
 - Optional push CloudEvent when unparked, e.g. `cost.wallet.threshold.v1`
 
 Proposed `data` delta vs quota events:
@@ -354,35 +393,50 @@ Threshold semantics are inverted vs budgets: budgets fire as **consumed % rises*
 
 ## 8. Deduction algorithm
 
+Mutations lock the wallet row (`SELECT … FOR UPDATE`) in the same transaction as the ledger insert + balance update.
+
 ```
 [after rating sweep writes new cost_entries]
-  for each active wallet matching cost scope (tenant, optional project):
-      select cost_entries where wallet not yet applied
-        and tenant_id matches
-        and (project_id matches wallet OR wallet is tenant-scoped)
-      for each entry in created_at order:
-          debit = min(entry.cost_amount, wallet.balance - wallet.balance_floor)
-          if debit <= 0:
-              mark wallet status depleted; stop applying further for this wallet
-          insert ledger deduction (-debit)
-          update wallets.balance
-          link cost_entry ↔ ledger_entry (full or partial)
-          if remaining_pct crossed threshold: update alerts / flags
+  select unrated-for-wallet cost_entries (applied_amount < cost_amount)
+    ordered by calculated_at (FIFO)
+  for each entry:
+      wallet = resolve_wallet(entry)   # see scope resolution below
+      if wallet is null:
+          continue                     # postpaid path — leave cost_entries only
+      if wallet.lifecycle_state != active:
+          continue                     # frozen/closed — queue (do not deduct)
+      remaining = entry.cost_amount - entry.applied_amount
+      debit = min(remaining, wallet.balance - wallet.balance_floor)
+      if debit <= 0:
+          mark wallet balance_status depleted; continue to next entry/wallet
+      insert ledger deduction (-debit); update wallets.balance
+      record application (amount_applied += debit)
+      if remaining_pct crossed threshold: update alerts / flags
+  # after top-up: same sweep resumes partial/unapplied backlog
 ```
 
-**Scope resolution (open — see §10):**
+**Scope resolution (hybrid-aware — decided for PoC):**
 
 | Option | Behavior |
 |---|---|
-| **A — Tenant wallet only (PoC lean)** | All tenant cost deducts from one wallet |
-| **B — Project wallet preferred** | Project wallet if present, else tenant wallet |
-| **C — Split** | Project wallets independent; tenant wallet unused for project spend |
+| **A — Tenant wallet only** | All tenant cost deducts from one wallet |
+| **B — Project wallet preferred (PoC lean)** | Project wallet if present for `cost_entry.project_id`; else tenant wallet if present; else **no deduction** (postpaid) |
+| **C — Split** | Project wallets only; tenant wallet never covers project spend |
 
-**Recommendation for PoC:** Option A (tenant-only). Add project wallets once REQ-3a project attribution demos need it.
+**Recommendation for PoC: Option B (hybrid-aware).**
+
+| Cost scope | Wallet present? | Funding path |
+|---|---|---|
+| `project-skunkworks` | Project wallet | Prepaid draw-down |
+| `project-corp-finance` | No project wallet, no tenant wallet | Postpaid invoice |
+| `project-corp-finance` | No project wallet, tenant wallet exists | Tenant prepaid (whole-enterprise prepaid mode) |
+| Tenant-level cost (`project_id` empty) | Tenant wallet if present | Prepaid; else postpaid |
+
+This matches MB-005: enterprise postpaid invoices + dedicated prepaid wallets for experimental teams, concurrently.
 
 ---
 
-## 9. Coexistence with budgets / quotas
+## 9. Coexistence with budgets / quotas / postpaid
 
 Independent evaluations after each rating cycle:
 
@@ -390,9 +444,14 @@ Independent evaluations after each rating cycle:
 |---|---|---|
 | Quota | `metering_entries` vs `quotas` | `within_limit` |
 | Budget | `SUM(cost_entries)` vs budget limit | `within_limit` |
-| Wallet | `wallets.balance` vs floor | `within_balance` |
+| Wallet | `wallets.balance` vs floor (when a wallet applies) | `within_balance` |
+| Postpaid invoice | Billing system over rated `cost_entries` | Outside Cost |
 
-OSAC may require **all** applicable checks to pass before create/inference. Cost returns each status; it does not combine them into a single boolean unless OSAC asks for a composite endpoint later.
+Notes:
+
+- Wallet draw-down does **not** remove rows from `cost_entries` — reports and postpaid invoicing still see accrued cost
+- OSAC may require **all** applicable checks to pass before create/inference for a prepaid project (quota + budget + wallet)
+- Cost returns each status independently; no composite boolean unless OSAC asks later
 
 ---
 
@@ -400,16 +459,18 @@ OSAC may require **all** applicable checks to pass before create/inference. Cost
 
 | # | Question | Impact | Lean |
 |---|---|---|---|
-| 1 | Tenant-only vs tenant + project wallets? | Schema uniqueness, deduction routing | Tenant-only for PoC |
-| 2 | Can projects share / draw from a tenant wallet? | Option B vs C above | Yes — tenant wallet covers all projects |
+| 1 | ~~Tenant-only vs tenant + project?~~ | — | **Decided:** tenant + project; Option B routing |
+| 2 | ~~Can projects share a tenant wallet?~~ | — | **Decided:** yes, via Option B fallthrough when no project wallet |
 | 3 | Who owns top-up UX? | Demo path | API in Cost; UX in OSAC or billing |
-| 4 | Zero balance: report-only or Cost participates in hard stop? | Product boundary | Report-only (OSAC enforces), same as REQ-9 |
-| 5 | `% of what` for low-balance — cumulative top-ups, last top-up, or absolute $? | `reference_balance` rules | Cumulative top-ups + absolute floor |
-| 6 | Partial deduction when cost > balance? | Ledger + unapplied cost | Deduct to floor; leave remainder unapplied; flag depleted |
+| 4 | ~~Zero balance hard stop?~~ | — | **Decided:** report-only (OSAC enforces) |
+| 5 | `% of what` for low-balance — cumulative top-ups, last top-up, or absolute $? | `reference_balance` rules | Cumulative top-ups + absolute floor (still confirm UX) |
+| 6 | ~~Partial deduction when cost > balance?~~ | — | **Decided:** deduct to floor; `amount_applied`; resume after top-up |
 | 7 | Frozen wallet (dispute) — still deduct? | Ops | No deductions while `frozen`; costs queue |
 | 8 | Shared alert table vs wallet-specific? | Schema | Reuse `alerts` with `limit_kind=wallet` |
-| 9 | MB-005 reserved allocations / multipliers | Scope creep | Remain OUT (billing system) |
-| 10 | Idempotency keys vs `external_ref` only? | Integration with Lago | Support both |
+| 9 | ~~MB-005 reserved allocations / multipliers~~ | — | **Decided:** Remain OUT (billing system) |
+| 10 | Idempotency keys vs `external_ref` only? | Integration with Lago | Support both (`external_ref` + `idempotency_key`) |
+| 11 | Does “experimental team” always = OSAC `project_id`? | Attribution | **Lean yes** for PoC; confirm with OSAC |
+| 12 | Acceptable overspend lag (meter→rate→deduct)? | Gate tightness | Accept ≤90s soft overspend for PoC; holds post-PoC |
 
 ---
 
@@ -417,15 +478,15 @@ OSAC may require **all** applicable checks to pass before create/inference. Cost
 
 | Phase | Deliverable | Depends on |
 |---|---|---|
-| **P0** | `wallets` + `wallet_ledger_entries` schema; create / get / top-up API | — |
-| **P1** | Deduction after rating (tenant wallet); link to `cost_entries` | P0, rating sweep |
-| **P2** | `GET .../wallet-status` with remaining % + threshold flags | P1 |
+| **P0** | `wallets` + `wallet_ledger_entries` schema; create / get / top-up API (tenant **and** project) | — |
+| **P1** | Deduction after rating with Option B routing + `amount_applied`; link to `cost_entries` | P0, rating sweep |
+| **P2** | `GET /api/v1/wallets/{tenant_id}` (+ `?project_id=`) with remaining % + threshold flags | P1 |
 | **P3** | Low-balance alert rows (pull-visible); optional push when REQ-10 unparked | P2, alerting patterns |
 | **P4** | Ledger query API + audit fields (`external_ref`, actor) | P0 |
-| **P5** | Project-scoped wallets (if required) | P1, scope decision |
-| **P6** | Demo seed + e2e in `test-inventory-watcher.sh` | P2 |
+| **P5** | Hybrid demo seed: postpaid project (no wallet) + prepaid experimental project wallet | P1–P2 |
+| **P6** | e2e in `test-inventory-watcher.sh` (balance drop + postpaid project untouched) | P5 |
 
-Minimum demo: seed tenant wallet → generate metered cost → show balance drop + status flags.
+Minimum demo: enterprise tenant → seed **project** wallet for experimental team → generate metered cost on that project (balance drops) and on a corporate project (no wallet deduction) → show status flags for the prepaid project only.
 
 ---
 
@@ -435,11 +496,13 @@ Minimum demo: seed tenant wallet → generate metered cost → show balance drop
 |---|---|
 | Top-up | Balance and `reference_balance` increase; ledger credit row |
 | Idempotent top-up | Same `external_ref` does not double-credit |
-| Deduction | Rated cost reduces balance; ledger debit; cost linked once |
-| Idempotent deduction | Re-running deduction job does not double-debit |
-| Depleted | Balance stops at floor; further cost left unapplied; `status=depleted` |
+| Project deduction | Rated cost on wallet project reduces that wallet; ledger debit |
+| Postpaid isolation | Cost on project **without** wallet does not change any wallet balance |
+| Tenant fallthrough | No project wallet + tenant wallet present → tenant wallet debited |
+| Partial + resume | Cost > balance → partial apply; top-up then remainder applied; no double-debit past `cost_amount` |
+| Depleted | Balance stops at floor; further cost left unapplied; `balance_status=depleted` |
 | Threshold | Crossing ≤25% remaining sets flag / alert once |
-| Status latency | `wallet-status` served from projection, not full ledger aggregate |
+| Status latency | `GET /api/v1/wallets/{tenant_id}` served from projection, not full ledger aggregate |
 | Coexistence | Budget exceeded and wallet OK (and vice versa) reported independently |
 | Audit | Ledger lists top-up, deduction, adjustment in order |
 

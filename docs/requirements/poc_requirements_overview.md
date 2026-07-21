@@ -322,10 +322,13 @@ Send threshold notifications from RHCM to OSAC when cost/quota consumption hits 
 **Source:** AI Grid MB-005 requirement.
 Support prepaid wallets so service providers can move from post-payment to pre-payment. Customers top up a wallet with a monetary amount; metered spend is deducted from that balance. When remaining funds fall below a configurable threshold (e.g. less than X% of the topped-up amount), alerts are sent.
 
+A single enterprise profile must be capable of processing **hybrid funding structures**, concurrently tracking postpaid monthly corporate invoices alongside dedicated prepaid wallets for experimental teams.
+
 **Definitions (contrast with REQ-9):**
 - **Budget** (REQ-9) = monetary *ceiling* — "do not spend more than $N" (typically over a period; unused budget is not prepaid cash)
 - **Wallet** (this requirement) = prepaid *balance* — "spend was prepaid; deduct until balance reaches zero (or a reserved floor)"
 - Both may coexist: a tenant can have a wallet balance *and* a budget/quota limit
+- Hybrid funding goes further: the same enterprise (tenant) can keep most spend on **postpaid invoices** while selected teams/projects draw from **dedicated prepaid wallets** — Cost must route deductions by scope, not assume one tenant-wide prepaid pool
 
 **Why not implement wallets as “budgets with no time limit”?**
 
@@ -337,9 +340,9 @@ A wallet *looks* a bit like an open-ended monetary budget (a balance that shrink
 Wallets therefore need an explicit prepaid-balance concept (this requirement), even if some ledger mechanics are shared with budgets under the hood.
 
 **Acceptance Criteria:**
-- RHCM can create, top up, and query wallet balances scoped to tenant (and optionally project)
-- Metered cost is deducted from the wallet balance as spend accrues
-- OSAC (or other consumers) can query remaining balance / % remaining via API (same latency expectations as REQ-9)
+- RHCM can create, top up, and query wallet balances scoped to tenant and project (project wallets are required for hybrid “experimental team” prepaid)
+- Metered cost attributed to a wallet-scoped project (or tenant wallet, if present) is deducted from that wallet as spend accrues; cost with no matching wallet remains on the postpaid / invoice path
+- OSAC (or other consumers) can query remaining balance / % remaining via API, including by project (same latency expectations as REQ-9)
 - Configurable low-balance thresholds trigger alerts (pairs with threshold notification work in REQ-10; see also Cost alerts/notifications tracking)
 - Wallet operations are auditable (top-ups, deductions, adjustments), i.e. they leave a trace in Cost Management audit log (the other side of the auditing will happen in the billing tool, e.g. Lago)
 
@@ -347,22 +350,29 @@ Wallets therefore need an explicit prepaid-balance concept (this requirement), e
 - No wallet / prepaid-balance concept exists in RHCM today
 - Closest existing capability is budgets/quotas (REQ-9), which model spending limits rather than prepaid credits
 - AI Grid MB-005 was marked Out of Scope for the trial/product cut in HIGHTP tracking (Jul 2026); Cost still needs the capability for prepaid provider models — PoC task [COST-7939](https://redhat.atlassian.net/browse/COST-7939), product feature [COST-7938](https://redhat.atlassian.net/browse/COST-7938)
+- Spec draft: [wallet-spec-draft.md](../poc_architecture/boundary_monitoring/wallet-spec-draft.md)
+
+**Decisions (from MB-005 / REQ-14):**
+- **Hybrid funding:** enterprise (tenant) supports postpaid corporate invoicing *and* dedicated prepaid wallets for experimental teams concurrently
+- **Wallet scope:** tenant + project; PoC maps “experimental team” → OSAC `project_id` wallet
+- **Deduction routing:** project wallet if present for that project’s cost; else tenant wallet if present; else no wallet deduction (postpaid path)
+- **Zero / insufficient balance:** Cost reports status only; OSAC enforces hard stop (same as REQ-9)
+- **Payment capture / reserved allocations / billing multipliers:** OUT of Cost — external billing system (Lago/Zuora/etc.)
 
 **Open Questions:**
-- Wallet scope: tenant-only, or tenant + project (and can projects share a tenant wallet)?
-- Who owns top-up UX / payment capture — Cost UI, OSAC, or an external billing system (Lago/Zuora/etc.) with Cost as balance ledger?
-- On zero/insufficient balance: does Cost only report status (like REQ-9), or must it participate in hard stop of provisioning/inference (enforcement still expected to be OSAC's)?
-- Relationship to reserved allocations / multipliers called out under MB-005 (those remain customer billing-system responsibilities per AI Grid notes)
+- Who owns top-up UX (not payment capture) — OSAC console vs billing console? Cost exposes API only for PoC
+- Exact `% of topped-up amount` denominator — cumulative top-ups vs last top-up vs reset-on-deplete (see wallet spec §6.3)
+- Confirm “experimental team” always maps to OSAC project (vs a separate team dimension)
 
 **Related:**
-- REQ-9 (Quota/Budget Status API) — complementary monetary controls
+- REQ-9 (Quota/Budget Status API) — complementary monetary controls; postpaid ceilings vs prepaid draw-down
 - REQ-10 (Threshold Notification Back Channel) — low-balance alerts
 - [COST-7938](https://redhat.atlassian.net/browse/COST-7938) — Cost Management feature
 - [Wallet spec draft](../poc_architecture/boundary_monitoring/wallet-spec-draft.md) — ledger, deduction, status API
 
 **Scope:**
-- IN: Wallet ledger (balance, top-up, deduction from metered spend); status API for remaining balance / threshold flags
-- OUT: Payment gateway / credit-card capture; enforcement of hard stop on zero balance (OSAC); reserved allocations and billing multipliers (customer billing system per MB-005)
+- IN: Wallet ledger (balance, top-up, deduction from metered spend); project- and tenant-scoped wallets; selective deduction for hybrid funding; status API for remaining balance / threshold flags
+- OUT: Payment gateway / credit-card capture; enforcement of hard stop on zero balance (OSAC); reserved allocations and billing multipliers (customer billing system per MB-005); generating the postpaid corporate invoice itself (billing system)
 
 ---
 
@@ -674,7 +684,7 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 | 20 | Exports | Should Have | Martin to double-check CSV export covers every field currently tracked |
 | 21 | Service Catalog | Should Have | Martin to verify cost calculation works purely from `instance_type` ahead of OSAC removing CPU/memory from `ComputeInstance` |
 | 22 | OSAC Integration | Should Have | Martin to file/coordinate a PR to expose bare metal events and catalog items on OSAC's public gRPC stream |
-| 23 | Wallets | Must Have | Design and implement prepaid wallets (REQ-14 / COST-7939 / AI Grid MB-005): top-up, deduct metered spend, low-balance alerts |
+| 23 | Wallets | Must Have | Design and implement prepaid wallets (REQ-14 / COST-7939 / AI Grid MB-005): hybrid funding (postpaid + project prepaid), top-up, selective deduct, low-balance alerts — [spec](../poc_architecture/boundary_monitoring/wallet-spec-draft.md) |
 
 ---
 
@@ -710,6 +720,11 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 | **Catalog price override by tenant** | (a) CSP-only pricing / (b) per-tenant pricing overrides / (c) tenant admins creating their own priced sub-offerings for their users | Raised by Moti (Jul 14, 2026 meeting), no answer yet from OSAC. Affects catalog/rate-lookup design in REQ-3b and REQ-13. See [osac-open-questions.md #22](osac-open-questions.md#catalog-pricing-model). |
 
 ---
+
+**Changelog — v1.6 (Jul 21, 2026):**
+- REQ-14: hybrid funding from MB-005 — enterprise must concurrently track postpaid corporate invoices and dedicated prepaid wallets for experimental teams; wallet scope lean is tenant + project (not tenant-only); deduction routing is selective (project wallet → tenant wallet → postpaid)
+- REQ-14: settled decisions for enforcement (OSAC), payment/reserved allocations (OUT), and audit split (Cost ledger + billing tool); remaining open Qs are top-up UX owner, `% of topped-up` denominator, and team→project mapping
+- Wallet technical spec updated to match — see [wallet-spec-draft.md](../poc_architecture/boundary_monitoring/wallet-spec-draft.md)
 
 **Changelog — v1.5 (Jul 20, 2026):**
 - REQ-14 (new): Wallets (prepaid balance) — from AI Grid MB-005; PoC task [COST-7939](https://redhat.atlassian.net/browse/COST-7939) under COST-7756; product feature [COST-7938](https://redhat.atlassian.net/browse/COST-7938); contrasts with budgets (REQ-9); low-balance alerts pair with REQ-10
