@@ -22,6 +22,9 @@ type Config struct {
 	MetricsPort             string
 	CustomMetricsConfigPath string
 	AuthIssuerURL           string
+	KokuDBURL               string
+	KokuMasuURL             string
+	KokuSyncInterval        time.Duration
 	DebugDashboard     bool
 	DisabledComponents map[string]bool
 	SplunkHECURL       string
@@ -116,6 +119,9 @@ func Load() *Config {
 		MetricsPort:        envOrDefault("METRICS_PORT", "9000"),
 		CustomMetricsConfigPath: os.Getenv("CUSTOM_METRICS_CONFIG"),
 		AuthIssuerURL:      os.Getenv("AUTH_ISSUER_URL"),
+		KokuDBURL:          os.Getenv("KOKU_DB_URL"),
+		KokuMasuURL:        envOrDefault("KOKU_MASU_URL", "http://localhost:5042"),
+		KokuSyncInterval:   durationOrDefault("KOKU_SYNC_INTERVAL", 5*time.Minute),
 		DebugDashboard:     envOrDefault("DEBUG_DASHBOARD", "true") != "false",
 		DisabledComponents: parseDisabledComponents(os.Getenv("DISABLE_COMPONENTS")),
 		SplunkHECURL:       os.Getenv("SPLUNK_HEC_URL"),

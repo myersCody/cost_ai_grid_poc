@@ -22,6 +22,7 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
 	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
+	"github.com/osac-project/cost-event-consumer/internal/kokusync"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
@@ -129,6 +130,22 @@ func main() {
 	}
 	startComponent("metering", func() error { return m.Run(ctx) })
 	startComponent("rating", func() error { return rt.Run(ctx) })
+
+	// Koku sync — opt-in via KOKU_DB_URL.
+	if cfg.KokuDBURL != "" {
+		kokuPool, err := pgxpool.New(ctx, cfg.KokuDBURL)
+		if err != nil {
+			logger.Error("failed to connect to Koku DB", "error", err)
+			os.Exit(1)
+		}
+		defer kokuPool.Close()
+		ks, err := kokusync.New(store.Pool(), kokuPool, cfg.KokuMasuURL, cfg.KokuSyncInterval, logger)
+		if err != nil {
+			logger.Error("failed to initialize koku-sync", "error", err)
+			os.Exit(1)
+		}
+		startComponent("koku-sync", func() error { return ks.Run(ctx) })
+	}
 
 	if cfg.SplunkHECURL != "" {
 		sf := splunk.New(store, cfg.SplunkHECURL, cfg.SplunkHECToken,
