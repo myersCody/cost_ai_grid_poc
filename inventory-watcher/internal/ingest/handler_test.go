@@ -1623,3 +1623,231 @@ func TestDeleteQuota_NotFound(t *testing.T) {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
 }
+
+// ── Fleet-Level Status Tests ──
+
+func TestListQuotas_WithStatus(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("fleet-tenant-%d", ts)
+	now := time.Now().UTC()
+
+	// Create a quota
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		TenantID: tenantID, MeterName: "vm_uptime_seconds",
+		LimitValue: 10000, Unit: "seconds", Period: "monthly",
+		EffectiveFrom: now.Add(-time.Hour),
+	})
+
+	// Add some consumption
+	testStore.InsertMeteringEntry(ctx, inventory.MeteringEntry{
+		ResourceType: "compute_instance", ResourceID: "vm-fleet",
+		TenantID: tenantID, MeterName: "vm_uptime_seconds",
+		Value: 3000, Unit: "seconds",
+		PeriodStart: now.Add(-60 * time.Second), PeriodEnd: now,
+	})
+
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas?tenant_id=" + tenantID + "&status=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Quotas []struct {
+			MeterName  string          `json:"meter_name"`
+			Consumed   float64         `json:"consumed"`
+			Percentage float64         `json:"percentage"`
+			Thresholds map[string]bool `json:"thresholds"`
+		} `json:"quotas"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	found := false
+	for _, q := range result.Quotas {
+		if q.MeterName == "vm_uptime_seconds" {
+			found = true
+			if q.Consumed < 3000 {
+				t.Errorf("consumed: got %.0f, want >= 3000", q.Consumed)
+			}
+			if q.Percentage <= 0 {
+				t.Error("percentage should be > 0")
+			}
+			if q.Thresholds == nil {
+				t.Error("thresholds should be present with status=true")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected vm_uptime_seconds quota for tenant %s", tenantID)
+	}
+}
+
+func TestListQuotas_WithoutStatus(t *testing.T) {
+	// Without ?status=true, response should have raw QuotaRecords (no consumed/thresholds)
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	// Should NOT contain "consumed" or "thresholds" fields since status=false
+	if strings.Contains(string(body), `"consumed"`) {
+		t.Error("without status=true, response should not include consumed field")
+	}
+}
+
+// ── Project Roll-up Tests ──
+
+func TestQuotaStatus_ProjectRollup(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("rollup-tenant-%d", ts)
+	now := time.Now().UTC()
+
+	// Create tenant-level quota
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		TenantID: tenantID, MeterName: "maas_tokens_in",
+		LimitValue: 10000000, Unit: "tokens", Period: "monthly",
+		EffectiveFrom: now.Add(-time.Hour),
+	})
+
+	// Create project-level quotas
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		TenantID: tenantID, ProjectID: "project-alpha", MeterName: "maas_tokens_in",
+		LimitValue: 4000000, Unit: "tokens", Period: "monthly",
+		EffectiveFrom: now.Add(-time.Hour),
+	})
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		TenantID: tenantID, ProjectID: "project-beta", MeterName: "maas_tokens_in",
+		LimitValue: 3000000, Unit: "tokens", Period: "monthly",
+		EffectiveFrom: now.Add(-time.Hour),
+	})
+
+	// Add consumption for each project
+	testStore.InsertMeteringEntry(ctx, inventory.MeteringEntry{
+		ResourceType: "model", ResourceID: "model-1",
+		TenantID: tenantID, ProjectID: "project-alpha",
+		MeterName: "maas_tokens_in", Value: 2000000, Unit: "tokens",
+		PeriodStart: now.Add(-60 * time.Second), PeriodEnd: now,
+	})
+	testStore.InsertMeteringEntry(ctx, inventory.MeteringEntry{
+		ResourceType: "model", ResourceID: "model-2",
+		TenantID: tenantID, ProjectID: "project-beta",
+		MeterName: "maas_tokens_in", Value: 1500000, Unit: "tokens",
+		PeriodStart: now.Add(-60 * time.Second), PeriodEnd: now,
+	})
+
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas/" + tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		TenantID string `json:"tenant_id"`
+		Quotas   []struct {
+			MeterName string  `json:"meter_name"`
+			Consumed  float64 `json:"consumed"`
+			Limit     float64 `json:"limit"`
+		} `json:"quotas"`
+		Projects map[string][]struct {
+			MeterName string  `json:"meter_name"`
+			Consumed  float64 `json:"consumed"`
+			Limit     float64 `json:"limit"`
+		} `json:"projects"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	// Tenant-level quota should show total consumption (2M + 1.5M = 3.5M)
+	if len(result.Quotas) == 0 {
+		t.Fatal("expected tenant-level quotas")
+	}
+	tenantConsumed := result.Quotas[0].Consumed
+	if tenantConsumed < 3400000 || tenantConsumed > 3600000 {
+		t.Errorf("tenant consumed: got %.0f, want ~3500000", tenantConsumed)
+	}
+
+	// Project quotas should be separated
+	if result.Projects == nil {
+		t.Fatal("expected projects field in response")
+	}
+	alpha, ok := result.Projects["project-alpha"]
+	if !ok || len(alpha) == 0 {
+		t.Fatal("expected project-alpha in projects")
+	}
+	if alpha[0].Consumed < 1900000 || alpha[0].Consumed > 2100000 {
+		t.Errorf("project-alpha consumed: got %.0f, want ~2000000", alpha[0].Consumed)
+	}
+
+	beta, ok := result.Projects["project-beta"]
+	if !ok || len(beta) == 0 {
+		t.Fatal("expected project-beta in projects")
+	}
+	if beta[0].Consumed < 1400000 || beta[0].Consumed > 1600000 {
+		t.Errorf("project-beta consumed: got %.0f, want ~1500000", beta[0].Consumed)
+	}
+}
+
+// ── Overcommit Validation Tests ──
+
+func TestCreateQuota_OvercommitRejected(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("overcommit-tenant-%d", ts)
+	meterName := fmt.Sprintf("overcommit_meter_%d", ts)
+	now := time.Now().UTC()
+
+	// Create tenant-level quota with limit 1000
+	testStore.UpsertQuota(ctx, inventory.QuotaRecord{
+		TenantID: tenantID, MeterName: meterName,
+		LimitValue: 1000, Unit: "units", Period: "monthly",
+		EffectiveFrom: now.Add(-time.Hour),
+	})
+
+	// Create a project quota with 600 (OK, under tenant limit)
+	body := fmt.Sprintf(`{"tenant_id":"%s","project_id":"proj-a","meter_name":"%s","limit_value":600,"unit":"units","period":"monthly"}`, tenantID, meterName)
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first project quota should succeed: got %d", resp.StatusCode)
+	}
+
+	// Create another project quota with 500 (would exceed: 600 + 500 = 1100 > 1000)
+	body = fmt.Sprintf(`{"tenant_id":"%s","project_id":"proj-b","meter_name":"%s","limit_value":500,"unit":"units","period":"monthly"}`, tenantID, meterName)
+	resp, err = http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("overcommitting project limits should fail: got %d, want 400", resp.StatusCode)
+	}
+
+	var errResp map[string]string
+	json.NewDecoder(resp.Body).Decode(&errResp)
+	if !strings.Contains(errResp["error"], "exceed tenant limit") {
+		t.Errorf("error should mention tenant limit: got %q", errResp["error"])
+	}
+}
+
+func TestCreateQuota_NoOvercommitWithoutTenantLimit(t *testing.T) {
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("no-limit-tenant-%d", ts)
+	meterName := fmt.Sprintf("no_limit_meter_%d", ts)
+
+	// No tenant-level quota exists — project quota should succeed regardless of value
+	body := fmt.Sprintf(`{"tenant_id":"%s","project_id":"proj-x","meter_name":"%s","limit_value":999999,"unit":"units","period":"monthly"}`, tenantID, meterName)
+	resp, err := http.Post(testServer.URL+"/api/v1/quotas", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("should succeed without tenant limit: got %d", resp.StatusCode)
+	}
+}
