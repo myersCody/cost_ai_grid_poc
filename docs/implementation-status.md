@@ -28,14 +28,14 @@
 | 6 | REQ-1a | [COST-7794](https://redhat.atlassian.net/browse/COST-7794) | HIGH | Cluster lifecycle | **Done** | ClusterOrder is the ordering workflow; we track the resulting Cluster (verified) |
 | 7 | REQ-3a | [COST-7799](https://redhat.atlassian.net/browse/COST-7799) | HIGH | Tenant/project attribution | **Done** | Authz/RBAC open |
 | 8 | REQ-3 | [COST-7798](https://redhat.atlassian.net/browse/COST-7798) | HIGH | Granular cost tracking | **Done** | Report API with tenant/project/user/resource dimensions, breakdown, daily resolution |
-| 9 | REQ-9 | [COST-7805](https://redhat.atlassian.net/browse/COST-7805) | HIGH | Quota/budget status API | Partial | Status API done; CRUD, project roll-up, fleet status, budgets, configurable thresholds — [gap analysis](requirements/req9-quota-budget-gap-analysis.md) |
+| 9 | REQ-9 | [COST-7805](https://redhat.atlassian.net/browse/COST-7805) | HIGH | Quota/budget status API | Partial | Status + non-monthly periods done; CRUD, project roll-up, fleet status, budgets, configurable thresholds — [gap analysis](requirements/req9-quota-budget-gap-analysis.md) |
 | 10 | REQ-10 | [COST-7807](https://redhat.atlassian.net/browse/COST-7807) | HIGH | Threshold notifications | **Done** (pull) | Webhook push deferred |
 | 11 | REQ-13 | [COST-7810](https://redhat.atlassian.net/browse/COST-7810) | HIGH | Custom rate dimensions | **Done** | [Design](research/req13-custom-metrics-design.md) |
 | 12 | REQ-2a | [COST-7797](https://redhat.atlassian.net/browse/COST-7797) | HIGH | MaaS CloudEvents + tokens | **Done** (emulator) | IPP verified with real plugin + echo LLM. [Stress test](dev/ipp-stress-test-2026-07-05.md) |
 | 13 | REQ-3b | [COST-7800](https://redhat.atlassian.net/browse/COST-7800) | MEDIUM | Service catalog sync | **Done** | Catalog sync + per-SKU pricing + catalog fallback — [rate guide](rate-configuration-guide.md) |
 | 14 | REQ-5 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | MEDIUM | Chargeback reporting | **Done** | Report API with project dimension, breakdown, daily resolution, date filtering; [CronJob export](dev/scheduled-chargeback-export.md) |
 | 15 | REQ-7 | [COST-7802](https://redhat.atlassian.net/browse/COST-7802) | MEDIUM | Audit trail | **Done** | `raw_events` + [Splunk forwarding](splunk-audit-forwarding.md) |
-| 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | Per-event done; capacity cumulative + time-windowed MaaS + decimal money = gaps — [gap analysis](requirements/req11-cost-tiers-gap-analysis.md) |
+| 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | Per-event + cumulative + windowed all done; decimal money gap remains — [rate guide](rate-configuration-guide.md) |
 | 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | TBD | PM definition pending |
 | 18 | REQ-8 | [COST-7811](https://redhat.atlassian.net/browse/COST-7811) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
 | 19 | REQ-14 | [COST-7939](https://redhat.atlassian.net/browse/COST-7939) | HIGH | Wallets (prepaid balance) | Not started | New in v1.5 — top-up, deduct metered spend, low-balance alerts |
@@ -228,7 +228,7 @@ resolution (see [OSAC open questions](requirements/osac-open-questions.md#bare-m
 | Σ(project limits) ≤ tenant limit | **Gap** | No overcommit validation (Jul 20 decision) |
 | Fleet-level status for OSAC | **Gap** | No list-all / cross-tenant endpoint |
 | Monetary budgets (cost-based limits) | **Gap** | Only usage quotas today; no cost-sum path |
-| Non-monthly quota periods (5h, 24h) | **Gap** | Hardcoded to calendar month |
+| Non-monthly quota periods (5h, 24h, 7d) | Done | `billing.ResolvePeriod` supports monthly/weekly/daily/Nh/Nd; quota status + threshold evaluation use per-quota period (PRs #68, #74, #76) |
 | Configurable thresholds | **Gap** | Fixed `[50, 70, 90, 100]` compile-time constant |
 
 ---
@@ -345,8 +345,8 @@ full evaluation.
 |---|---|---|
 | Multiple pricing tiers per resource type | Done | `rates.tiers` JSONB column; `applyTieredRate` waterfall |
 | Per-event tiers (within a single MaaS event) | Done | Graduated waterfall works for large events crossing boundaries |
-| Capacity cumulative tiers (GiB-month, core-hours) | **Gap** | Monthly accumulation needed; [design proposal](requirements/req11-cumulative-tiers-design-proposal.md) ready |
-| Time-windowed MaaS tiers (e.g. every 5h/24h) | **Gap** | New in v1.5 — no `window`/`period` field on `Tier`; no windowed accumulation |
+| Capacity cumulative tiers (GiB-month, core-hours) | Done | `tier_mode="cumulative"` + `tier_period`; `ApplyRateCumulative` with `MeteringSumBefore` (PRs #68, #74) |
+| Time-windowed MaaS tiers (e.g. every 5h/24h) | Done | Same cumulative engine with `tier_period="5h"` etc.; `ResolvePeriod` supports Nh/Nd (PR #76) |
 | Tier config without code changes | Done | JSON in `rates` table; no recompile needed |
 | Exact decimal money (not float64) | **Gap** | New in v1.5 — `float64` used for prices/costs; need `shopspring/decimal` or similar |
 
