@@ -13,8 +13,8 @@
 | CRITICAL | 5 | 4 | 1 | 0 |
 | HIGH | 9 | 9 | 0 | 0 |
 | MEDIUM | 3 | 3 | 0 | 0 |
-| LOW | 2 | 0 | 1 | 1 |
-| **Total** | **19** | **16** | **2** | **1** |
+| LOW | 2 | 1 | 1 | 0 |
+| **Total** | **19** | **17** | **2** | **0** |
 
 ## Full Requirements Status
 
@@ -36,7 +36,7 @@
 | 14 | REQ-5 | [COST-7801](https://redhat.atlassian.net/browse/COST-7801) | MEDIUM | Chargeback reporting | **Done** | Report API with project dimension, breakdown, daily resolution, date filtering; [CronJob export](dev/scheduled-chargeback-export.md) |
 | 15 | REQ-7 | [COST-7802](https://redhat.atlassian.net/browse/COST-7802) | MEDIUM | Audit trail | **Done** | `raw_events` + [Splunk forwarding](splunk-audit-forwarding.md) |
 | 16 | REQ-11 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Cost tiers | **Partial** | Per-event + cumulative + windowed all done; decimal money gap remains — [rate guide](rate-configuration-guide.md) |
-| 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | TBD | PM definition pending |
+| 17 | REQ-12 | [COST-7808](https://redhat.atlassian.net/browse/COST-7808) | LOW | Daily OCP Virt costs | **Done** | Live queries via `?resolution=daily`; no pre-aggregated summary table |
 | 18 | REQ-8 | [COST-7811](https://redhat.atlassian.net/browse/COST-7811) | HIGH | Bare metal costing | **Done** | [gap analysis](requirements/req8-bare-metal-gap-analysis.md) |
 | 19 | REQ-14 | [COST-7939](https://redhat.atlassian.net/browse/COST-7939) | HIGH | Wallets (prepaid balance) | **Done** | Tenant-scoped wallets: create, top-up, deduction sweep, status API, ledger audit; project-scoped wallets deferred |
 
@@ -352,6 +352,36 @@ full evaluation.
 
 ---
 
+### REQ-12 — Daily OpenShift Virtualization Costs
+**Status:** Done
+**Spec:** [poc_requirements_overview.md#req-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12--daily-openshift-virtualization-costs)
+
+| Acceptance Criterion | Status | Implementation |
+|---|---|---|
+| Daily cost per resource | Done | `GET /api/v1/reports/costs?resolution=daily` — adds date column to cost report |
+| Hourly or finer granularity | Done | 60s metering sweep + 30s rating sweep; cost entries available within 90s of event |
+| Per-project/tenant breakdown | Done | `?group_by=project` or `?group_by=tenant` with `?resolution=daily` |
+| Different rates per tenant/project | Done | Per-tenant rate overrides + per-SKU `instance_type` rates |
+| CSV/JSON export | Done | `?format=csv` for daily resolution export |
+
+**What we have:** Live queries over `cost_entries` with `?resolution=daily`
+give daily (or any date-range) cost per tenant/project/resource. No
+pre-aggregated summary table — the query sums `cost_entries` in real time.
+This is more flexible than a daily rollup (supports hourly, arbitrary
+ranges, any grouping) but may be slower at scale.
+
+**Possible future gaps (not blocking for PoC):**
+- **Pre-aggregated daily summary** — if live queries become too slow at
+  production scale, a materialized `daily_cost_summary` table could be
+  added as a caching layer. The API stays the same; only the query source
+  changes.
+- **Neocloud per-second granularity** — the spec notes neoclouds doing
+  per-minute or per-second billing. Our 60s metering sweep supports
+  per-minute naturally. Per-second would need a shorter sweep interval
+  (configurable via `METERING_INTERVAL`).
+
+---
+
 ## MEDIUM Requirements
 
 ### REQ-3b — Service Catalog Sync from OSAC
@@ -418,7 +448,7 @@ See also: [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queri
 | Req | Title | Status | Notes |
 |---|---|---|---|
 | [REQ-6](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-6--platform-security--access-control) | Security & Access Control | N/A | In-product, no gap |
-| [REQ-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12--daily-openshift-virtualization-costs) | Daily OCP Virt Costs | TBD | Pending PM confirmation |
+| [REQ-12](https://github.com/myersCody/cost_ai_grid_poc/blob/main/docs/requirements/poc_requirements_overview.md#req-12--daily-openshift-virtualization-costs) | Daily OCP Virt Costs | **Done** | Via live queries (`?resolution=daily`); see detailed section |
 | — | RBAC / Access Control for cost data | Not started | Track separately. Insights RBAC (Koku) vs Keycloak (OSAC). See [open question #18](requirements/osac-open-questions.md). Affects REQ-3a and REQ-6. |
 
 ---
