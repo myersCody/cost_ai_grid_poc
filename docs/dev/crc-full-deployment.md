@@ -31,13 +31,8 @@ oc login -u kubeadmin https://api.crc.testing:6443
 ### Repository Setup
 
 ```bash
-# Clone the repository
-cd ~/Projects/koku
-git clone <repo-url> cost_ai_grid_poc
+git clone https://github.com/myersCody/cost_ai_grid_poc.git
 cd cost_ai_grid_poc
-
-# Checkout the deployment branch
-git checkout openshift-deployment
 ```
 
 ## Architecture
@@ -306,7 +301,6 @@ EOF
 oc wait certificate osac-grpc-tls osac-oidc-tls -n osac --for=condition=Ready --timeout=60s
 
 # Deploy the OIDC server (uses osac-oidc-tls — see cert above)
-cd ~/Projects/koku/cost_ai_grid_poc
 kubectl apply -f deploy/k8s/osac-oidc-fixed.yaml
 
 # Deploy OSAC gRPC server
