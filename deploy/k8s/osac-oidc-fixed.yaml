@@ -151,7 +151,7 @@ spec:
             name: oidc-server-script
         - name: certs
           secret:
-            secretName: osac-grpc-tls
+            secretName: osac-oidc-tls
 ---
 apiVersion: v1
 kind: Service

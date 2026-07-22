@@ -171,16 +171,18 @@ helm upgrade cnpg oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg \
 ## Step 5: Create OSAC PostgreSQL Cluster
 
 ```bash
-# Create credentials
+# Create credentials with fixed passwords.
+# Fixed (not random) so the gRPC connection string matches without waiting
+# for CNPG to reconcile a rotation — fine for a PoC/dev environment.
 oc create secret generic -n postgres osac-keycloak-credentials \
   --type=kubernetes.io/basic-auth \
   --from-literal=username=keycloak \
-  --from-literal=password="$(openssl rand -base64 18)"
+  --from-literal=password=osac-keycloak-dev
 
 oc create secret generic -n postgres osac-service-credentials \
   --type=kubernetes.io/basic-auth \
   --from-literal=username=service \
-  --from-literal=password="$(openssl rand -base64 18)"
+  --from-literal=password=osac-service-dev
 
 # Create TLS certificate
 oc apply -f - <<'EOF'
@@ -252,18 +254,17 @@ oc wait pods -n postgres \
 ## Step 6: Deploy OSAC Stack
 
 ```bash
-# Get DB password
-POSTGRES_SERVICE=$(oc get secret -n postgres osac-service-credentials -o json | jq -r '.data["username"] | @base64d')
-POSTGRES_PASSWORD=$(oc get secret -n postgres osac-service-credentials -o json | jq -r '.data["password"] | @base64d')
-
-# Apply OSAC manifests
-cd ~/Projects/koku/cost_ai_grid_poc
-kubectl apply -f deploy/k8s/osac-oidc-fixed.yaml
-
-# Create namespace
+# Create namespace first
 oc new-project osac
 
-# Create gRPC TLS certificate
+POSTGRES_SERVICE=service
+POSTGRES_PASSWORD=osac-service-dev
+
+# Create TLS certificates — one for gRPC, one for the OIDC server.
+# IMPORTANT: osac-oidc-tls MUST be separate from osac-grpc-tls.
+# The OIDC pod serves HTTPS at osac-oidc.osac.svc:8013; if its cert
+# doesn't include that SAN, the gRPC server's JWKS fetch fails and
+# every token is rejected with 401. See troubleshooting.md for details.
 oc apply -f - <<'EOF'
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -281,7 +282,32 @@ spec:
   secretName: osac-grpc-tls
   privateKey:
     rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  namespace: osac
+  name: osac-oidc-tls
+spec:
+  issuerRef:
+    kind: ClusterIssuer
+    name: osac-ca
+  dnsNames:
+    - osac-oidc.osac.svc.cluster.local
+    - osac-oidc.osac.svc
+    - osac-oidc.osac
+    - osac-oidc
+  secretName: osac-oidc-tls
+  privateKey:
+    rotationPolicy: Always
 EOF
+
+# Wait for both certs to be issued
+oc wait certificate osac-grpc-tls osac-oidc-tls -n osac --for=condition=Ready --timeout=60s
+
+# Deploy the OIDC server (uses osac-oidc-tls — see cert above)
+cd ~/Projects/koku/cost_ai_grid_poc
+kubectl apply -f deploy/k8s/osac-oidc-fixed.yaml
 
 # Deploy OSAC gRPC server
 oc apply -f - <<EOF
@@ -482,6 +508,8 @@ metadata:
   namespace: cost-mgmt
 type: Opaque
 stringData:
+  user: "user"
+  password: "pass"
   connection-url: "postgres://user:pass@cost-db:5432/costdb"
 ---
 apiVersion: v1
@@ -511,6 +539,10 @@ spec:
       labels:
         app: cost-event-consumer
     spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.37
+          command: ['sh', '-c', 'until nc -z cost-db 5432; do echo "waiting for cost-db"; sleep 2; done']
       containers:
         - name: consumer
           image: quay.io/martin_povolny/cost-event-consumer:latest
@@ -575,6 +607,33 @@ spec:
 EOF
 ```
 
+## Step 8: Generate OSAC Token
+
+Tokens are signed with the **osac-oidc-tls** private key and expire after 90 days.
+CRC restart does **not** require a token refresh — Secrets persist across VM
+suspend/resume. You need to re-run this script when:
+
+- The token expires (90 days after last run), or
+- cert-manager rotates `osac-oidc-tls` (~90-day default) — the signing key
+  changes on rotation, invalidating any existing token.
+
+See [troubleshooting.md](troubleshooting.md) for the full explanation of why
+the key must be `osac-oidc-tls`, not `osac-grpc-tls`.
+
+```bash
+# Requires: pip install cryptography pyjwt
+./scripts/refresh-token.sh
+```
+
+The script extracts the signing key, generates a JWT, patches the
+`cost-consumer-secrets` Secret, and restarts the consumer pod.
+
+To inspect the token without applying it:
+
+```bash
+./scripts/refresh-token.sh --dry-run
+```
+
 ## Verification
 
 ```bash
@@ -584,31 +643,11 @@ kubectl get pods --all-namespaces | grep -E "NAMESPACE|osac|postgres|cert-manage
 # Check OSAC services
 kubectl get svc -n osac
 
-# Check consumer logs
+# Check consumer logs — should show reconciliation, not 401 loops
 kubectl logs -n cost-mgmt -l app=cost-event-consumer --tail=20
 ```
 
-Expected output:
-- All pods in Running state
-- Consumer showing 401 errors (token not valid) - this is expected with dummy token
-
-## Generate OSAC Token (Optional)
-
-To test with real authentication:
-
-```bash
-# Use the gen_token.py script from inventory-watcher
-cd ~/Projects/koku/cost_ai_grid_poc/inventory-watcher
-python3 scripts/gen_token.py > /tmp/osac_token.txt
-
-# Update the secret
-kubectl create secret generic -n cost-mgmt cost-consumer-secrets \
-  --from-literal=osac-token="$(cat /tmp/osac_token.txt)" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-# Restart consumer to pick up new token
-kubectl delete pod -n cost-mgmt -l app=cost-event-consumer
-```
+Expected: all pods `Running`, consumer logs showing `reconciliation complete` with no `token is not valid` errors.
 
 ## Cleanup
 
@@ -643,8 +682,8 @@ kubectl delete crd clusters.postgresql.cnpg.io
 - Check cert mount at /certs
 
 **Consumer 401 errors:**
-- Expected with dummy token
-- Generate real token with gen_token.py script
+- Run `scripts/refresh-token.sh` to generate and apply a real token
+- See [troubleshooting.md](troubleshooting.md) for root-cause details
 
 **CRC resource constraints:**
 - Stop unnecessary pods

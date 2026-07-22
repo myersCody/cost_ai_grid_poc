@@ -45,12 +45,12 @@ spec:
               value: costdb
           livenessProbe:
             exec:
-              command: ["pg_isready", "-U", "costuser"]
+              command: ["pg_isready", "-U", "user"]
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "costuser"]
+              command: ["pg_isready", "-U", "user"]
             initialDelaySeconds: 5
             periodSeconds: 5
           volumeMounts:

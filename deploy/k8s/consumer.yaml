@@ -13,6 +13,10 @@ spec:
       labels:
         app: cost-event-consumer
     spec:
+      initContainers:
+        - name: wait-for-db
+          image: busybox:1.37
+          command: ['sh', '-c', 'until nc -z cost-db 5432; do echo "waiting for cost-db"; sleep 2; done']
       containers:
         - name: consumer
           image: quay.io/martin_povolny/cost-event-consumer:latest
