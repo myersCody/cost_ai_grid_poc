@@ -334,6 +334,13 @@ Charge is based on what was provisioned, not what was used. The PoC emits these 
 | VM | `COMPUTE_INSTANCE_STATE_RUNNING` | `vm_uptime_seconds`, `vm_cpu_core_seconds`, `vm_memory_gib_seconds` |
 | Cluster | `CLUSTER_STATE_READY`, `CLUSTER_STATE_PROGRESSING` | `cluster_uptime_seconds`, `cluster_worker_node_seconds` (sum of `node_set.size × duration` across all node sets) |
 
+**VM pricing model:** OSAC is removing `cores`/`memory_gib` from
+`ComputeInstance` events. The recommended pricing model uses the
+`instance_type` field to determine cost: each instance type gets its
+own rate on `vm_uptime_seconds` (e.g. m5.xlarge = $0.50/hr). CPU and
+memory meters are emitted for capacity reporting but priced at $0.
+See [Rate Configuration Guide — Instance-Type Pricing](../rate-configuration-guide.md#option-1-flat-rate-per-instance-type-recommended) for setup.
+
 Final metering on DELETE is implemented for VMs only (not clusters).
 
 **Not implemented in PoC:**

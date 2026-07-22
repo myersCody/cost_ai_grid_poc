@@ -28,14 +28,23 @@ it calculates `duration = now - last_metered_at` and emits entries.
 
 | Meter | Formula | Unit | Notes |
 |-------|---------|------|-------|
-| `vm_uptime_seconds` | duration | seconds | Always emitted |
-| `vm_cpu_core_seconds` | cores × duration | core_seconds | 0 if cores unknown |
-| `vm_memory_gib_seconds` | memory_gib × duration | gib_seconds | 0 if memory unknown |
+| `vm_uptime_seconds` | duration | seconds | Always emitted; **primary billing meter** |
+| `vm_cpu_core_seconds` | cores × duration | core_seconds | 0 if cores unknown; capacity reporting only |
+| `vm_memory_gib_seconds` | memory_gib × duration | gib_seconds | 0 if memory unknown; capacity reporting only |
 
-**Catalog fallback:** when `cores = 0` and `instance_type` is set,
-the sweep looks up `inventory_instance_type` to resolve cores and
-memory_gib. If the instance type isn't in the catalog, CPU and memory
-meters produce 0 — but `vm_uptime_seconds` still works.
+**OSAC pricing model:** OSAC is removing `cores`/`memory_gib` from
+`ComputeInstance` events. Cost is determined by the `instance_type`
+field — each instance type gets its own rate on `vm_uptime_seconds`.
+The CPU/memory meters are emitted for capacity dashboards but should
+have $0 rates when using instance-type pricing. See
+[Rate Configuration Guide — Option 1](rate-configuration-guide.md#option-1-flat-rate-per-instance-type-recommended).
+
+**Catalog fallback (optional):** when `cores = 0` and `instance_type`
+is set, the sweep looks up `inventory_instance_type` to resolve cores
+and memory_gib. This populates the CPU/memory meters for capacity
+reporting. If the instance type isn't in the catalog, these meters
+produce 0 — this has no billing impact when using instance-type
+pricing.
 
 ```
 VM "vm-001" (instance_type: "m5.xlarge", cores: 0, memory_gib: 0)
@@ -199,29 +208,67 @@ Seeded on first startup if the `rates` table is empty:
 | model | maas_requests | — | Supplementary | $5.00/M req | 5.00/1M per request |
 | bare_metal | bm_uptime_seconds | node_cost_per_hour | Infrastructure | $0.05/hr | 0.05/3600 per second |
 
-## Worked Example: Full Cycle
+## Worked Example: Instance-Type Pricing (Recommended)
 
-A tenant "globex" runs one m5.xlarge VM (4 cores, 16 GiB) for 1 hour
-using default rates:
+A tenant "globex" runs one m5.xlarge VM for 1 hour with
+per-instance-type rates configured:
 
-**1. Metering sweep** (runs 60 times in 1 hour):
-
-Each sweep produces 3 entries with ~60s of usage:
-```
-vm_uptime_seconds     = 60.0    (× 60 sweeps = 3600 total)
-vm_cpu_core_seconds   = 240.0   (× 60 sweeps = 14400 total)
-vm_memory_gib_seconds = 960.0   (× 60 sweeps = 57600 total)
+**Rates:**
+```sql
+('compute_instance', 'm5.xlarge', 'vm_uptime_seconds', 'Infrastructure', 0.50/3600, 'USD')
+('compute_instance', '',          'vm_cpu_core_seconds', 'Supplementary', 0, 'USD')
+('compute_instance', '',          'vm_memory_gib_seconds', 'Supplementary', 0, 'USD')
 ```
 
-**2. Rating sweep** (applies rates to each entry):
+**1. Metering sweep** (60 sweeps × 60s each):
 
 ```
-vm_uptime_seconds:     60 × 0.01/3600 = $0.000167 per sweep
-vm_cpu_core_seconds:   240 × 0.005/3600 = $0.000333 per sweep
-vm_memory_gib_seconds: 960 × 0.002/3600 = $0.000533 per sweep
+vm_uptime_seconds     = 60.0    (× 60 = 3600 total)
+vm_cpu_core_seconds   = 0.0     (OSAC didn't send cores; catalog not populated)
+vm_memory_gib_seconds = 0.0     (same — doesn't matter, rate is $0)
 ```
 
-**3. Hourly totals:**
+**2. Rating sweep** — matches m5.xlarge rate on `vm_uptime_seconds`:
+
+```
+vm_uptime_seconds: 60 × 0.50/3600 = $0.00833 per sweep
+```
+
+**3. Hourly total:**
+
+| Meter | Value | Rate | Cost | Type |
+|-------|-------|------|------|------|
+| vm_uptime_seconds | 3,600 s | $0.50/hr (m5.xlarge) | **$0.500** | Infrastructure |
+| vm_cpu_core_seconds | 0 | $0 | $0.000 | Supplementary |
+| vm_memory_gib_seconds | 0 | $0 | $0.000 | Supplementary |
+| | | **Total** | **$0.500** | |
+
+No catalog lookup needed. No CPU/memory dependency. The instance type
+alone determines the cost.
+
+**4. With tenant-specific discount** ($0.40/hr for globex on m5.xlarge):
+
+```sql
+('tenant-globex', 'compute_instance', 'm5.xlarge', 'vm_uptime_seconds', 'Infrastructure', 0.40/3600, 'USD')
+```
+
+```
+vm_uptime_seconds: 3600 × 0.40/3600 = $0.400  (saved $0.100)
+```
+
+## Worked Example: CPU/Memory Pricing (Legacy)
+
+For environments where OSAC sends `cores`/`memory_gib` (or the
+InstanceType catalog is populated), you can price by resource specs:
+
+**Rates:**
+```sql
+('compute_instance', '', 'vm_uptime_seconds',       'Infrastructure', 0.01/3600, 'USD')
+('compute_instance', '', 'vm_cpu_core_seconds',     'Supplementary',  0.005/3600, 'USD')
+('compute_instance', '', 'vm_memory_gib_seconds',   'Supplementary',  0.002/3600, 'USD')
+```
+
+A 4-core, 16 GiB VM running for 1 hour:
 
 | Meter | Value | Rate | Cost | Type |
 |-------|-------|------|------|------|
@@ -230,20 +277,7 @@ vm_memory_gib_seconds: 960 × 0.002/3600 = $0.000533 per sweep
 | vm_memory_gib_seconds | 57,600 gs | $0.002/hr/GiB | **$0.032** | Supplementary |
 | | | **Total** | **$0.062** | |
 
-Infrastructure: $0.010, Supplementary: $0.052
-
-**4. If globex had a tenant-specific rate** ($0.008/hr for uptime):
-
-```
-vm_uptime_seconds: 3600 × 0.008/3600 = $0.008  (vs $0.010 default)
-Total: $0.060 (saved $0.002)
-```
-
-**5. If using per-SKU pricing** ($0.50/hr for m5.xlarge, CPU/memory at $0):
-
-```
-vm_uptime_seconds: 3600 × 0.50/3600 = $0.500
-vm_cpu_core_seconds: 14400 × 0 = $0.000
-vm_memory_gib_seconds: 57600 × 0 = $0.000
-Total: $0.500 (catalog-based, no CPU/memory line items)
-```
+This model requires either OSAC to include CPU/memory on the event
+or the `inventory_instance_type` catalog to be populated (via OSAC
+reconciler). If neither is available, CPU/memory meters produce 0
+and only `vm_uptime_seconds` contributes to cost.

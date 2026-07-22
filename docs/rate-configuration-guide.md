@@ -7,6 +7,22 @@ pricing, and MaaS token pricing.
 how meters are computed, catalog fallback, and worked examples
 showing the full path from resource to dollar amount.
 
+## OSAC Pricing Model: Instance Type
+
+OSAC is moving toward a model where `ComputeInstance` events carry an
+`instance_type` field but **not** CPU/memory specs. The cost of a VM
+is determined by its instance type — not by decomposing into
+core-hours and GiB-hours. This is analogous to how AWS EC2 pricing
+works: an `m5.xlarge` costs $X/hr regardless of how you look at its
+4 cores and 16 GiB.
+
+**Recommended setup:** configure one rate per instance type on the
+`vm_uptime_seconds` meter (Option 1 below). Set CPU/memory meter
+rates to $0 so they produce zero-cost entries (useful for capacity
+reporting but not billing). This way the catalog fallback for
+cores/memory never affects cost — even if OSAC stops sending specs
+and the instance type isn't in the local catalog.
+
 The rate engine supports per-SKU pricing via the `instance_type`
 dimension on the `rates` table. This enables three distinct pricing
 models that can be mixed per resource type.
@@ -27,19 +43,28 @@ all tenants").
 
 ## Pricing Models
 
-### Option 1: Flat rate per catalog item (recommended for OSAC)
+### Option 1: Flat rate per instance type (recommended)
 
-Price each VM size as a catalog item. No dependency on CPU/memory fields.
+Price each VM size by its instance type. Cost comes from the
+`vm_uptime_seconds` meter matched to an instance-type-specific rate.
+**No dependency on CPU/memory fields from OSAC or the catalog.**
+
+This is the recommended model because:
+- OSAC is removing `cores`/`memory_gib` from `ComputeInstance` events
+- The instance type fully determines the price (like cloud provider pricing)
+- No catalog lookup needed — the `instance_type` string on the event
+  is sufficient for rate matching
 
 ```sql
--- Per-SKU pricing: each instance type has its own hourly rate
+-- Per-instance-type pricing: each SKU has its own hourly rate
 INSERT INTO rates (resource_type, instance_type, meter_name, cost_type, price_per_unit, currency)
 VALUES
   ('compute_instance', 'm5.xlarge',  'vm_uptime_seconds', 'Infrastructure', 0.50 / 3600, 'USD'),
   ('compute_instance', 'm5.4xlarge', 'vm_uptime_seconds', 'Infrastructure', 2.00 / 3600, 'USD'),
   ('compute_instance', 'c5.2xlarge', 'vm_uptime_seconds', 'Infrastructure', 1.20 / 3600, 'USD');
 
--- Suppress CPU/memory line items (set to $0 or don't seed them)
+-- Zero out CPU/memory rates — these meters still emit for capacity
+-- reporting but produce $0 cost entries
 INSERT INTO rates (resource_type, instance_type, meter_name, cost_type, price_per_unit, currency)
 VALUES
   ('compute_instance', '', 'vm_cpu_core_seconds',    'Supplementary', 0, 'USD'),
@@ -48,7 +73,13 @@ VALUES
 
 **Result:** A tenant running one m5.xlarge for 1 hour pays $0.50.
 CPU/memory meters still exist (for capacity tracking / reporting) but
-produce $0 cost entries.
+produce $0 cost entries. The catalog fallback for cores/memory is
+irrelevant — cost is determined entirely by instance type × uptime.
+
+**How to add a new instance type:** insert one row into `rates` with
+the instance type name and per-second price. No catalog sync needed.
+If no rate exists for an instance type, the fallback chain tries
+tenant-only → global default (see Rate Matching Logic above).
 
 ### Option 2: CPU/memory rates (pre-OSAC / traditional model)
 
@@ -107,18 +138,33 @@ from the OpenAI-compatible API are *subsets* of `prompt_tokens` and
 separately would double-count. We parse them from CloudEvents for
 observability but don't create separate cost entries.
 
-## Catalog Fallback
+## Catalog Fallback (legacy / capacity reporting)
 
 When OSAC removes `cores`/`memory_gib` from `ComputeInstance` (or
-sends them as 0), the metering sweep automatically resolves hardware
-specs from the `InstanceType` catalog (`inventory_instance_type`
-table, synced via the reconciler). This means:
+sends them as 0), the metering sweep can resolve hardware specs from
+the `InstanceType` catalog (`inventory_instance_type` table, synced
+via the reconciler). This is a **secondary** mechanism for capacity
+reporting — **not required for billing** when using the recommended
+per-instance-type pricing model (Option 1).
 
-- `vm_cpu_core_seconds` and `vm_memory_gib_seconds` meters continue to
-  produce correct values even without inline specs
-- If the `InstanceType` is not in the catalog, these meters produce 0
-- With Option 1 (per-SKU pricing), this is irrelevant — cost comes
-  from the uptime rate, not CPU/memory meters
+The fallback works like this:
+
+- If `cores == 0` and `instance_type` is set on the event, look up
+  `inventory_instance_type` by the instance type ID
+- If found: use catalog's `cores` and `memory_gib` for the
+  `vm_cpu_core_seconds` and `vm_memory_gib_seconds` meters
+- If not found: those meters produce 0
+
+**With Option 1 (per-instance-type pricing):** the catalog fallback
+is irrelevant to billing. Cost comes from `vm_uptime_seconds` ×
+instance-type-specific rate. CPU/memory meters exist for capacity
+dashboards (e.g. "how many total core-hours across the fleet") but
+their rates are set to $0.
+
+**With Option 2 (CPU/memory pricing):** the catalog fallback is
+essential — it provides the specs needed to compute non-zero
+CPU/memory meters. This model requires either OSAC to send specs
+or the catalog to be populated.
 
 ## Tiered Pricing
 

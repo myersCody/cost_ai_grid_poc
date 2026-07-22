@@ -13,7 +13,7 @@
 > calculation works purely from `instance_type`. This doc is that
 > verification.
 
-## Implementation Progress (updated Jul 18, 2026)
+## Implementation Progress (updated Jul 22, 2026)
 
 > Gaps 1, 2, and 5 from this analysis have been addressed in PR #59:
 > - **Gap 1 (metering catalog fallback):** Done — `computeInstanceMeters`
@@ -28,6 +28,47 @@
 >
 > Remaining: Fix 3 (reconciler refresh), Fix 4 (guard metric), Fix 6
 > (instance_type on heartbeat CloudEvents)
+>
+> **Open Question #1 resolved:** Instance-type pricing is the primary
+> billing model. Cost = `vm_uptime_seconds` × per-instance-type rate.
+> CPU/memory meters are emitted for capacity reporting at $0 rates.
+> See [Rate Configuration Guide — Option 1](../rate-configuration-guide.md#option-1-flat-rate-per-instance-type-recommended).
+
+## How Instance-Type Pricing Works
+
+With OSAC dropping `cores`/`memory_gib` from `ComputeInstance`, the
+billing model is:
+
+```
+OSAC event: ComputeInstance { instance_type: "m5.xlarge", ... }
+                │
+                ▼
+Metering sweep: vm_uptime_seconds = duration (always works)
+                vm_cpu_core_seconds = 0 (no cores from OSAC; catalog optional)
+                vm_memory_gib_seconds = 0 (same)
+                │
+                ▼
+Rating sweep: matchRate(tenant, "m5.xlarge", "compute_instance", "vm_uptime_seconds")
+              → finds rate $0.50/hr for m5.xlarge
+              → cost = duration × $0.50/3600
+```
+
+**No catalog lookup required for billing.** The `instance_type` string
+on the metering entry is matched directly against the `instance_type`
+column on the `rates` table. The 4-way fallback (tenant+SKU → SKU →
+tenant → global) ensures a rate is always found as long as either a
+per-SKU or global default rate exists.
+
+**Setup:** one `INSERT INTO rates` per instance type. See
+[Rate Configuration Guide](../rate-configuration-guide.md) for
+complete examples including tenant overrides and tiered pricing.
+
+**Catalog fallback (for capacity reporting only):** if the InstanceType
+catalog is populated (via OSAC reconciler), the metering sweep resolves
+cores/memory and emits non-zero `vm_cpu_core_seconds` /
+`vm_memory_gib_seconds` entries. These are useful for dashboards
+("how many total core-hours across the fleet?") but should be priced
+at $0 when using instance-type pricing to avoid double-counting.
 
 ## TL;DR (written before PR #59 — some gaps below are now closed)
 
@@ -276,13 +317,12 @@ Once the fix lands, per this repo's doc-sync rules:
 
 ## Open Questions
 
-1. **Meter replace-vs-additive:** Does catalog-item pricing (a flat/tiered
-   `instance_type` rate) *replace* `vm_cpu_core_seconds` +
-   `vm_memory_gib_seconds`, or is it additive (e.g. base `instance_type`
-   price + supplementary CPU/memory line items still computed from
-   catalog specs for reporting/breakdown purposes, just not charged
-   twice)? Affects `SeedDefaultRates` and every quota/report consumer of
-   those two meter names.
+1. **Meter replace-vs-additive — RESOLVED:** Instance-type pricing
+   *replaces* CPU/memory pricing as the billing model. CPU/memory meters
+   are still emitted (for capacity dashboards) but priced at $0. Set up
+   per-instance-type rates on `vm_uptime_seconds` — see
+   [Rate Configuration Guide](../rate-configuration-guide.md). The
+   CPU/memory meters are additive only for reporting, not billing.
 2. **Timing/versioning:** Is there a target OSAC release or PR for this
    change? Martin asked Moti for a pointer — still outstanding. Without
    it we don't know if this needs to ship before the Jul 31 PoC or can
@@ -302,11 +342,9 @@ Once the fix lands, per this repo's doc-sync rules:
 5. **Bare metal analogy:** `BareMetalInstanceSpec` already only has
    `catalog_item` (no inline `cores`/`memory_gib`) per
    [req8-bare-metal-gap-analysis.md](req8-bare-metal-gap-analysis.md#blockers).
-   Bare metal metering isn't implemented yet (parked post-PoC), so it
-   never hit this problem — but whatever catalog-lookup pattern is built
-   for Fix #2 should be written generically enough to reuse for bare
-   metal metering when that work resumes, rather than building two
-   catalog-lookup implementations.
+   Bare metal metering uses `bm_uptime_seconds` only — no CPU/memory
+   decomposition — so it's already aligned with the instance-type
+   pricing model.
 
 ## Effort
 
