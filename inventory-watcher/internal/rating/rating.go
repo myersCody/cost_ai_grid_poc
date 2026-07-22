@@ -143,10 +143,11 @@ func (r *Rater) sweep(ctx context.Context) {
 	metrics.RatingSweepDuration.Observe(time.Since(start).Seconds())
 
 	r.evaluateThresholds(ctx)
-	r.deductWallets(ctx)
+	r.DeductWallets(ctx)
 }
 
-func (r *Rater) deductWallets(ctx context.Context) {
+// DeductWallets applies unapplied cost entries to tenant wallets.
+func (r *Rater) DeductWallets(ctx context.Context) {
 	tenants, err := r.store.AllTenantsWithWallets(ctx)
 	if err != nil || len(tenants) == 0 {
 		return

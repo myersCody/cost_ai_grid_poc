@@ -1494,9 +1494,16 @@ func (s *Store) WalletLedger(ctx context.Context, walletID string, limit int) ([
 	var results []WalletLedgerEntry
 	for rows.Next() {
 		var e WalletLedgerEntry
+		var extRef, reason *string
 		if err := rows.Scan(&e.ID, &e.WalletID, &e.EntryType, &e.Amount, &e.BalanceAfter, &e.Currency,
-			&e.CostEntryID, &e.ExternalRef, &e.Reason, &e.CreatedAt); err != nil {
+			&e.CostEntryID, &extRef, &reason, &e.CreatedAt); err != nil {
 			return nil, err
+		}
+		if extRef != nil {
+			e.ExternalRef = *extRef
+		}
+		if reason != nil {
+			e.Reason = *reason
 		}
 		results = append(results, e)
 	}

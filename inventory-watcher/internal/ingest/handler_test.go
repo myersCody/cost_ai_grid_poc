@@ -1939,3 +1939,150 @@ func TestCreateQuota_MonetaryBudget(t *testing.T) {
 		t.Errorf("meter_name: got %v", result["meter_name"])
 	}
 }
+
+// ── Wallet Tests ──
+
+func TestCreateWallet(t *testing.T) {
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("wallet-tenant-%d", ts)
+
+	body := fmt.Sprintf(`{"tenant_id":"%s","currency":"USD","thresholds":[50,25,10]}`, tenantID)
+	resp, err := http.Post(testServer.URL+"/api/v1/wallets", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 201, got %d: %s", resp.StatusCode, b)
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+	if result["id"] == nil || result["id"].(string) == "" {
+		t.Error("expected non-empty wallet ID")
+	}
+	if result["tenant_id"] != tenantID {
+		t.Errorf("tenant_id: got %v", result["tenant_id"])
+	}
+	if result["lifecycle_state"] != "active" {
+		t.Errorf("lifecycle_state: got %v", result["lifecycle_state"])
+	}
+}
+
+func TestCreateWallet_MissingTenant(t *testing.T) {
+	resp, err := http.Post(testServer.URL+"/api/v1/wallets", "application/json", strings.NewReader(`{"currency":"USD"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing tenant, got %d", resp.StatusCode)
+	}
+}
+
+func TestWallet_TopUpAndStatus(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("topup-tenant-%d", ts)
+
+	// Create wallet
+	body := fmt.Sprintf(`{"tenant_id":"%s","currency":"USD"}`, tenantID)
+	createResp, _ := http.Post(testServer.URL+"/api/v1/wallets", "application/json", strings.NewReader(body))
+	var created map[string]interface{}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	createResp.Body.Close()
+	walletID := created["id"].(string)
+
+	// Top up $500
+	topUpBody := `{"amount": 500.00, "external_ref": "test-payment-1"}`
+	topUpResp, _ := http.Post(fmt.Sprintf("%s/api/v1/wallets/%s/top-ups", testServer.URL, walletID),
+		"application/json", strings.NewReader(topUpBody))
+	if topUpResp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(topUpResp.Body)
+		t.Fatalf("top-up expected 201, got %d: %s", topUpResp.StatusCode, b)
+	}
+	topUpResp.Body.Close()
+
+	// Verify idempotent top-up
+	topUpResp2, _ := http.Post(fmt.Sprintf("%s/api/v1/wallets/%s/top-ups", testServer.URL, walletID),
+		"application/json", strings.NewReader(topUpBody))
+	if topUpResp2.StatusCode != http.StatusBadRequest {
+		t.Errorf("duplicate top-up should fail: got %d", topUpResp2.StatusCode)
+	}
+	topUpResp2.Body.Close()
+
+	// Check status
+	statusResp, _ := http.Get(fmt.Sprintf("%s/api/v1/wallets/%s", testServer.URL, tenantID))
+	var status map[string]interface{}
+	json.NewDecoder(statusResp.Body).Decode(&status)
+	statusResp.Body.Close()
+
+	// decimal.Decimal serializes as string in JSON
+	balanceStr, _ := status["balance"].(string)
+	if balanceStr != "500" {
+		t.Errorf("balance: got %v, want 500", status["balance"])
+	}
+	if status["balance_status"] != "ok" {
+		t.Errorf("balance_status: got %v, want ok", status["balance_status"])
+	}
+	if status["within_balance"] != true {
+		t.Errorf("within_balance: got %v", status["within_balance"])
+	}
+
+	// Verify ledger
+	ledgerResp, _ := http.Get(fmt.Sprintf("%s/api/v1/wallets/%s/ledger", testServer.URL, walletID))
+	var ledger map[string]interface{}
+	json.NewDecoder(ledgerResp.Body).Decode(&ledger)
+	ledgerResp.Body.Close()
+
+	if entriesRaw, ok := ledger["entries"].([]interface{}); ok {
+		if len(entriesRaw) != 1 {
+			t.Errorf("expected 1 ledger entry, got %d", len(entriesRaw))
+		}
+	} else {
+		t.Errorf("expected entries array in ledger response, got: %+v (status %d)", ledger, ledgerResp.StatusCode)
+	}
+
+	_ = ctx
+}
+
+func TestWallet_DeductionViaRatingSweep(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("deduct-tenant-%d", ts)
+	now := time.Now().UTC()
+
+	// Create wallet and top up $100
+	wallet := inventory.WalletRecord{
+		ID: fmt.Sprintf("wallet-deduct-%d", ts), TenantID: tenantID,
+		Currency: "USD", LifecycleState: "active",
+	}
+	testStore.CreateWallet(ctx, wallet)
+	testStore.TopUpWallet(ctx, wallet.ID, decimal.NewFromFloat(100), "seed-topup")
+
+	// Insert a cost entry (simulating rated metering)
+	testStore.InsertCostEntry(ctx, inventory.CostEntry{
+		TenantID: tenantID, ResourceType: "compute_instance",
+		ResourceID: fmt.Sprintf("vm-deduct-%d", ts), MeterName: "vm_uptime_seconds",
+		MeteredValue: 3600, CostAmount: decimal.NewFromFloat(25.00), Currency: "USD",
+		PeriodStart: now.Add(-time.Hour), PeriodEnd: now,
+	})
+
+	// Run the deduction sweep
+	rater := rating.New(testStore, 30*time.Second, testLogger)
+	rater.DeductWallets(ctx)
+
+	// Check balance decreased
+	updated, _ := testStore.GetWallet(ctx, wallet.ID)
+	if !updated.Balance.Equal(decimal.NewFromFloat(75)) {
+		t.Errorf("balance after deduction: got %s, want 75", updated.Balance.String())
+	}
+
+	// Check ledger has the deduction
+	ledger, _ := testStore.WalletLedger(ctx, wallet.ID, 10)
+	if len(ledger) != 2 {
+		t.Errorf("expected 2 ledger entries (top-up + deduction), got %d", len(ledger))
+	}
+}
