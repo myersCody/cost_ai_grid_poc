@@ -606,7 +606,7 @@ EOF
 
 ## Step 8: Generate OSAC Token
 
-Tokens are signed with the **osac-oidc-tls** private key and expire after 24 h.
+Tokens are signed with the **osac-oidc-tls** private key and expire after 7 days.
 Run this immediately after deployment and again whenever CRC restarts (cert
 rotation generates a new key). See [troubleshooting.md](troubleshooting.md)
 for the full explanation of why the key must be `osac-oidc-tls`, not

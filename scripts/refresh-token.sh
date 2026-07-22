@@ -2,7 +2,7 @@
 # Refresh the OSAC JWT in the cost-consumer-secrets and restart the consumer.
 #
 # Tokens are signed with the osac-oidc-tls private key (not osac-grpc-tls).
-# They expire after 24 h; run this script whenever:
+# They expire after 7 days; run this script whenever:
 #   - CRC was restarted (cert rotation generates a new key)
 #   - The consumer shows "token is not valid" in its logs
 #
@@ -57,7 +57,7 @@ token = jwt.encode(
         "preferred_username": "admin",
         "groups": ["admins"],
         "iat": now,
-        "exp": now + datetime.timedelta(hours=24),
+        "exp": now + datetime.timedelta(days=7),
     },
     pk,
     algorithm="RS256",
