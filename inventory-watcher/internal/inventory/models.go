@@ -240,6 +240,46 @@ type CostBreakdownRow struct {
 	Currency     string  `json:"currency"`
 }
 
+type WalletRecord struct {
+	ID               string          `json:"id"`
+	TenantID         string          `json:"tenant_id"`
+	ProjectID        string          `json:"project_id"`
+	Currency         string          `json:"currency"`
+	Balance          decimal.Decimal `json:"balance"`
+	BalanceFloor     decimal.Decimal `json:"balance_floor"`
+	ReferenceBalance decimal.Decimal `json:"reference_balance"`
+	LifecycleState   string          `json:"lifecycle_state"`
+	Thresholds       []float64       `json:"thresholds,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+type WalletLedgerEntry struct {
+	ID           int64           `json:"id"`
+	WalletID     string          `json:"wallet_id"`
+	EntryType    string          `json:"entry_type"`
+	Amount       decimal.Decimal `json:"amount"`
+	BalanceAfter decimal.Decimal `json:"balance_after"`
+	Currency     string          `json:"currency"`
+	CostEntryID  *int64          `json:"cost_entry_id,omitempty"`
+	ExternalRef  string          `json:"external_ref,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+type WalletStatus struct {
+	WalletID         string          `json:"wallet_id"`
+	TenantID         string          `json:"tenant_id"`
+	Currency         string          `json:"currency"`
+	Balance          decimal.Decimal `json:"balance"`
+	ReferenceBalance decimal.Decimal `json:"reference_balance"`
+	RemainingPct     float64         `json:"remaining_pct"`
+	BalanceFloor     decimal.Decimal `json:"balance_floor"`
+	BalanceStatus    string          `json:"balance_status"`
+	WithinBalance    bool            `json:"within_balance"`
+	Thresholds       map[string]bool `json:"thresholds"`
+}
+
 type PipelineSummary struct {
 	RawEvents       int `json:"raw_events"`
 	MeteringEntries int `json:"metering_entries"`
