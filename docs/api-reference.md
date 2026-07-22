@@ -22,6 +22,11 @@
 | GET | `/api/v1/reports/summary` | Pipeline health counts | `handlePipelineSummary` | — |
 | POST | `/api/v1/reconcile` | Trigger manual reconciliation | `handleReconcile` | `TestReconcileNotConfigured` |
 | GET | `/api/v1/customers/{id}/entitlements/{key}/value` | Balance check (IPP compatible) | `handleBalanceCheck` | `TestBalanceCheckResponseFormat` |
+| POST | `/api/v1/wallets` | Create wallet | `handleCreateWallet` | `TestCreateWallet`, `TestCreateWallet_MissingTenant` |
+| GET | `/api/v1/wallets/{id}` | Wallet status | `handleWalletStatus` | `TestWallet_TopUpAndStatus` |
+| POST | `/api/v1/wallets/{id}/top-ups` | Top up wallet | `handleWalletAction` | `TestWallet_TopUpAndStatus` |
+| POST | `/api/v1/wallets/{id}/adjustments` | Manual adjustment | `handleWalletAction` | — |
+| GET | `/api/v1/wallets/{id}/ledger` | Audit trail | `handleWalletLedger` | `TestWallet_TopUpAndStatus` |
 | GET | `/api/v1/debug/config` | Diagnostic config (secrets masked) | `handleDebugConfig` | — |
 | GET | `/debug/dashboard` | Built-in diagnostic dashboard (HTML) | `handleDebugDashboard` | — |
 

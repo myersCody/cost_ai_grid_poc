@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 )
 
 type Store struct {
@@ -319,6 +320,39 @@ ALTER TABLE rates ADD COLUMN IF NOT EXISTS tier_period TEXT NOT NULL DEFAULT '';
 ALTER TABLE quotas ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
 ALTER TABLE quotas ADD COLUMN IF NOT EXISTS policy TEXT NOT NULL DEFAULT 'deny';
 ALTER TABLE quotas ADD COLUMN IF NOT EXISTS thresholds JSONB;
+
+-- wallet tables (REQ-14)
+CREATE TABLE IF NOT EXISTS wallets (
+    id               TEXT PRIMARY KEY,
+    tenant_id        TEXT NOT NULL,
+    project_id       TEXT NOT NULL DEFAULT '',
+    currency         TEXT NOT NULL DEFAULT 'USD',
+    balance          NUMERIC(18,6) NOT NULL DEFAULT 0,
+    balance_floor    NUMERIC(18,6) NOT NULL DEFAULT 0,
+    reference_balance NUMERIC(18,6) NOT NULL DEFAULT 0,
+    lifecycle_state  TEXT NOT NULL DEFAULT 'active',
+    thresholds       JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_wallets_tenant ON wallets (tenant_id);
+
+CREATE TABLE IF NOT EXISTS wallet_ledger_entries (
+    id               BIGSERIAL PRIMARY KEY,
+    wallet_id        TEXT NOT NULL,
+    entry_type       TEXT NOT NULL,
+    amount           NUMERIC(18,6) NOT NULL,
+    balance_after    NUMERIC(18,6) NOT NULL,
+    currency         TEXT NOT NULL,
+    cost_entry_id    BIGINT,
+    external_ref     TEXT,
+    reason           TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_wle_wallet ON wallet_ledger_entries (wallet_id, created_at);
+
+-- wallet_applied tracks how much of a cost entry has been deducted from wallets
+ALTER TABLE cost_entries ADD COLUMN IF NOT EXISTS wallet_applied NUMERIC(18,6) NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS splunk_cursor (
     id             INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -1299,6 +1333,198 @@ func (s *Store) SoftDeleteQuota(ctx context.Context, id int64) error {
 		return fmt.Errorf("quota %d not found or already deleted", id)
 	}
 	return nil
+}
+
+// ── Wallet store functions ──
+
+func (s *Store) CreateWallet(ctx context.Context, w WalletRecord) error {
+	var thresholdsJSON []byte
+	if w.Thresholds != nil {
+		thresholdsJSON, _ = json.Marshal(w.Thresholds)
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO wallets (id, tenant_id, project_id, currency, balance, balance_floor, reference_balance, lifecycle_state, thresholds)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, w.ID, w.TenantID, w.ProjectID, w.Currency, w.Balance, w.BalanceFloor, w.ReferenceBalance, w.LifecycleState, thresholdsJSON)
+	return err
+}
+
+func (s *Store) GetWallet(ctx context.Context, id string) (*WalletRecord, error) {
+	var w WalletRecord
+	var thresholdsJSON []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, project_id, currency, balance, balance_floor, reference_balance, lifecycle_state, thresholds, created_at, updated_at
+		FROM wallets WHERE id = $1
+	`, id).Scan(&w.ID, &w.TenantID, &w.ProjectID, &w.Currency, &w.Balance, &w.BalanceFloor, &w.ReferenceBalance, &w.LifecycleState, &thresholdsJSON, &w.CreatedAt, &w.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if thresholdsJSON != nil {
+		_ = json.Unmarshal(thresholdsJSON, &w.Thresholds)
+	}
+	return &w, nil
+}
+
+func (s *Store) GetWalletForTenant(ctx context.Context, tenantID string) (*WalletRecord, error) {
+	var w WalletRecord
+	var thresholdsJSON []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, project_id, currency, balance, balance_floor, reference_balance, lifecycle_state, thresholds, created_at, updated_at
+		FROM wallets WHERE tenant_id = $1 AND lifecycle_state = 'active'
+		ORDER BY created_at DESC LIMIT 1
+	`, tenantID).Scan(&w.ID, &w.TenantID, &w.ProjectID, &w.Currency, &w.Balance, &w.BalanceFloor, &w.ReferenceBalance, &w.LifecycleState, &thresholdsJSON, &w.CreatedAt, &w.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if thresholdsJSON != nil {
+		_ = json.Unmarshal(thresholdsJSON, &w.Thresholds)
+	}
+	return &w, nil
+}
+
+func (s *Store) TopUpWallet(ctx context.Context, walletID string, amount decimal.Decimal, externalRef string) (*WalletLedgerEntry, error) {
+	if externalRef != "" {
+		var exists bool
+		_ = s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM wallet_ledger_entries WHERE wallet_id = $1 AND external_ref = $2)`, walletID, externalRef).Scan(&exists)
+		if exists {
+			return nil, fmt.Errorf("duplicate top-up: external_ref %s already applied", externalRef)
+		}
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var newBalance, newRef decimal.Decimal
+	err = tx.QueryRow(ctx, `
+		UPDATE wallets SET balance = balance + $1, reference_balance = reference_balance + $1, updated_at = NOW()
+		WHERE id = $2 RETURNING balance, reference_balance
+	`, amount, walletID).Scan(&newBalance, &newRef)
+	if err != nil {
+		return nil, fmt.Errorf("top-up wallet %s: %w", walletID, err)
+	}
+
+	var entry WalletLedgerEntry
+	err = tx.QueryRow(ctx, `
+		INSERT INTO wallet_ledger_entries (wallet_id, entry_type, amount, balance_after, currency, external_ref)
+		VALUES ($1, 'top_up', $2, $3, (SELECT currency FROM wallets WHERE id = $1), $4)
+		RETURNING id, wallet_id, entry_type, amount, balance_after, currency, external_ref, created_at
+	`, walletID, amount, newBalance, externalRef).Scan(&entry.ID, &entry.WalletID, &entry.EntryType, &entry.Amount, &entry.BalanceAfter, &entry.Currency, &entry.ExternalRef, &entry.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, tx.Commit(ctx)
+}
+
+func (s *Store) DeductFromWallet(ctx context.Context, walletID string, costEntryID int64, amount decimal.Decimal) (*WalletLedgerEntry, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var newBalance decimal.Decimal
+	err = tx.QueryRow(ctx, `
+		UPDATE wallets SET balance = balance - $1, updated_at = NOW()
+		WHERE id = $2 AND lifecycle_state = 'active'
+		RETURNING balance
+	`, amount, walletID).Scan(&newBalance)
+	if err != nil {
+		return nil, fmt.Errorf("deduct from wallet %s: %w", walletID, err)
+	}
+
+	_, _ = tx.Exec(ctx, `UPDATE cost_entries SET wallet_applied = wallet_applied + $1 WHERE id = $2`, amount, costEntryID)
+
+	negAmount := amount.Neg()
+	var entry WalletLedgerEntry
+	err = tx.QueryRow(ctx, `
+		INSERT INTO wallet_ledger_entries (wallet_id, entry_type, amount, balance_after, currency, cost_entry_id)
+		VALUES ($1, 'deduction', $2, $3, (SELECT currency FROM wallets WHERE id = $1), $4)
+		RETURNING id, wallet_id, entry_type, amount, balance_after, currency, cost_entry_id, created_at
+	`, walletID, negAmount, newBalance, costEntryID).Scan(&entry.ID, &entry.WalletID, &entry.EntryType, &entry.Amount, &entry.BalanceAfter, &entry.Currency, &entry.CostEntryID, &entry.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, tx.Commit(ctx)
+}
+
+func (s *Store) UnappliedCostEntries(ctx context.Context, tenantID string) ([]CostEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, metering_entry_id, rate_id, tenant_id, project_id, user_id, resource_type, resource_id,
+		       meter_name, metered_value, cost_amount, currency, period_start, period_end
+		FROM cost_entries
+		WHERE tenant_id = $1 AND wallet_applied < cost_amount
+		ORDER BY period_start
+	`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []CostEntry
+	for rows.Next() {
+		var ce CostEntry
+		if err := rows.Scan(&ce.ID, &ce.MeteringEntryID, &ce.RateID, &ce.TenantID, &ce.ProjectID, &ce.UserID,
+			&ce.ResourceType, &ce.ResourceID, &ce.MeterName, &ce.MeteredValue, &ce.CostAmount,
+			&ce.Currency, &ce.PeriodStart, &ce.PeriodEnd); err != nil {
+			return nil, err
+		}
+		results = append(results, ce)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) WalletLedger(ctx context.Context, walletID string, limit int) ([]WalletLedgerEntry, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, wallet_id, entry_type, amount, balance_after, currency, cost_entry_id, external_ref, reason, created_at
+		FROM wallet_ledger_entries WHERE wallet_id = $1 ORDER BY created_at DESC LIMIT $2
+	`, walletID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []WalletLedgerEntry
+	for rows.Next() {
+		var e WalletLedgerEntry
+		var extRef, reason *string
+		if err := rows.Scan(&e.ID, &e.WalletID, &e.EntryType, &e.Amount, &e.BalanceAfter, &e.Currency,
+			&e.CostEntryID, &extRef, &reason, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		if extRef != nil {
+			e.ExternalRef = *extRef
+		}
+		if reason != nil {
+			e.Reason = *reason
+		}
+		results = append(results, e)
+	}
+	return results, rows.Err()
+}
+
+func (s *Store) AllTenantsWithWallets(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT tenant_id FROM wallets WHERE lifecycle_state = 'active'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tenants []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		tenants = append(tenants, t)
+	}
+	return tenants, rows.Err()
 }
 
 // ProjectLimitSum returns the sum of active project-level quota limits

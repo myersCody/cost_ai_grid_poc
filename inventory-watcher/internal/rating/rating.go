@@ -143,6 +143,61 @@ func (r *Rater) sweep(ctx context.Context) {
 	metrics.RatingSweepDuration.Observe(time.Since(start).Seconds())
 
 	r.evaluateThresholds(ctx)
+	r.DeductWallets(ctx)
+}
+
+// DeductWallets applies unapplied cost entries to tenant wallets.
+func (r *Rater) DeductWallets(ctx context.Context) {
+	tenants, err := r.store.AllTenantsWithWallets(ctx)
+	if err != nil || len(tenants) == 0 {
+		return
+	}
+
+	deducted := 0
+	for _, tenantID := range tenants {
+		wallet, err := r.store.GetWalletForTenant(ctx, tenantID)
+		if err != nil || wallet == nil || wallet.LifecycleState != "active" {
+			continue
+		}
+
+		entries, err := r.store.UnappliedCostEntries(ctx, tenantID)
+		if err != nil || len(entries) == 0 {
+			continue
+		}
+
+		for _, ce := range entries {
+			var applied decimal.Decimal
+			_ = r.store.Pool().QueryRow(ctx, `SELECT wallet_applied FROM cost_entries WHERE id = $1`, ce.ID).Scan(&applied)
+			remaining := ce.CostAmount.Sub(applied)
+			if remaining.IsZero() || remaining.IsNegative() {
+				continue
+			}
+
+			available := wallet.Balance.Sub(wallet.BalanceFloor)
+			if available.IsZero() || available.IsNegative() {
+				r.logger.Info("wallet depleted", "tenant", tenantID, "wallet", wallet.ID)
+				break
+			}
+
+			debit := remaining
+			if debit.GreaterThan(available) {
+				debit = available
+			}
+
+			if _, err := r.store.DeductFromWallet(ctx, wallet.ID, ce.ID, debit); err != nil {
+				r.logger.Error("wallet deduction failed", "wallet", wallet.ID, "cost_entry", ce.ID, "error", err)
+				continue
+			}
+
+			// Refresh wallet balance after deduction
+			wallet, _ = r.store.GetWallet(ctx, wallet.ID)
+			deducted++
+		}
+	}
+
+	if deducted > 0 {
+		r.logger.Info("wallet deductions complete", "entries_applied", deducted)
+	}
 }
 
 type rateKey struct {

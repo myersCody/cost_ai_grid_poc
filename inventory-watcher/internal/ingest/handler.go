@@ -12,6 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
 	"github.com/osac-project/cost-event-consumer/internal/billing"
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
@@ -141,6 +144,9 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("PUT /api/v1/quotas/", h.handleUpdateQuota)
 	mux.HandleFunc("DELETE /api/v1/quotas/", h.handleDeleteQuota)
 	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
+	mux.HandleFunc("POST /api/v1/wallets", h.handleCreateWallet)
+	mux.HandleFunc("GET /api/v1/wallets/", h.handleWalletStatus)
+	mux.HandleFunc("POST /api/v1/wallets/", h.handleWalletAction)
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
 	mux.HandleFunc("GET /api/v1/reports/breakdown", h.handleCostBreakdown)
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
@@ -791,6 +797,193 @@ func (h *Handler) validateProjectOvercommit(ctx context.Context, q inventory.Quo
 			projectSum, q.LimitValue, tenantLimit)
 	}
 	return nil
+}
+
+// ── Wallet Handlers ──
+
+func (h *Handler) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var req struct {
+		TenantID     string    `json:"tenant_id"`
+		ProjectID    string    `json:"project_id"`
+		Currency     string    `json:"currency"`
+		Thresholds   []float64 `json:"thresholds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.TenantID == "" {
+		writeErrorJSON(w, "tenant_id is required", http.StatusBadRequest)
+		return
+	}
+	if req.Currency == "" {
+		req.Currency = "USD"
+	}
+
+	wallet := inventory.WalletRecord{
+		ID:             uuid.New().String(),
+		TenantID:       req.TenantID,
+		ProjectID:      req.ProjectID,
+		Currency:       req.Currency,
+		LifecycleState: "active",
+		Thresholds:     req.Thresholds,
+	}
+
+	if err := h.store.CreateWallet(r.Context(), wallet); err != nil {
+		h.logger.Error("create wallet failed", "error", err)
+		writeErrorJSON(w, "failed to create wallet", http.StatusInternalServerError)
+		return
+	}
+
+	created, _ := h.store.GetWallet(r.Context(), wallet.ID)
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, created)
+}
+
+func (h *Handler) handleWalletStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeErrorJSON(w, "wallet_id or tenant_id required", http.StatusBadRequest)
+		return
+	}
+
+	// If the path ends with /ledger, serve the ledger
+	if len(parts) >= 2 && parts[1] == "ledger" {
+		h.handleWalletLedger(w, r, parts[0])
+		return
+	}
+
+	id := parts[0]
+	ctx := r.Context()
+
+	// Try as wallet ID first, then as tenant ID
+	wallet, err := h.store.GetWallet(ctx, id)
+	if err != nil {
+		wallet, err = h.store.GetWalletForTenant(ctx, id)
+	}
+	if err != nil || wallet == nil {
+		writeErrorJSON(w, "wallet not found", http.StatusNotFound)
+		return
+	}
+
+	remainingPct := 0.0
+	if !wallet.ReferenceBalance.IsZero() {
+		remainingPct = wallet.Balance.Div(wallet.ReferenceBalance).InexactFloat64() * 100
+	}
+
+	balanceStatus := "ok"
+	if wallet.Balance.LessThanOrEqual(wallet.BalanceFloor) {
+		balanceStatus = "depleted"
+	}
+
+	levels := []float64{50, 25, 10, 0}
+	if len(wallet.Thresholds) > 0 {
+		levels = wallet.Thresholds
+	}
+	thresholds := make(map[string]bool, len(levels))
+	for _, t := range levels {
+		thresholds[fmt.Sprintf("%.0f", t)] = remainingPct <= t
+	}
+
+	writeJSON(w, inventory.WalletStatus{
+		WalletID:         wallet.ID,
+		TenantID:         wallet.TenantID,
+		Currency:         wallet.Currency,
+		Balance:          wallet.Balance,
+		ReferenceBalance: wallet.ReferenceBalance,
+		RemainingPct:     math.Round(remainingPct*100) / 100,
+		BalanceFloor:     wallet.BalanceFloor,
+		BalanceStatus:    balanceStatus,
+		WithinBalance:    wallet.Balance.GreaterThan(wallet.BalanceFloor),
+		Thresholds:       thresholds,
+	})
+}
+
+func (h *Handler) handleWalletAction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		writeErrorJSON(w, "expected /api/v1/wallets/{id}/top-ups or /adjustments", http.StatusBadRequest)
+		return
+	}
+	walletID := parts[0]
+	action := parts[1]
+
+	var req struct {
+		Amount      decimal.Decimal `json:"amount"`
+		Currency    string          `json:"currency"`
+		ExternalRef string          `json:"external_ref"`
+		Reason      string          `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	switch action {
+	case "top-ups":
+		if req.Amount.IsZero() || req.Amount.IsNegative() {
+			writeErrorJSON(w, "amount must be positive", http.StatusBadRequest)
+			return
+		}
+		entry, err := h.store.TopUpWallet(ctx, walletID, req.Amount, req.ExternalRef)
+		if err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, entry)
+
+	case "adjustments":
+		if req.Amount.IsZero() {
+			writeErrorJSON(w, "amount must be non-zero", http.StatusBadRequest)
+			return
+		}
+		if req.Amount.IsPositive() {
+			entry, err := h.store.TopUpWallet(ctx, walletID, req.Amount, req.ExternalRef)
+			if err != nil {
+				writeErrorJSON(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, entry)
+		} else {
+			writeErrorJSON(w, "negative adjustments not yet implemented", http.StatusNotImplemented)
+		}
+
+	default:
+		writeErrorJSON(w, "unknown action: "+action, http.StatusBadRequest)
+	}
+}
+
+func (h *Handler) handleWalletLedger(w http.ResponseWriter, r *http.Request, walletID string) {
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	entries, err := h.store.WalletLedger(r.Context(), walletID, limit)
+	if err != nil {
+		writeErrorJSON(w, "failed to query ledger", http.StatusInternalServerError)
+		return
+	}
+	if entries == nil {
+		entries = []inventory.WalletLedgerEntry{}
+	}
+	writeJSON(w, map[string]any{"entries": entries})
 }
 
 // ── Cost Report ──
