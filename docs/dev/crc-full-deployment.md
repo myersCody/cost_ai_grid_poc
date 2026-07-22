@@ -171,16 +171,18 @@ helm upgrade cnpg oci://ghcr.io/cloudnative-pg/charts/cloudnative-pg \
 ## Step 5: Create OSAC PostgreSQL Cluster
 
 ```bash
-# Create credentials
+# Create credentials with fixed passwords.
+# Fixed (not random) so the gRPC connection string matches without waiting
+# for CNPG to reconcile a rotation — fine for a PoC/dev environment.
 oc create secret generic -n postgres osac-keycloak-credentials \
   --type=kubernetes.io/basic-auth \
   --from-literal=username=keycloak \
-  --from-literal=password="$(openssl rand -hex 18)"
+  --from-literal=password=osac-keycloak-dev
 
 oc create secret generic -n postgres osac-service-credentials \
   --type=kubernetes.io/basic-auth \
   --from-literal=username=service \
-  --from-literal=password="$(openssl rand -hex 18)"
+  --from-literal=password=osac-service-dev
 
 # Create TLS certificate
 oc apply -f - <<'EOF'
@@ -255,9 +257,8 @@ oc wait pods -n postgres \
 # Create namespace first
 oc new-project osac
 
-# Get DB password
-POSTGRES_SERVICE=$(oc get secret -n postgres osac-service-credentials -o json | jq -r '.data["username"] | @base64d')
-POSTGRES_PASSWORD=$(oc get secret -n postgres osac-service-credentials -o json | jq -r '.data["password"] | @base64d')
+POSTGRES_SERVICE=service
+POSTGRES_PASSWORD=osac-service-dev
 
 # Create TLS certificates — one for gRPC, one for the OIDC server.
 # IMPORTANT: osac-oidc-tls MUST be separate from osac-grpc-tls.
