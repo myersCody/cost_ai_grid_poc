@@ -606,11 +606,11 @@ EOF
 
 ## Step 8: Generate OSAC Token
 
-Tokens are signed with the **osac-oidc-tls** private key and expire after 7 days.
+Tokens are signed with the **osac-oidc-tls** private key and expire after 90 days.
 CRC restart does **not** require a token refresh — Secrets persist across VM
 suspend/resume. You need to re-run this script when:
 
-- The token expires (7 days after last run), or
+- The token expires (90 days after last run), or
 - cert-manager rotates `osac-oidc-tls` (~90-day default) — the signing key
   changes on rotation, invalidating any existing token.
 
