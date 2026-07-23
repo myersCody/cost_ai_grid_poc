@@ -20,6 +20,32 @@ curl (with X-MaaS-* headers)
       → raw_events → metering_entries
 ```
 
+## Test Scope — What Is and Isn't Covered
+
+This test verifies the metering pipeline *after* authentication. It does
+**not** test the authentication layer itself.
+
+| Step | In test | In production | Notes |
+|------|---------|---------------|-------|
+| Client authenticates with API key / K8s token | ❌ skipped | ✅ Authorino | We pre-set headers instead |
+| Authorino injects `x-maas-username`, `x-maas-group`, `x-maas-organization-id` | ❌ skipped | ✅ Authorino | We set these headers manually in curl |
+| `maas-headers-guard` reads and strips `x-maas-*` headers | ✅ | ✅ | Headers are present regardless of who set them |
+| `external-metering` emits `inference.tokens.used` CloudEvent with identity fields | ✅ | ✅ | Verified via consumer logs |
+| `organization_id` propagated into CloudEvent (PR #386) | ✅ | ✅ | New field tested with `x-maas-organization-id` header |
+| CloudEvent POSTed to consumer `/api/v1/events` | ✅ | ✅ | |
+| Consumer creates metering + cost entries | ✅ | ✅ | |
+| Cost entries attributed to correct tenant via `organization_id` | ✅ | ✅ | Asserted in `test-ipp.sh` |
+
+**The untested assumption:** Authorino correctly maps a given credential
+(API key or K8s token) to the right `organization_id`. If that mapping
+is wrong, costs are misattributed and this test would not catch it.
+Testing that mapping requires a full Authorino deployment with real
+credentials, which is out of scope here.
+
+In other words: we are **emulating what Authorino would do** by setting
+the `x-maas-*` headers directly. The test validates everything from the
+IPP plugin onward.
+
 ## Versions (verified working)
 
 | Component | Version | Source |
@@ -28,7 +54,7 @@ curl (with X-MaaS-* headers)
 | k3s (inside k3d) | v1.35.5+k3s1 | k3d default |
 | Istio | **1.29.2** | `curl -sL https://istio.io/downloadIstio \| ISTIO_VERSION=1.29.2 sh -` |
 | Gateway API CRDs | **v1.4.0** | `kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.0/standard-install.yaml` |
-| IPP (ai-gateway-payload-processing) | PR #320 branch `feat/external-metering-dp` | Built from source |
+| IPP (ai-gateway-payload-processing) | [PR #386](https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386) branch `feat/tenant-attribution-fields` | Built from `martinpovolny` fork |
 | llm-katan | 0.20.2 | `pip install llm-katan` in container |
 | cost-event-consumer | main branch | Built from repo |
 | PostgreSQL | 16-alpine | `postgres:16-alpine` |
@@ -41,8 +67,10 @@ curl (with X-MaaS-* headers)
   correctly.
 - **Gateway API CRDs v1.4.0** — must be installed BEFORE Istio. Istio
   uses `gatewayClassName: istio` which requires these CRDs.
-- **IPP from PR #320** — the `odh-stable` image does NOT include the
-  `external-metering` plugin. Must build from the PR branch.
+- **IPP from PR #386** — the `odh-stable` image does NOT include the
+  `external-metering` plugin. Must build from source. PR #386 adds
+  `organization_id` and `cost_center` fields required for tenant
+  attribution.
 
 ## Setup Steps (Reproducible)
 
@@ -99,10 +127,11 @@ CMD ["--model", "test-model", "--backend", "echo", "--providers", "openai,anthro
 EOF
 docker save llm-katan:latest | docker exec -i k3d-cost-test-server-0 ctr images import -
 
-# IPP (from PR #320)
+# IPP (from PR #386 — adds organization_id to CloudEvents)
+git clone --branch feat/tenant-attribution-fields --depth 1 \
+  https://github.com/martinpovolny/ai-gateway-payload-processing.git \
+  ~/Projects/ai-gateway-payload-processing
 cd ~/Projects/ai-gateway-payload-processing
-git fetch origin pull/320/head:feat/external-metering-dp
-git checkout feat/external-metering-dp
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o /tmp/bbr ./cmd
 
 $BUILD -t ipp-metering:latest -f - /tmp <<'EOF'
@@ -300,7 +329,10 @@ kubectl exec -n ai-gateway test-client -c test-client -- \
   -H "x-maas-username: test-user" \
   -H "x-maas-group: test-tenant" \
   -H "x-maas-subscription: test-tenant/premium-plan" \
+  -H "x-maas-organization-id: my-org" \
   -d '{"model":"test-model","messages":[{"role":"user","content":"hello"}]}'
+# Note: in production these headers are injected by Authorino, not set by the client.
+# See "Test Scope" section above.
 ```
 
 **Expected results:**
@@ -355,9 +387,9 @@ Source: [client.go reportUsage](https://github.com/opendatahub-io/ai-gateway-pay
 
 ### No Authorino in this setup
 
-We manually send `X-MaaS-*` headers. In production, Authorino injects
-these after authentication. Without them, the metering plugin skips:
-"no username or subscription header found, skipping metering".
+See [Test Scope](#test-scope--what-is-and-isnt-covered) for the full
+breakdown of what's covered vs. skipped. Short version: we set
+`x-maas-*` headers manually, emulating what Authorino would inject.
 
 ## Troubleshooting Log
 
