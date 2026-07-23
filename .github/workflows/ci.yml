@@ -111,6 +111,18 @@ jobs:
           args: --offline --no-progress 'docs/**/*.md' 'README.md' 'CLAUDE.md'
           fail: true
 
+      - name: Validate OpenAPI spec
+        run: |
+          pip install openapi-spec-validator -q
+          python3 -c "
+          from openapi_spec_validator import validate
+          import yaml
+          with open('docs/openapi.yaml') as f:
+              spec = yaml.safe_load(f)
+          validate(spec)
+          print('OpenAPI spec valid')
+          "
+
   container-build:
     name: Container Build
     runs-on: ubuntu-latest

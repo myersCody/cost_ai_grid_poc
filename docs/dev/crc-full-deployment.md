@@ -846,10 +846,20 @@ Expected response: `[echo] model=test-model ...` from llm-katan.
 
 Check consumer received the metering event:
 ```bash
-kubectl logs -n cost-mgmt deployment/cost-event-consumer --tail=5 | grep "http request"
-# Expected:
+# Note: use --all-containers — the init container log dominates output otherwise
+kubectl logs -n cost-mgmt deployment/cost-event-consumer --all-containers --tail=50 | grep "http request"
+# Expected (two lines near the same timestamp):
 # GET /api/v1/customers/tenant-1/entitlements/inference-tokens/value  200
 # POST /api/v1/events  204
+```
+
+Check cost was rated (wait ~30s for the rating sweep):
+```bash
+kubectl exec -n cost-mgmt deployment/cost-event-consumer -- \
+  curl -s http://localhost:8020/api/v1/reports/costs | \
+  python3 -c "import json,sys; [print(r['group'], r['cost']) for r in json.load(sys.stdin).get('data',[])]"
+# Expected: org-demo (or whatever x-maas-organization-id you used) with a small cost value
+# Note: costs are attributed to the organization_id field, not the username
 ```
 
 ### Cleanup (Step 9)

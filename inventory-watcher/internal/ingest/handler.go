@@ -147,6 +147,7 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/wallets", h.handleCreateWallet)
 	mux.HandleFunc("GET /api/v1/wallets/", h.handleWalletStatus)
 	mux.HandleFunc("POST /api/v1/wallets/", h.handleWalletAction)
+	mux.HandleFunc("GET /api/v1/rates", h.handleListRates)
 	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
 	mux.HandleFunc("GET /api/v1/reports/breakdown", h.handleCostBreakdown)
 	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
@@ -1037,6 +1038,55 @@ func buildKokuTotal(cost, infraCost, suppCost float64, currency string) kokuCost
 type costBreakdownResponse struct {
 	Meta costBreakdownMeta              `json:"meta"`
 	Data []inventory.CostBreakdownRow   `json:"data"`
+}
+
+func (h *Handler) handleListRates(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	tenantID := r.URL.Query().Get("tenant_id")
+
+	rates, err := h.store.ListRates(r.Context(), tenantID)
+	if err != nil {
+		writeErrorJSON(w, "failed to list rates", http.StatusInternalServerError)
+		return
+	}
+	if rates == nil {
+		rates = []inventory.RateRecord{}
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" && r.Header.Get("Accept") == "text/csv" {
+		format = "csv"
+	}
+
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=rates.csv")
+		fmt.Fprintln(w, "id,tenant_id,resource_type,instance_type,meter_name,cost_type,price_per_unit,currency,tier_mode,tier_period,tiers,description,effective_from,effective_to")
+		for _, rate := range rates {
+			tid := ""
+			if rate.TenantID != nil {
+				tid = *rate.TenantID
+			}
+			eto := ""
+			if rate.EffectiveTo != nil {
+				eto = rate.EffectiveTo.Format(time.RFC3339)
+			}
+			tiersJSON := ""
+			if len(rate.Tiers) > 0 {
+				b, _ := json.Marshal(rate.Tiers)
+				tiersJSON = string(b)
+			}
+			fmt.Fprintf(w, "%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+				rate.ID, CsvSafe(tid), CsvSafe(rate.ResourceType), CsvSafe(rate.InstanceType),
+				CsvSafe(rate.MeterName), CsvSafe(rate.CostType), rate.PricePerUnit.String(),
+				CsvSafe(rate.Currency), CsvSafe(rate.TierMode), CsvSafe(rate.TierPeriod),
+				CsvSafe(tiersJSON), CsvSafe(rate.Description),
+				rate.EffectiveFrom.Format(time.RFC3339), eto)
+		}
+		return
+	}
+
+	writeJSON(w, map[string]any{"rates": rates, "count": len(rates)})
 }
 
 type costBreakdownMeta struct {

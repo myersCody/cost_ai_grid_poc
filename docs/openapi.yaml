@@ -1,0 +1,1482 @@
+openapi: 3.0.3
+info:
+  title: Cost Event Consumer API
+  version: 1.0.0
+  description: >-
+    OSAC cost management — event ingestion, metering, rating,
+    quota/budget management, wallet management, and chargeback reporting
+
+servers:
+  - url: http://localhost:8020
+    description: Local development
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Events
+    description: CloudEvents ingestion
+  - name: Rates
+    description: Rate card listing
+  - name: Quotas
+    description: Quota and budget management
+  - name: Wallets
+    description: Prepaid wallet management
+  - name: Reports
+    description: Cost reports and breakdowns
+  - name: IPP
+    description: IPP entitlement / balance check compatibility
+  - name: Operations
+    description: Reconciliation and debug
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────
+  /healthz:
+    get:
+      operationId: getLiveness
+      tags: [Health]
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  /readyz:
+    get:
+      operationId: getReadiness
+      tags: [Health]
+      summary: Readiness probe (checks database connectivity)
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: Service is not ready (database unreachable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+
+  # ── Events ──────────────────────────────────────────────────────────────
+  /api/v1/events:
+    post:
+      operationId: ingestEvent
+      tags: [Events]
+      summary: Ingest a CloudEvents 1.0 envelope
+      description: >-
+        Accepts a CloudEvents 1.0 structured-mode JSON envelope.
+        Supported event types: osac.compute_instance.lifecycle,
+        osac.cluster.lifecycle, osac.model.lifecycle,
+        inference.tokens.used, and custom-metric event types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudEvent"
+      responses:
+        "204":
+          description: Event accepted and processed
+        "400":
+          description: Invalid JSON, missing required fields, or bad event data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Duplicate event (already ingested)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: duplicate
+        "500":
+          description: Storage or processing failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Rates ───────────────────────────────────────────────────────────────
+  /api/v1/rates:
+    get:
+      operationId: listRates
+      tags: [Rates]
+      summary: List rate records
+      description: >-
+        Returns all rate records, optionally filtered by tenant.
+        Supports CSV export via format=csv or Accept: text/csv.
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+          description: Filter rates by tenant ID
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv]
+          description: Set to "csv" for CSV export
+      responses:
+        "200":
+          description: List of rate records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rates:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RateRecord"
+                  count:
+                    type: integer
+            text/csv:
+              schema:
+                type: string
+                description: CSV with columns id,tenant_id,resource_type,instance_type,meter_name,cost_type,price_per_unit,currency,tier_mode,tier_period,tiers,description,effective_from,effective_to
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Quotas ──────────────────────────────────────────────────────────────
+  /api/v1/quotas:
+    post:
+      operationId: createQuota
+      tags: [Quotas]
+      summary: Create a quota or budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotaRecord"
+      responses:
+        "201":
+          description: Quota created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaRecord"
+        "400":
+          description: Validation error (missing fields, bad period, overcommit)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Storage failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      operationId: listQuotas
+      tags: [Quotas]
+      summary: List all quotas
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+          description: Filter by tenant ID
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: ["true", "false"]
+          description: >-
+            When "true", enriches each quota with consumed/percentage/thresholds
+      responses:
+        "200":
+          description: List of quotas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quotas:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: "#/components/schemas/QuotaRecord"
+                        - $ref: "#/components/schemas/QuotaWithStatus"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/quotas/{id}:
+    put:
+      operationId: updateQuota
+      tags: [Quotas]
+      summary: Update an existing quota
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Quota record ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotaRecord"
+      responses:
+        "200":
+          description: Quota updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaRecord"
+        "204":
+          description: Updated but record not retrievable
+        "400":
+          description: Invalid quota ID, bad JSON, or bad period
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Quota not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteQuota
+      tags: [Quotas]
+      summary: Soft-delete a quota
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: Quota record ID
+      responses:
+        "204":
+          description: Quota deleted
+        "400":
+          description: Invalid quota ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Quota not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/quotas/{tenant_id}:
+    get:
+      operationId: getQuotaStatus
+      tags: [Quotas]
+      summary: Get quota status for a tenant
+      description: >-
+        Returns consumed/remaining for every quota belonging to the tenant,
+        including per-project breakdowns if project-scoped quotas exist.
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Tenant ID
+      responses:
+        "200":
+          description: Quota status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaStatusResponse"
+        "400":
+          description: Missing or oversized tenant_id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Wallets ─────────────────────────────────────────────────────────────
+  /api/v1/wallets:
+    post:
+      operationId: createWallet
+      tags: [Wallets]
+      summary: Create a prepaid wallet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWalletRequest"
+      responses:
+        "201":
+          description: Wallet created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletRecord"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Storage failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/wallets/{id}:
+    get:
+      operationId: getWalletStatus
+      tags: [Wallets]
+      summary: Get wallet status
+      description: >-
+        Looks up by wallet ID first, then falls back to tenant ID.
+        Returns balance, remaining percentage, and threshold breaches.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Wallet ID or tenant ID
+      responses:
+        "200":
+          description: Wallet status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletStatus"
+        "400":
+          description: Missing ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Wallet not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/wallets/{id}/top-ups:
+    post:
+      operationId: topUpWallet
+      tags: [Wallets]
+      summary: Add funds to a wallet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Wallet ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletActionRequest"
+      responses:
+        "201":
+          description: Top-up recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletLedgerEntry"
+        "400":
+          description: Invalid JSON or non-positive amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/wallets/{id}/adjustments:
+    post:
+      operationId: adjustWallet
+      tags: [Wallets]
+      summary: Adjust wallet balance
+      description: >-
+        Positive adjustments are applied immediately.
+        Negative adjustments are not yet implemented (returns 501).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Wallet ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletActionRequest"
+      responses:
+        "201":
+          description: Adjustment recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletLedgerEntry"
+        "400":
+          description: Invalid JSON or zero amount
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Negative adjustments not yet implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/wallets/{id}/ledger:
+    get:
+      operationId: getWalletLedger
+      tags: [Wallets]
+      summary: Get wallet ledger entries
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Wallet ID
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum number of entries to return
+      responses:
+        "200":
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WalletLedgerEntry"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Reports ─────────────────────────────────────────────────────────────
+  /api/v1/reports/costs:
+    get:
+      operationId: getCostReport
+      tags: [Reports]
+      summary: Aggregated cost report (Koku-compatible)
+      description: >-
+        Returns costs grouped by tenant, resource_type, meter, project, or user.
+        Supports daily resolution, custom date ranges, and CSV export.
+        Response meta block follows Koku cost/infrastructure/supplementary structure.
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+          description: Filter by tenant ID
+        - name: resource_type
+          in: query
+          schema:
+            type: string
+          description: Filter by resource type
+        - name: group_by
+          in: query
+          schema:
+            type: string
+            default: tenant
+            enum: [tenant, resource_type, meter, project, user]
+          description: Grouping dimension
+        - name: resolution
+          in: query
+          schema:
+            type: string
+            enum: [daily]
+          description: Set to "daily" for per-day rows
+        - name: period
+          in: query
+          schema:
+            type: string
+            example: "2026-07"
+          description: Month in YYYY-MM format (default current month)
+        - name: from
+          in: query
+          schema:
+            type: string
+          description: Start date (YYYY-MM-DD or RFC3339); overrides period
+        - name: to
+          in: query
+          schema:
+            type: string
+          description: End date (YYYY-MM-DD or RFC3339); defaults to now
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv]
+          description: Set to "csv" for CSV export
+      responses:
+        "200":
+          description: Cost report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostReportResponse"
+            text/csv:
+              schema:
+                type: string
+                description: >-
+                  CSV columns vary by resolution.
+                  Without resolution: group,entries,cost,infrastructure_cost,supplementary_cost,currency.
+                  With resolution=daily: date,group,entries,cost,infrastructure_cost,supplementary_cost,currency.
+        "400":
+          description: Invalid date format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/reports/breakdown:
+    get:
+      operationId: getCostBreakdown
+      tags: [Reports]
+      summary: Line-item cost breakdown
+      description: >-
+        Returns individual cost entries with meter-level detail.
+        Supports CSV export via format=csv or Accept: text/csv.
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+          description: Filter by tenant ID
+        - name: resource_type
+          in: query
+          schema:
+            type: string
+          description: Filter by resource type
+        - name: from
+          in: query
+          schema:
+            type: string
+          description: Start date (YYYY-MM-DD or RFC3339); defaults to first of current month
+        - name: to
+          in: query
+          schema:
+            type: string
+          description: End date (YYYY-MM-DD or RFC3339); defaults to now
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          description: Maximum rows to return
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [csv]
+          description: Set to "csv" for CSV export
+      responses:
+        "200":
+          description: Cost breakdown rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CostBreakdownResponse"
+            text/csv:
+              schema:
+                type: string
+                description: >-
+                  CSV columns: date,tenant_id,project_id,user_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency
+        "400":
+          description: Invalid date format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/reports/summary:
+    get:
+      operationId: getPipelineSummary
+      tags: [Reports]
+      summary: Pipeline summary counts
+      description: >-
+        Returns aggregate counts across all pipeline tables
+        (raw events, metering entries, cost entries, rates, live resources).
+      responses:
+        "200":
+          description: Pipeline summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineSummary"
+        "500":
+          description: Query failure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── IPP ─────────────────────────────────────────────────────────────────
+  /api/v1/customers/{customerID}/entitlements/{featureKey}/value:
+    get:
+      operationId: getEntitlementValue
+      tags: [IPP]
+      summary: IPP-compatible balance / entitlement check
+      description: >-
+        Returns an entitlementValue response compatible with the
+        IPP external-metering plugin client. Checks all quotas for
+        the customer and returns aggregate balance, usage, and overage.
+      parameters:
+        - name: customerID
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Customer / tenant ID
+        - name: featureKey
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Feature key (reserved for future feature-scoped quotas)
+        - name: model
+          in: query
+          schema:
+            type: string
+          description: Model name (informational, not yet used for filtering)
+      responses:
+        "200":
+          description: Entitlement value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EntitlementValue"
+        "400":
+          description: Malformed path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Operations ──────────────────────────────────────────────────────────
+  /api/v1/reconcile:
+    post:
+      operationId: triggerReconcile
+      tags: [Operations]
+      summary: Trigger a full OSAC reconciliation
+      description: >-
+        Starts a background reconciliation run. Returns 429 if one is
+        already in progress.
+      responses:
+        "202":
+          description: Reconciliation triggered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: reconciliation triggered
+        "429":
+          description: Reconciliation already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Reconciler not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/debug/config:
+    get:
+      operationId: getDebugConfig
+      tags: [Operations]
+      summary: Return runtime configuration (sanitized)
+      description: >-
+        Returns a sanitized view of the running configuration.
+        Secrets are masked or shown as boolean flags.
+      responses:
+        "200":
+          description: Diagnostic configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticInfo"
+
+components:
+  schemas:
+    # ── Common ────────────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReadinessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+        error:
+          type: string
+          description: Present only when not ready
+
+    # ── CloudEvent ────────────────────────────────────────────────────────
+    CloudEvent:
+      type: object
+      description: CloudEvents 1.0 structured-mode JSON envelope
+      required: [specversion, type, source, id]
+      properties:
+        specversion:
+          type: string
+          example: "1.0"
+        type:
+          type: string
+          description: >-
+            Event type. Known types: osac.compute_instance.lifecycle,
+            osac.cluster.lifecycle, osac.model.lifecycle,
+            inference.tokens.used
+          example: inference.tokens.used
+        source:
+          type: string
+          example: /osac/metering-collector
+        id:
+          type: string
+          example: evt-abc123
+        time:
+          type: string
+          format: date-time
+        subject:
+          type: string
+        datacontenttype:
+          type: string
+          example: application/json
+        data:
+          description: >-
+            Event payload; shape depends on type. See
+            ComputeInstanceEventData, ClusterEventData, MaaSEventData.
+          oneOf:
+            - $ref: "#/components/schemas/ComputeInstanceEventData"
+            - $ref: "#/components/schemas/ClusterEventData"
+            - $ref: "#/components/schemas/MaaSEventData"
+
+    ComputeInstanceEventData:
+      type: object
+      description: OSAC metering collector VMaaS schema
+      properties:
+        duration_seconds:
+          type: number
+          format: double
+        cpu_core_seconds:
+          type: integer
+          format: int64
+        memory_gib_seconds:
+          type: integer
+          format: int64
+        tenant_id:
+          type: string
+        instance_id:
+          type: string
+        template:
+          type: string
+        catalog_item:
+          type: string
+        state:
+          type: string
+        cores:
+          type: integer
+          format: int32
+        memory_gib:
+          type: integer
+          format: int32
+
+    ClusterEventData:
+      type: object
+      description: OSAC metering collector CaaS schema
+      properties:
+        duration_seconds:
+          type: number
+          format: double
+        worker_node_seconds:
+          type: integer
+          format: int64
+        node_count:
+          type: integer
+          format: int32
+        tenant_id:
+          type: string
+        cluster_id:
+          type: string
+        template:
+          type: string
+        state:
+          type: string
+        host_type:
+          type: string
+
+    MaaSEventData:
+      type: object
+      description: >-
+        MaaS / IPP external-metering event data. Accepts both legacy
+        mock format and the real IPP external-metering plugin format.
+      properties:
+        # Legacy mock fields
+        tenant_id:
+          type: string
+        model_id:
+          type: string
+        model_name:
+          type: string
+        template:
+          type: string
+        state:
+          type: string
+        tokens_in:
+          type: integer
+          format: int64
+        tokens_out:
+          type: integer
+          format: int64
+        requests:
+          type: integer
+          format: int64
+        duration_seconds:
+          type: number
+          format: double
+        request_count:
+          type: integer
+          format: int64
+        # IPP external-metering plugin fields
+        user:
+          type: string
+        group:
+          type: string
+        subscription:
+          type: string
+        organization_id:
+          type: string
+        cost_center:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        prompt_tokens:
+          type: integer
+          format: int64
+        completion_tokens:
+          type: integer
+          format: int64
+        total_tokens:
+          type: integer
+          format: int64
+        cached_input_tokens:
+          type: integer
+          format: int64
+          description: Subset of prompt_tokens; parsed for observability, not billed separately
+        cache_creation_tokens:
+          type: integer
+          format: int64
+          description: Subset of prompt_tokens
+        reasoning_tokens:
+          type: integer
+          format: int64
+          description: Subset of completion_tokens (o1/o3/DeepSeek R1)
+        duration_ms:
+          type: integer
+          format: int64
+
+    # ── Rates ─────────────────────────────────────────────────────────────
+    Tier:
+      type: object
+      properties:
+        up_to:
+          type: number
+          format: double
+          nullable: true
+          description: Upper bound of tier; null means unlimited
+        price_per_unit:
+          type: string
+          format: decimal
+      required: [price_per_unit]
+
+    RateRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tenant_id:
+          type: string
+          nullable: true
+        resource_type:
+          type: string
+        instance_type:
+          type: string
+        meter_name:
+          type: string
+        koku_metric:
+          type: string
+        cost_type:
+          type: string
+          description: "Infrastructure or Supplementary"
+        price_per_unit:
+          type: string
+          format: decimal
+        currency:
+          type: string
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tier"
+        tier_mode:
+          type: string
+        tier_period:
+          type: string
+        description:
+          type: string
+        effective_from:
+          type: string
+          format: date-time
+        effective_to:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ── Quotas ────────────────────────────────────────────────────────────
+    QuotaRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        tenant_id:
+          type: string
+        project_id:
+          type: string
+        resource_type:
+          type: string
+        meter_name:
+          type: string
+        limit_value:
+          type: number
+          format: double
+        unit:
+          type: string
+          description: >-
+            Unit of the quota. Currency codes (USD, EUR, etc.) indicate
+            a budget quota; otherwise a metering unit.
+        period:
+          type: string
+          description: >-
+            Billing period: monthly, weekly, daily, or custom.
+            Defaults to "monthly" if omitted.
+        policy:
+          type: string
+          description: Enforcement policy. Defaults to "deny".
+        thresholds:
+          type: array
+          items:
+            type: number
+            format: double
+          description: Alert threshold percentages
+        effective_from:
+          type: string
+          format: date-time
+        effective_to:
+          type: string
+          format: date-time
+          nullable: true
+
+    QuotaStatus:
+      type: object
+      properties:
+        meter_name:
+          type: string
+        unit:
+          type: string
+        limit:
+          type: number
+          format: double
+        consumed:
+          type: number
+          format: double
+        percentage:
+          type: number
+          format: double
+        thresholds:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Threshold percentage keys mapped to breached (true/false)
+        alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertRecord"
+
+    AlertRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        tenant_id:
+          type: string
+        meter_name:
+          type: string
+        threshold_pct:
+          type: number
+          format: double
+        consumed:
+          type: number
+          format: double
+        limit_value:
+          type: number
+          format: double
+        period:
+          type: string
+        state:
+          type: string
+        fired_at:
+          type: string
+          format: date-time
+
+    QuotaStatusResponse:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        period:
+          type: string
+        quotas:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuotaStatus"
+        projects:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: "#/components/schemas/QuotaStatus"
+          description: Per-project quota statuses (present only when project-scoped quotas exist)
+
+    QuotaWithStatus:
+      description: QuotaRecord enriched with live consumption data
+      allOf:
+        - $ref: "#/components/schemas/QuotaRecord"
+        - type: object
+          properties:
+            consumed:
+              type: number
+              format: double
+            percentage:
+              type: number
+              format: double
+            thresholds:
+              type: object
+              additionalProperties:
+                type: boolean
+
+    # ── Wallets ───────────────────────────────────────────────────────────
+    CreateWalletRequest:
+      type: object
+      required: [tenant_id]
+      properties:
+        tenant_id:
+          type: string
+        project_id:
+          type: string
+        currency:
+          type: string
+          default: USD
+        thresholds:
+          type: array
+          items:
+            type: number
+            format: double
+
+    WalletRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+        project_id:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: string
+          format: decimal
+        balance_floor:
+          type: string
+          format: decimal
+        reference_balance:
+          type: string
+          format: decimal
+        lifecycle_state:
+          type: string
+        thresholds:
+          type: array
+          items:
+            type: number
+            format: double
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WalletLedgerEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        wallet_id:
+          type: string
+        entry_type:
+          type: string
+        amount:
+          type: string
+          format: decimal
+        balance_after:
+          type: string
+          format: decimal
+        currency:
+          type: string
+        cost_entry_id:
+          type: integer
+          format: int64
+          nullable: true
+        external_ref:
+          type: string
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    WalletActionRequest:
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+        currency:
+          type: string
+        external_ref:
+          type: string
+        reason:
+          type: string
+
+    WalletStatus:
+      type: object
+      properties:
+        wallet_id:
+          type: string
+        tenant_id:
+          type: string
+        currency:
+          type: string
+        balance:
+          type: string
+          format: decimal
+        reference_balance:
+          type: string
+          format: decimal
+        remaining_pct:
+          type: number
+          format: double
+        balance_floor:
+          type: string
+          format: decimal
+        balance_status:
+          type: string
+          enum: [ok, depleted]
+        within_balance:
+          type: boolean
+        thresholds:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    # ── Reports ───────────────────────────────────────────────────────────
+    CostReportRow:
+      type: object
+      properties:
+        date:
+          type: string
+          description: Present only when resolution=daily
+        group:
+          type: string
+        entries:
+          type: integer
+        cost:
+          type: number
+          format: double
+        infrastructure_cost:
+          type: number
+          format: double
+        supplementary_cost:
+          type: number
+          format: double
+        currency:
+          type: string
+
+    KokuCostLayer:
+      type: object
+      properties:
+        value:
+          type: number
+          format: double
+        units:
+          type: string
+
+    KokuCostBlock:
+      type: object
+      properties:
+        raw:
+          $ref: "#/components/schemas/KokuCostLayer"
+        markup:
+          $ref: "#/components/schemas/KokuCostLayer"
+        usage:
+          $ref: "#/components/schemas/KokuCostLayer"
+        total:
+          $ref: "#/components/schemas/KokuCostLayer"
+
+    KokuCostTotal:
+      type: object
+      properties:
+        cost:
+          $ref: "#/components/schemas/KokuCostBlock"
+        infrastructure:
+          $ref: "#/components/schemas/KokuCostBlock"
+        supplementary:
+          $ref: "#/components/schemas/KokuCostBlock"
+        cost_units:
+          type: string
+
+    CostReportMeta:
+      type: object
+      properties:
+        total:
+          $ref: "#/components/schemas/KokuCostTotal"
+        period:
+          type: string
+        group_by:
+          type: string
+        resolution:
+          type: string
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+
+    CostReportResponse:
+      type: object
+      properties:
+        meta:
+          $ref: "#/components/schemas/CostReportMeta"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CostReportRow"
+
+    CostBreakdownRow:
+      type: object
+      properties:
+        date:
+          type: string
+        tenant_id:
+          type: string
+        project_id:
+          type: string
+        user_id:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        meter_name:
+          type: string
+        metered_value:
+          type: number
+          format: double
+        cost_amount:
+          type: number
+          format: double
+        cost_type:
+          type: string
+        currency:
+          type: string
+
+    CostBreakdownMeta:
+      type: object
+      properties:
+        count:
+          type: integer
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+
+    CostBreakdownResponse:
+      type: object
+      properties:
+        meta:
+          $ref: "#/components/schemas/CostBreakdownMeta"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/CostBreakdownRow"
+
+    PipelineSummary:
+      type: object
+      properties:
+        raw_events:
+          type: integer
+        metering_entries:
+          type: integer
+        cost_entries:
+          type: integer
+        rates:
+          type: integer
+        live_vms:
+          type: integer
+        live_clusters:
+          type: integer
+        live_models:
+          type: integer
+
+    # ── IPP ───────────────────────────────────────────────────────────────
+    EntitlementValue:
+      type: object
+      description: >-
+        IPP-compatible entitlement value. Matches the entitlementValue
+        struct from the IPP external-metering plugin client.
+      properties:
+        hasAccess:
+          type: boolean
+        balance:
+          type: number
+          format: double
+        usage:
+          type: number
+          format: double
+        overage:
+          type: number
+          format: double
+
+    # ── Operations ────────────────────────────────────────────────────────
+    DiagnosticInfo:
+      type: object
+      properties:
+        osac_base_url:
+          type: string
+        inventory_db_host:
+          type: string
+          description: Database URL with credentials masked
+        reconcile_interval:
+          type: string
+        metering_interval:
+          type: string
+        rating_interval:
+          type: string
+        log_level:
+          type: string
+        log_format:
+          type: string
+        ingest_listen_addr:
+          type: string
+        metrics_port:
+          type: string
+        custom_metrics_config_path:
+          type: string
+        auth_issuer_url:
+          type: string
+        debug_dashboard:
+          type: boolean
+        osac_token_set:
+          type: boolean
+        osac_ca_cert_set:
+          type: boolean
+        splunk_hec_url:
+          type: string
+        splunk_token_set:
+          type: boolean
+        splunk_index:
+          type: string

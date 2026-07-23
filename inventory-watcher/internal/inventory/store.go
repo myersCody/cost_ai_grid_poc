@@ -1142,6 +1142,44 @@ func (s *Store) AllActiveRates(ctx context.Context, at time.Time) ([]RateRecord,
 	return results, rows.Err()
 }
 
+// ListRates returns all rates, optionally filtered by tenant_id.
+func (s *Store) ListRates(ctx context.Context, tenantID string) ([]RateRecord, error) {
+	q := `SELECT id, tenant_id, resource_type, instance_type, meter_name, koku_metric, cost_type,
+	             price_per_unit, currency, tiers, tier_mode, tier_period, description, effective_from, effective_to
+	      FROM rates`
+
+	var args []interface{}
+	if tenantID != "" {
+		q += ` WHERE tenant_id = $1 OR tenant_id IS NULL OR tenant_id = ''`
+		args = append(args, tenantID)
+	}
+	q += ` ORDER BY resource_type, meter_name, instance_type`
+
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []RateRecord
+	for rows.Next() {
+		var r RateRecord
+		var tiersJSON []byte
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.ResourceType, &r.InstanceType, &r.MeterName,
+			&r.KokuMetric, &r.CostType, &r.PricePerUnit, &r.Currency, &tiersJSON,
+			&r.TierMode, &r.TierPeriod, &r.Description, &r.EffectiveFrom, &r.EffectiveTo); err != nil {
+			return nil, err
+		}
+		if tiersJSON != nil {
+			if err := json.Unmarshal(tiersJSON, &r.Tiers); err != nil {
+				return nil, fmt.Errorf("unmarshal tiers for rate %d: %w", r.ID, err)
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // InsertCostEntryBatch inserts multiple cost entries in a single statement.
 func (s *Store) InsertCostEntryBatch(ctx context.Context, entries []CostEntry) error {
 	if len(entries) == 0 {
