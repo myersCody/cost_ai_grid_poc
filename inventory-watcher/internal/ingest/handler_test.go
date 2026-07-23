@@ -2048,6 +2048,74 @@ func TestWallet_TopUpAndStatus(t *testing.T) {
 	_ = ctx
 }
 
+func TestWallet_NegativeAdjustment(t *testing.T) {
+	ctx := context.Background()
+	ts := time.Now().UnixNano()
+	tenantID := fmt.Sprintf("adj-tenant-%d", ts)
+
+	// Create wallet
+	body := fmt.Sprintf(`{"tenant_id":"%s","currency":"USD"}`, tenantID)
+	createResp, _ := http.Post(testServer.URL+"/api/v1/wallets", "application/json", strings.NewReader(body))
+	var created map[string]interface{}
+	json.NewDecoder(createResp.Body).Decode(&created)
+	createResp.Body.Close()
+	walletID := created["id"].(string)
+
+	// Top up $500
+	topUpBody := `{"amount": 500}`
+	topResp, _ := http.Post(fmt.Sprintf("%s/api/v1/wallets/%s/top-ups", testServer.URL, walletID), "application/json", strings.NewReader(topUpBody))
+	topResp.Body.Close()
+
+	// Negative adjustment -$50 (dispute correction)
+	adjBody := `{"amount": -50, "reason": "dispute correction"}`
+	adjResp, _ := http.Post(fmt.Sprintf("%s/api/v1/wallets/%s/adjustments", testServer.URL, walletID), "application/json", strings.NewReader(adjBody))
+	if adjResp.StatusCode != http.StatusCreated {
+		t.Fatalf("negative adjustment: got status %d, want 201", adjResp.StatusCode)
+	}
+	var adjEntry map[string]interface{}
+	json.NewDecoder(adjResp.Body).Decode(&adjEntry)
+	adjResp.Body.Close()
+
+	if adjEntry["entry_type"] != "adjustment" {
+		t.Errorf("entry_type: got %v, want adjustment", adjEntry["entry_type"])
+	}
+	if adjEntry["amount"].(string) != "-50" {
+		t.Errorf("amount: got %v, want -50", adjEntry["amount"])
+	}
+	if adjEntry["balance_after"].(string) != "450" {
+		t.Errorf("balance_after: got %v, want 450", adjEntry["balance_after"])
+	}
+	if adjEntry["reason"] != "dispute correction" {
+		t.Errorf("reason: got %v, want 'dispute correction'", adjEntry["reason"])
+	}
+
+	// Verify status: balance=450 but reference_balance=500 (unchanged by adjustment)
+	statusResp, _ := http.Get(fmt.Sprintf("%s/api/v1/wallets/%s", testServer.URL, walletID))
+	var status map[string]interface{}
+	json.NewDecoder(statusResp.Body).Decode(&status)
+	statusResp.Body.Close()
+
+	if status["balance"].(string) != "450" {
+		t.Errorf("balance: got %v, want 450", status["balance"])
+	}
+	if status["reference_balance"].(string) != "500" {
+		t.Errorf("reference_balance should be unchanged: got %v, want 500", status["reference_balance"])
+	}
+
+	// Verify ledger has 3 entries: top_up, adjustment
+	ledgerResp, _ := http.Get(fmt.Sprintf("%s/api/v1/wallets/%s/ledger", testServer.URL, walletID))
+	var ledger map[string]interface{}
+	json.NewDecoder(ledgerResp.Body).Decode(&ledger)
+	ledgerResp.Body.Close()
+
+	entries := ledger["entries"].([]interface{})
+	if len(entries) != 2 {
+		t.Errorf("expected 2 ledger entries (top_up + adjustment), got %d", len(entries))
+	}
+
+	_ = ctx
+}
+
 func TestWallet_DeductionViaRatingSweep(t *testing.T) {
 	ctx := context.Background()
 	ts := time.Now().UnixNano()

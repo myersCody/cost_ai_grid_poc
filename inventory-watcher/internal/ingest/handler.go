@@ -950,17 +950,13 @@ func (h *Handler) handleWalletAction(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, "amount must be non-zero", http.StatusBadRequest)
 			return
 		}
-		if req.Amount.IsPositive() {
-			entry, err := h.store.TopUpWallet(ctx, walletID, req.Amount, req.ExternalRef)
-			if err != nil {
-				writeErrorJSON(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.WriteHeader(http.StatusCreated)
-			writeJSON(w, entry)
-		} else {
-			writeErrorJSON(w, "negative adjustments not yet implemented", http.StatusNotImplemented)
+		entry, err := h.store.AdjustWallet(ctx, walletID, req.Amount, req.Reason)
+		if err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			return
 		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, entry)
 
 	default:
 		writeErrorJSON(w, "unknown action: "+action, http.StatusBadRequest)

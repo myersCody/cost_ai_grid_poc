@@ -1452,6 +1452,36 @@ func (s *Store) DeductFromWallet(ctx context.Context, walletID string, costEntry
 	return &entry, tx.Commit(ctx)
 }
 
+func (s *Store) AdjustWallet(ctx context.Context, walletID string, amount decimal.Decimal, reason string) (*WalletLedgerEntry, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var newBalance decimal.Decimal
+	err = tx.QueryRow(ctx, `
+		UPDATE wallets SET balance = balance + $1, updated_at = NOW()
+		WHERE id = $2 AND lifecycle_state = 'active'
+		RETURNING balance
+	`, amount, walletID).Scan(&newBalance)
+	if err != nil {
+		return nil, fmt.Errorf("adjust wallet %s: %w", walletID, err)
+	}
+
+	var entry WalletLedgerEntry
+	err = tx.QueryRow(ctx, `
+		INSERT INTO wallet_ledger_entries (wallet_id, entry_type, amount, balance_after, currency, reason)
+		VALUES ($1, 'adjustment', $2, $3, (SELECT currency FROM wallets WHERE id = $1), $4)
+		RETURNING id, wallet_id, entry_type, amount, balance_after, currency, reason, created_at
+	`, walletID, amount, newBalance, reason).Scan(&entry.ID, &entry.WalletID, &entry.EntryType, &entry.Amount, &entry.BalanceAfter, &entry.Currency, &entry.Reason, &entry.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &entry, tx.Commit(ctx)
+}
+
 func (s *Store) UnappliedCostEntries(ctx context.Context, tenantID string) ([]CostEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, metering_entry_id, rate_id, tenant_id, project_id, user_id, resource_type, resource_id,
