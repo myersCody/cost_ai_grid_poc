@@ -34,11 +34,19 @@ HTTP ingest endpoint ──► MaaS / custom events ──►   quota status API
 
 ## Quick Start
 
+### Run locally (development)
 1. [Local dev setup](dev/local-dev-setup.md) — run OSAC + the consumer locally
 2. [Demo data setup](../snippets/setup-demo-data.sh) — create VMs, fire MaaS events, populate costs
 3. [Query costs](../snippets/query-costs.sh) — see cost breakdowns by tenant, resource, model
 4. [Bruno collection](../bruno-collection/) — clickable CloudEvent catalog (open in Bruno)
 5. [Grafana stack](../deploy/observability/) — `docker compose up -d` for dashboards
+
+### Deploy to OpenShift (CRC)
+1. [Full CRC deployment guide](dev/crc-full-deployment.md) — **start here** for OpenShift deployment
+   - Steps 1–8: full stack (cert-manager, CloudNativePG, OSAC, cost-event-consumer)
+   - Step 9 (optional): MaaS inference metering (Istio + IPP + llm-katan)
+2. [CRC checklist](dev/crc-deployment-checklist.md) — quick reference
+3. [Troubleshooting](dev/troubleshooting.md) — common issues (cert SAN, token refresh, migrations)
 
 ## Architecture & Design
 

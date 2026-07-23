@@ -628,6 +628,240 @@ To inspect the token without applying it:
 ./scripts/refresh-token.sh --dry-run
 ```
 
+## Step 9 (Optional): MaaS Inference Metering Stack
+
+Deploys the AI gateway (Istio + IPP) to test the full MaaS inference metering
+pipeline: requests flow through the gateway, the IPP calls our consumer for
+balance checks and reports token usage as CloudEvents.
+
+**Prerequisites:** ~2.5 GB free RAM on the CRC node. Scale down or delete
+unused namespaces first if needed:
+```bash
+kubectl top nodes   # check — target < 75% memory before proceeding
+```
+
+### 9a. Install Istio 1.29.2
+
+```bash
+# Download istioctl
+curl -sL "https://github.com/istio/istio/releases/download/1.29.2/istioctl-1.29.2-osx-arm64.tar.gz" \
+  | tar xz -C /tmp
+
+# Install with OpenShift profile
+eval $(crc oc-env)
+/tmp/istioctl install --set profile=openshift --set values.global.platform=openshift -y
+
+# Grant SCCs
+oc adm policy add-scc-to-group privileged system:serviceaccounts:istio-system
+
+# Verify
+kubectl get pods -n istio-system
+# Expected: istiod Running, istio-cni-node Running
+```
+
+> **Note:** OpenShift manages Gateway API CRDs (v1.3.0) via its Ingress Operator
+> — do not apply the upstream v1.4.0 install YAML, it will be rejected.
+> The `istio` GatewayClass is automatically created and accepted.
+
+### 9b. Apply IPP CRDs and Create Namespace
+
+```bash
+kubectl apply -f ~/Projects/koku/ai-gateway-payload-processing/config/crd/bases/
+
+kubectl create namespace ai-gateway
+kubectl label namespace ai-gateway istio-injection=enabled
+oc adm policy add-scc-to-group anyuid system:serviceaccounts:ai-gateway
+```
+
+### 9c. Create Istio Gateway
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ai-gateway
+  namespace: ai-gateway
+spec:
+  gatewayClassName: istio
+  listeners:
+  - name: http
+    port: 80
+    protocol: HTTP
+    allowedRoutes:
+      namespaces:
+        from: All
+EOF
+
+kubectl wait --for=condition=Accepted gateway/ai-gateway -n ai-gateway --timeout=60s
+```
+
+### 9d. Deploy llm-katan (Echo LLM)
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-katan
+  namespace: ai-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-katan
+  template:
+    metadata:
+      labels:
+        app: llm-katan
+    spec:
+      containers:
+        - name: llm-katan
+          image: quay.io/martin_povolny/llm-katan:latest
+          imagePullPolicy: Always
+          env:
+            - name: LLM_KATAN_PORT
+              value: "8000"
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-katan
+  namespace: ai-gateway
+spec:
+  ports:
+    - port: 8000
+  selector:
+    app: llm-katan
+EOF
+```
+
+> **Note:** `LLM_KATAN_PORT=8000` must be set explicitly — Kubernetes injects a
+> `LLM_KATAN_PORT` env var with the service URL, which crashes llm-katan.
+
+### 9e. Deploy IPP via Helm
+
+```bash
+cat > /tmp/ipp-values.yaml <<'EOF'
+upstreamIpp:
+  payloadProcessor:
+    image:
+      registry: quay.io/martin_povolny
+      repository: ipp-metering
+      tag: pr-386
+      pullPolicy: Always
+    env:
+    - name: GATEWAY_NAME
+      value: "ai-gateway"
+    - name: GATEWAY_NAMESPACE
+      value: "ai-gateway"
+    customConfig:
+      plugins:
+      - type: maas-headers-guard
+      - type: body-field-to-header
+        name: model-extractor
+        parameters:
+          fieldName: model
+          headerName: X-Gateway-Model-Name
+      - type: external-metering
+        name: metering
+        parameters:
+          meteringURL: "http://cost-event-consumer.cost-mgmt.svc:8020"
+          featureKey: "inference-tokens"
+          source: "maas-gateway"
+          failOpen: true
+      - type: api-translation
+      profiles:
+      - name: default
+        plugins:
+          request:
+          - pluginRef: maas-headers-guard
+          - pluginRef: model-extractor
+          - pluginRef: metering
+          - pluginRef: api-translation
+          response:
+          - pluginRef: metering
+          - pluginRef: api-translation
+  provider:
+    name: istio
+    istio:
+      envoyFilter:
+        operation: INSERT_FIRST
+  inferenceGateway:
+    name: ai-gateway
+EOF
+
+helm install payload-processing \
+  ~/Projects/koku/ai-gateway-payload-processing/deploy/payload-processing \
+  --namespace ai-gateway \
+  --dependency-update \
+  -f /tmp/ipp-values.yaml
+
+# Disable Istio sidecar on IPP (it manages its own Envoy)
+kubectl patch deployment payload-processing -n ai-gateway --type=merge \
+  -p='{"spec":{"template":{"metadata":{"annotations":{"sidecar.istio.io/inject":"false"}}}}}'
+```
+
+### 9f. Create HTTPRoute and Verify
+
+```bash
+kubectl apply -f - <<'EOF'
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-route
+  namespace: ai-gateway
+spec:
+  parentRefs:
+    - name: ai-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/
+      backendRefs:
+        - name: llm-katan
+          port: 8000
+EOF
+
+# Wait for all pods
+kubectl get pods -n ai-gateway
+# Expected: ai-gateway-istio, llm-katan, payload-processing all Running
+
+# End-to-end test
+GATEWAY_IP=$(kubectl get svc -n ai-gateway ai-gateway-istio -o jsonpath='{.spec.clusterIP}')
+kubectl run curl-test --image=curlimages/curl:latest --rm -i --restart=Never -n ai-gateway -- \
+  curl -s -X POST "http://${GATEWAY_IP}/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer test-key" \
+  -H "x-maas-username: tenant-1" \
+  -H "x-maas-organization-id: org-1" \
+  -H "x-maas-cost-center: cc-engineering" \
+  -d '{"model":"test-model","messages":[{"role":"user","content":"hello"}]}'
+```
+
+Expected response: `[echo] model=test-model ...` from llm-katan.
+
+Check consumer received the metering event:
+```bash
+kubectl logs -n cost-mgmt deployment/cost-event-consumer --tail=5 | grep "http request"
+# Expected:
+# GET /api/v1/customers/tenant-1/entitlements/inference-tokens/value  200
+# POST /api/v1/events  204
+```
+
+### Cleanup (Step 9)
+
+```bash
+helm uninstall payload-processing -n ai-gateway
+kubectl delete namespace ai-gateway
+/tmp/istioctl uninstall --purge -y
+kubectl delete namespace istio-system
+kubectl delete crd $(kubectl get crd | grep istio.io | awk '{print $1}')
+```
+
 ## Verification
 
 ```bash
