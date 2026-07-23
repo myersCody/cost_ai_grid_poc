@@ -18,7 +18,7 @@
 > priority-rank order). Future Work (REQ-6) and the formal Out-of-Scope list
 > are intentionally excluded — see the overview doc for those.
 >
-> **Last updated:** Jul 20, 2026.
+> **Last updated:** Jul 22, 2026.
 >
 > **Acceptance criteria key:** ✅ met today &nbsp;·&nbsp; ⚠️ partially met / met with a caveat worth knowing about &nbsp;·&nbsp; ❌ not met yet
 
@@ -34,21 +34,23 @@
 | 4 | REQ-1b | CRITICAL | Heartbeat event ingestion | Done | Satisfied via a local 60s sweep, not an actual OSAC-emitted heartbeat event — functionally equivalent, mechanically different |
 | 5 | REQ-2 | CRITICAL | Near-real-time cost calculation | Done | No known gaps |
 | 6 | REQ-1a | HIGH | Cluster lifecycle via cluster orders | Done | No known gaps |
-| 7 | REQ-3a | HIGH | Tenant/project attribution | Partial | Cost attribution works; project-level quotas with roll-up (and no project-limit overcommit) aren't built; Cost Management UI now preferred provider surface; RBAC stays project-scoped |
+| 7 | REQ-3a | HIGH | Tenant/project attribution | Done | Cost attribution + project-level quotas with roll-up + no-overcommit validation all implemented; Cost Management UI preferred provider surface; RBAC stays project-scoped |
 | 8 | REQ-3 | HIGH | Granular cost tracking | Done | Filterable by tenant/project/user/resource today; spec now also wants any OSAC CloudEvent property (incl. tags) — tag/arbitrary-property filtering not built; user dimension has open PII question (Pau) |
-| 9 | REQ-9 | HIGH | Quota/budget status API | Partial | Tenant status API works; Jul 31 scope now also requires CRUD, project→tenant roll-up (no limit overcommit), fleet-level status, monetary budgets, configurable thresholds/windows — see [req9 gap analysis](req9-quota-budget-gap-analysis.md) |
+| 9 | REQ-9 | HIGH | Quota/budget status API | Done | Full CRUD, project→tenant roll-up (no limit overcommit), fleet-level list, monetary budgets, configurable thresholds/windows — all implemented |
 | 10 | REQ-10 | HIGH → Parked | Threshold notification back-channel | Done (pull) | Push/webhook notifications parked — OSAC has no receiver to act on them yet; also the alert path for REQ-14 low-balance thresholds |
 | 11 | REQ-13 | HIGH | Custom metrics / custom rates | Done | Only supports "creative math" on existing metrics today; a real backchannel to ask OSAC for brand-new meters doesn't exist |
 | 12 | REQ-2a | HIGH | MaaS CloudEvents & token metering | Done (emulated) | Real OSAC/RHOAI MaaS events don't exist yet; we're validated against an IPP plugin + echo LLM, not production inference traffic |
 | 13 | REQ-3b | MEDIUM | Service catalog sync | Done | Catalog sync + per-SKU pricing via `instance_type` rate dimension (PR #59) + catalog fallback; rate auto-derivation from catalog not built (manual seeding acceptable for PoC) |
 | 14 | REQ-5 | MEDIUM | Chargeback reporting | Done | Project grouping, breakdown endpoint, daily resolution, date filtering (PR #42); CronJob export pattern documented and verified; CSV/JSON via API explicitly in scope |
 | 15 | REQ-7 | MEDIUM | Audit trail | Done | No known gaps for PoC scope |
-| 16 | REQ-11 | LOW | Cost tiers | Partial | Tiers work correctly for MaaS (per-event); capacity-based cumulative tiers (GiB-month, core-hours) are not implemented and would silently undercharge if configured today |
-| 17 | REQ-12 | LOW | Daily OpenShift Virtualization costs | TBD | Still underspecified; PM added neocloud-style finer granularity as desirable and multi-tenant/project rates on shared clusters as a hard constraint |
+| 16 | REQ-11 | LOW | Cost tiers | Done | Per-event tiers (MaaS) + cumulative tiers (capacity) both implemented; `ApplyRateCumulative` with `MeteringSumBefore` + `billing.ResolvePeriod`; volume pricing deferred |
+| 17 | REQ-12 | LOW | Daily OpenShift Virtualization costs | Done | Live queries via `?resolution=daily`, date filtering, per-project/tenant breakdown, per-tenant rate overrides; no pre-aggregated summary table |
 | 18 | REQ-8 | HIGH → Parked | Bare metal costing | Done (ahead of schedule) | Built already, parked for Jul 31; BMaaS is an Aug 31 OSAC deliverable; standalone (non-OCP) bare metal confirmed IN for post-PoC |
-| 19 | REQ-14 | HIGH | Wallets (prepaid balance) | Not started | Spec drafted (v1.6) — tenant wallets must-have; project/hybrid funding stretch; no ledger built yet |
+| 19 | REQ-14 | HIGH | Wallets (prepaid balance) | Done | Tenant-scoped wallets: create, top-up, deduction sweep, status API, ledger audit; project-scoped wallets deferred |
 
-**At a glance (updated Jul 20):** 13 of 19 are Done, 4 are Partial (POC-ENV, REQ-3a, REQ-9, REQ-11), 1 is TBD (REQ-12), and 1 is Not started (REQ-14). Two requirements (REQ-10, REQ-8) remain explicitly parked by joint decision. The biggest Jul 20 impact is REQ-9 scope expansion (all listed gaps in scope for Jul 31) plus brand-new REQ-14 wallets. REQ-3a and REQ-9 still share the project→tenant quota roll-up gap; product rule is now **no overcommit of project limits** above the tenant limit (was previously framed as overcommit-allowed).
+**At a glance (updated Jul 22):** 17 of 19 are Done, 1 is Partial (POC-ENV — owned by RHCM platform team), 1 is Done with note (REQ-11 — volume pricing deferred). Two requirements (REQ-10, REQ-8) remain explicitly parked by joint decision.
+
+**Key changes since Jul 20:** REQ-3a project quota roll-up + overcommit validation implemented; REQ-9 all gaps closed (CRUD, monetary budgets, configurable thresholds/windows, fleet list); REQ-11 cumulative tiers implemented; REQ-12 marked Done (live queries); REQ-14 wallets fully implemented (create, top-up, deduction sweep, status, ledger).
 
 **Key changes in v1.5 (Jul 20):** REQ-14 wallets added; REQ-9 reframed as fleet-level status + CRUD + no project-limit overcommit (grace periods OUT); Cost Management UI preferred for provider cost views; CaaS/VMaaS CloudEvents marked available; POC-ARCH explicitly OUT bare metal for PoC.
 
@@ -216,7 +218,7 @@ None outstanding.
 ---
 
 ### 7. REQ-3a — OSAC Tenant/Project Attribution
-**Status: Partial** &nbsp;·&nbsp; [COST-7799](https://redhat.atlassian.net/browse/COST-7799)
+**Status: Done** &nbsp;·&nbsp; [COST-7799](https://redhat.atlassian.net/browse/COST-7799)
 
 Map OSAC's Tenant → Project hierarchy into RHCM so all costs attribute correctly, including quota/budget rollup from project to tenant.
 
@@ -225,22 +227,21 @@ Map OSAC's Tenant → Project hierarchy into RHCM so all costs attribute correct
 - ✅ Cost data drillable to project level within a tenant
 - ✅ Tenant/project hierarchy read from OSAC
 - ✅ Multi-tenant attribution works even on shared infrastructure
-- ❌ Quotas/budgets tracked per project and per tenant, with project consumption rolling up to the tenant; **sum of project-level limits must not exceed the tenant-level limit** (no overcommit of limits across projects — Jul 20 clarification; previously framed as overcommit-allowed)
+- ✅ Quotas/budgets tracked per project and per tenant, with project consumption rolling up to the tenant; **sum of project-level limits must not exceed the tenant-level limit** *(implemented: `validateProjectOvercommit` enforced on create and update; `ProjectLimitSum` + `TenantQuotaLimit` queries; quota status separates tenant vs project quotas)*
 
 **Current Implementation Status**
 - `inventory_project` table tracks the OSAC Tenant → Project hierarchy; all metering entries carry `tenant_id`
 - **Decision (Jul 2, 2026):** RBAC scope for PoC is tenant + project level only; fine-grained Insights RBAC deferred post-PoC
 - **Jul 20 clarification:** Cost Management UI is the preferred provider cost surface. RBAC remains project-scoped only — project access ⇒ full visibility within that project; users with multiple projects see only the projects they can access
-- **Gap confirmed in code:** the `quotas` table already has a `project_id` column, but `QuotasForTenant` (the query behind the quota API — [`store.go:1218`](../../inventory-watcher/internal/inventory/store.go)) filters by `tenant_id` only and ignores it. Quota tracking today is tenant-level exclusively; no project-level rows, roll-up logic, or overcommit validation exist
+- **Implemented (Jul 21–22):** Quota CRUD API (`POST/GET/PUT/DELETE /api/v1/quotas`), project-scoped quotas with `project_id`, roll-up to tenant in quota status response (`projects` map), overcommit validation via `validateProjectOvercommit` (rejects if Σ project limits > tenant limit), supporting store queries (`ProjectLimitSum`, `TenantQuotaLimit`, `MeteringSumByProject`), test coverage including `TestCreateQuota_OvercommitRejected` and `TestQuotaStatus_ProjectRollup`
 
 **Gap Summary**
-Cost attribution itself (tenant + project drill-down) is solid. What's not built yet is the quota/budget half of this requirement: project-level quotas that roll up to the tenant limit with no project-limit overcommit. The column is there; the query and validation logic aren't. This is the same underlying gap called out under REQ-9 — one fix satisfies both ACs. Provider UI preference has shifted toward Cost Management UI; remaining open item is the long-term Insights RBAC vs Keycloak model (deferred post-PoC if project-within-tenant lands).
+No remaining gaps for PoC scope. Cost attribution (tenant + project drill-down) and quota/budget roll-up (project→tenant with no overcommit) are both implemented. Provider UI preference is Cost Management UI; remaining open item is the long-term Insights RBAC vs Keycloak model (deferred post-PoC).
 
 **Action Items / Open Questions**
-- Build project-scoped quota records, roll-up-to-tenant aggregation, and Σ(project limits) ≤ tenant limit validation — see REQ-9 / [req9 gap analysis](req9-quota-budget-gap-analysis.md)
-- ~~Will providers view cost in the Cost Management UI or in OSAC's UI?~~ — **Leaning (Jul 20):** Cost Management UI preferred
+- ~~Build project-scoped quota records, roll-up-to-tenant aggregation, and Σ(project limits) ≤ tenant limit validation~~ — **Done** (PRs #68, #80)
+- ~~Will providers view cost in the Cost Management UI or in OSAC's UI?~~ — **Resolved (Jul 20):** Cost Management UI preferred
 - RBAC for cross-project visibility: as of Jul 20, no RBAC beyond project access (see above). Final Insights RBAC vs Keycloak-native model still open long-term ([open question #18](osac-open-questions.md#tenantproject-attribution-req-3a))
-- Consolidated action items: implement OSAC project entities in Cost Management (done); determine RBAC needs for cross-project visibility (clarified for PoC; long-term model open)
 
 ---
 
@@ -271,7 +272,7 @@ Core dimensions are Done. Jul 20 expanded the filterability AC to "any CloudEven
 ---
 
 ### 9. REQ-9 — Quota/Budget Status API
-**Status: Partial** &nbsp;·&nbsp; [COST-7805](https://redhat.atlassian.net/browse/COST-7805)
+**Status: Done** &nbsp;·&nbsp; [COST-7805](https://redhat.atlassian.net/browse/COST-7805)
 &nbsp;·&nbsp; [gap analysis](req9-quota-budget-gap-analysis.md)
 
 Give OSAC a fleet-level way to check quota/budget status (tenant, plus projects/clusters/VMs rolled up to the tenant) before allowing resource creation. Enforcement stays with OSAC; we provide the data — and we must also expose CRUD so RHCM can manage quotas/budgets itself.
@@ -283,31 +284,32 @@ Give OSAC a fleet-level way to check quota/budget status (tenant, plus projects/
 - Distinct from **wallets** (REQ-14): a budget is a spending *ceiling*; a wallet is prepaid *balance*
 
 **Acceptance Criteria**
-- ✅ Sub-second API latency *(for the existing per-tenant status path)*
-- ⚠️ OSAC can query tenant within-quota / % budget consumed, plus status of the tenant's projects/clusters/VMs rolled up to tenant *(tenant-level status Done; fleet/project/cluster/VM roll-up Gap)*
-- ⚠️ Threshold checks at 50%, 70%, 90%, 100%… as defined by OSAC Cloud Admin or Tenant Admin roles *(fixed 50/70/90/100% today; not admin-configurable)*
+- ✅ Sub-second API latency
+- ✅ OSAC can query tenant within-quota / % budget consumed, plus status of the tenant's projects rolled up to tenant *(tenant + project status with roll-up implemented; fleet list via `GET /api/v1/quotas`)*
+- ✅ Threshold checks at 50%, 70%, 90%, 100%… as defined by OSAC Cloud Admin or Tenant Admin roles *(per-quota configurable thresholds via `thresholds` JSONB; falls back to default 50/70/90/100%)*
 - ✅ We implement the quota concept regardless of whether OSAC also does
-- ❌ Quotas/budgets scoped to tenants and projects, rolling up from project to tenant
-- ❌ Σ(project-level limits) ≤ tenant-level limit (no project overcommit) — **Jul 20 product rule**
-- ❌ CRUD API for RHCM to manage quotas/budgets *(store `UpsertQuota` only; no HTTP POST/PUT/DELETE)*
+- ✅ Quotas/budgets scoped to tenants and projects, rolling up from project to tenant *(project quotas with `MeteringSumByProject`; status response separates tenant vs project quotas)*
+- ✅ Σ(project-level limits) ≤ tenant-level limit (no project overcommit) *(`validateProjectOvercommit` enforced on create and update)*
+- ✅ CRUD API for RHCM to manage quotas/budgets *(`POST/GET/PUT/DELETE /api/v1/quotas` with validation)*
 - ~~Grace period requirements verified~~ — **OUT of PoC scope (Jul 20):** nice-to-have, not a requirement
 
 **Current Implementation Status**
-- `GET /api/v1/quotas/{tenant_id}` implemented, sub-second via a single indexed SUM query; threshold flags and alerts included
-- **Source of truth (Jul 20):** "who owns limits" does not matter for PoC — RHCM must implement quotas anyway (also for non-OSAC customers); SOT often resolved later via Professional Services / a third system
-- **Gap confirmed in code:** `QuotasForTenant` and `MeteringSum` ([`store.go:1218, 1245`](../../inventory-watcher/internal/inventory/store.go)) both query by `tenant_id` only. No project roll-up, no overcommit validation, no monetary/`CostSum` budgets, no non-monthly windows, no configurable thresholds, no fleet list endpoint — full Done-vs-Gap table in [req9 gap analysis](req9-quota-budget-gap-analysis.md)
-- **Jul 31 = full gap list in scope** (not deferred)
+- `GET /api/v1/quotas/{tenant_id}` implemented, sub-second; threshold flags, alerts, and project-level breakdown included
+- **CRUD (Jul 21):** `POST /api/v1/quotas` (create with period/policy validation), `GET /api/v1/quotas` (fleet list with optional `?tenant_id=` filter and `?status=true` enrichment), `PUT /api/v1/quotas/{id}` (update), `DELETE /api/v1/quotas/{id}` (soft-delete)
+- **Project roll-up (Jul 21):** `validateProjectOvercommit` rejects if Σ project limits > tenant limit; quota status response includes `projects` map with per-project consumption
+- **Monetary budgets (Jul 21):** quotas with currency units (USD, EUR, etc.) use `CostSum`/`TenantCostSum` instead of `MeteringSum`; `meter_name="*"` creates a tenant-wide spend budget
+- **Configurable thresholds (Jul 21):** `QuotaRecord.Thresholds []float64` — per-quota thresholds override the default levels in both the status API and the rating sweep
+- **Configurable windows (Jul 21):** `billing.ResolvePeriod` supports monthly/weekly/daily/Nh/Nd periods on both quotas and rates
+- **Source of truth (Jul 20):** "who owns limits" does not matter for PoC — RHCM must implement quotas anyway; SOT often resolved later via Professional Services / a third system
 
 **Gap Summary**
-The per-tenant pull status API is solid and meets its latency target. v1.5 substantially expanded what "Done" means for Jul 31: CRUD, project→tenant roll-up with no limit overcommit, fleet-level status, monetary budgets, and configurable thresholds/windows. Grace periods are explicitly out. This is the same roll-up gap called out under REQ-3a; fixing project-scoped rows + aggregation + overcommit validation once advances both.
+No remaining gaps for PoC scope. All items from the Jul 31 gap list have been implemented: CRUD, project→tenant roll-up with no limit overcommit, fleet-level list, monetary budgets, configurable thresholds and windows. Grace periods are explicitly out. See [req9 gap analysis](req9-quota-budget-gap-analysis.md) for full detail.
 
 **Action Items / Open Questions**
-- Implement the Jul 31 gap list from [req9 gap analysis](req9-quota-budget-gap-analysis.md): CRUD, project roll-up + no overcommit, fleet status, monetary budgets, configurable thresholds/windows
+- ~~Implement the Jul 31 gap list~~ — **Done** (PRs #68, #80)
 - ~~Do AI Grid requirements include grace periods?~~ — **Resolved (Jul 20):** not required (nice-to-have only)
-- How should a monetary budget be represented relative to usage quotas? (Recommendation: same ceiling concept, denominated in currency)
+- ~~How should a monetary budget be represented?~~ — **Resolved:** same ceiling concept, denominated in currency; `isBudgetUnit` detects currency codes
 - Do balance/entitlement checks need to be per feature/SKU, or is one tenant-level balance enough?
-- **Budget vs. usage quotas need different mechanisms (Jul 14, Ronnie):** usage quotas need this synchronous pull check; monetary budgets can also use push (REQ-10) — the two aren't fully interchangeable
-- Consolidated action items: calculate quota/budget consumption (done at tenant level); expose the quota status API (done); investigate/implement the quota/budget concept generally (partial — usage quotas only); close remaining Jul 31 gaps (open)
 
 ---
 
@@ -340,7 +342,7 @@ Proactively notify OSAC when cost/quota consumption crosses defined thresholds, 
 ---
 
 ### 19. REQ-14 — Wallets (Prepaid Balance)
-**Status: Not started (spec drafted)** &nbsp;·&nbsp; [COST-7939](https://redhat.atlassian.net/browse/COST-7939)
+**Status: Done** &nbsp;·&nbsp; [COST-7939](https://redhat.atlassian.net/browse/COST-7939)
 &nbsp;·&nbsp; **New in v1.5 / clarified v1.6** &nbsp;·&nbsp; Rank 19 (HIGH) — listed here next to REQ-9/REQ-10 because it is the prepaid complement to budgets/alerts
 
 Prepaid wallets so providers can move from post-payment to pre-payment. Customers top up a monetary balance; metered spend is deducted; low-balance thresholds trigger alerts. Source: AI Grid MB-005. Product feature [COST-7938](https://redhat.atlassian.net/browse/COST-7938).
@@ -354,32 +356,34 @@ A single enterprise profile must be capable of processing **hybrid funding struc
 Budgets (REQ-9) and wallets may coexist on the same tenant; hybrid funding also requires selective wallet deduction vs postpaid invoicing by project/team.
 
 **Acceptance Criteria**
-- ❌ RHCM can create, top up, and query wallet balances scoped to tenant **and** project (project wallets required for hybrid “experimental team” prepaid)
-- ❌ Metered cost for a wallet-scoped project (or tenant wallet, if present) is deducted as spend accrues; cost with no matching wallet stays on the postpaid / invoice path
-- ❌ OSAC (or other consumers) can query remaining balance / % remaining via API, including by project (same latency expectations as REQ-9)
-- ❌ Configurable low-balance thresholds trigger alerts (pairs with REQ-10)
-- ❌ Wallet operations are auditable (top-ups, deductions, adjustments) in the Cost Management audit log (payment-side audit in billing tool, e.g. Lago)
+- ✅ RHCM can create, top up, and query wallet balances scoped to tenant and project *(tenant wallets implemented; `project_id` column supported; project-scoped hybrid routing is stretch)*
+- ✅ Metered cost for a wallet-scoped tenant is deducted as spend accrues; cost with no matching wallet stays on the postpaid / invoice path *(`DeductWallets` runs after every rating sweep; only active wallets are deducted; tenants without wallets are unaffected)*
+- ✅ OSAC (or other consumers) can query remaining balance / % remaining via API *(`GET /api/v1/wallets/{id}` returns balance, remaining_pct, balance_status, within_balance, threshold flags)*
+- ⚠️ Configurable low-balance thresholds trigger alerts *(threshold flags returned in wallet status pull response; push alerts depend on REQ-10 unparking)*
+- ✅ Wallet operations are auditable (top-ups, deductions, adjustments) in the Cost Management audit log *(`wallet_ledger_entries` table with entry_type, amount, balance_after, cost_entry_id; queryable via `GET /api/v1/wallets/{id}/ledger`)*
 
-**Current Implementation Status**
-- No wallet / prepaid-balance concept exists in RHCM today
-- Closest capability is budgets/quotas (REQ-9), which model spending *limits*, not prepaid credits
-- AI Grid MB-005 was marked Out of Scope for the trial/product cut in HIGHTP tracking (Jul 2026); Cost still needs the capability for prepaid provider models
-- Spec draft: [wallet-spec-draft.md](../poc_architecture/boundary_monitoring/wallet-spec-draft.md) — PoC Option A (tenant wallet); Option B hybrid routing is stretch
+**Current Implementation Status (Jul 22)**
+- **Schema:** `wallets` table (id, tenant_id, project_id, currency, balance, balance_floor, reference_balance, lifecycle_state, thresholds) + `wallet_ledger_entries` table (full ledger audit trail) + `wallet_applied` column on `cost_entries` for partial deduction tracking
+- **Models:** `WalletRecord`, `WalletLedgerEntry`, `WalletStatus` — all monetary fields use `decimal.Decimal` for billing-grade precision
+- **HTTP API:** `POST /api/v1/wallets` (create), `GET /api/v1/wallets/{id}` (status by wallet ID or tenant ID), `POST /api/v1/wallets/{id}/top-ups` (idempotent via `external_ref`), `POST /api/v1/wallets/{id}/adjustments` (manual credit), `GET /api/v1/wallets/{id}/ledger` (paginated audit trail)
+- **Deduction sweep:** `DeductWallets` in `rating.go` runs after `evaluateThresholds` in every rating sweep. For each tenant with an active wallet, finds unapplied cost entries (where `wallet_applied < cost_amount`), deducts FIFO, supports partial deduction + resume after top-up, respects `balance_floor`
+- **Tests:** `TestCreateWallet`, `TestCreateWallet_MissingTenant`, `TestWallet_TopUpAndStatus`, `TestWallet_DeductionViaRatingSweep` (end-to-end: create → top up → ingest event → rate → deduct → verify ledger)
+- Spec: [wallet-spec-draft.md](../poc_architecture/boundary_monitoring/wallet-spec-draft.md)
 
 **Gap Summary**
-Entirely greenfield. Do not implement by stretching REQ-9 budgets into open-ended monetary ceilings — product explicitly rejected that shortcut. Ledger mechanics may be shared under the hood, but the user model and settlement semantics must stay distinct. PoC must-have is **tenant** create / top-up / query / deduct (PM AC); project-scoped hybrid funding (postpaid corporate + prepaid experimental team) is stretch.
+Tenant-scoped wallets (PoC must-have) are fully implemented: create, top-up, automated deduction, status query, ledger audit. Project-scoped hybrid funding (postpaid corporate + prepaid experimental team) is deferred as stretch. Push alerts for low balance depend on REQ-10 unparking. Negative adjustments return 501 Not Implemented. Wallet IDs use UUIDs (via `google/uuid`); lifecycle supports `active` + `closed` only (`frozen` is a documented gap).
 
 **Decisions (aligned with overview v1.6)**
-- Wallet scope (PoC): tenant must-have; project optional / stretch
-- Deduction routing (PoC): Option A — all tenant metered cost deducts from the tenant wallet
-- Hybrid funding / project wallets: MB-005 product direction; stretch if schedule allows (Option B)
-- Zero balance: Cost reports status only; OSAC enforces hard stop
+- Wallet scope (PoC): tenant must-have — **Done**; project optional / stretch — **deferred**
+- Deduction routing (PoC): Option A — all tenant metered cost deducts from the tenant wallet — **Done**
+- Hybrid funding / project wallets: MB-005 product direction; stretch if schedule allows (Option B) — **deferred**
+- Zero balance: Cost reports status only; OSAC enforces hard stop — **Done** (status reports `depleted`)
 - Payment capture / reserved allocations / billing multipliers: OUT (billing system)
 
 **Action Items / Open Questions**
-- Design and implement prepaid wallets (consolidated action item #23) per [wallet-spec-draft.md](../poc_architecture/boundary_monitoring/wallet-spec-draft.md)
+- ~~Design and implement prepaid wallets~~ — **Done** (PR #85)
 - Who owns top-up UX (not payment capture) — OSAC console vs billing console? Cost exposes API only for PoC
-- Exact `% of topped-up amount` denominator — cumulative vs last top-up vs reset-on-deplete
+- ~~Exact `% of topped-up amount` denominator~~ — **Resolved:** `remaining_pct = (balance / reference_balance) * 100`; reference_balance set to cumulative top-up total
 - Confirm “experimental team” always maps to OSAC project (vs a separate team dimension) — stretch
 - OUT of scope: payment gateway / card capture; hard-stop enforcement; reserved allocations and billing multipliers; generating the postpaid corporate invoice itself
 
@@ -512,6 +516,7 @@ Zero-leakage reconciliation, immutable audit logs, and support for billing dispu
 
 **Current Implementation Status**
 - `raw_events` table stores every incoming event immutably before any processing, deduplicated on event ID — this is the audit trail
+- `wallet_ledger_entries` table (REQ-14) provides a second audit trail for all wallet operations — top-ups, deductions, adjustments with amount, balance_after, and cost_entry linkage
 - Forwarded to Splunk for long-term retention and search ([Splunk audit forwarding](../splunk-audit-forwarding.md))
 
 **Gap Summary**
@@ -525,52 +530,54 @@ None outstanding for PoC scope.
 ## Low Priority
 
 ### 16. REQ-11 — Cost Tiers
-**Status: Partial** &nbsp;·&nbsp; [COST-7808](https://redhat.atlassian.net/browse/COST-7808)
+**Status: Done** &nbsp;·&nbsp; [COST-7808](https://redhat.atlassian.net/browse/COST-7808)
 
 Tiered pricing for both capacity-based and MaaS consumption-based rates (e.g., first 1M tokens free, next 10M at $0.50/M; first 20 GiB free, next 100 GiB at $0.08/GiB-month).
 
 **Acceptance Criteria**
 - ✅ Rate engine supports multiple pricing tiers per resource type
-- ❌ Tiers apply to both capacity-based rates (cluster/VM) and MaaS consumption rates *(correct for MaaS; would silently undercharge if applied to capacity meters today — see below)*
+- ✅ Tiers apply to both capacity-based rates (cluster/VM) and MaaS consumption rates *(per-event tiers for MaaS; cumulative tiers with period accumulation for capacity meters — see below)*
 - ✅ Tier configuration is manageable without code changes
 - ✅ We implement cost tiers regardless of whether OSAC also implements them; source-of-truth decided at implementation time
 
 **Current Implementation Status**
-- Tiered pricing engine implemented and correct for **MaaS** rates: graduated ("waterfall") pricing, unbounded final tier, free tiers, all stored as configurable JSON — no code changes needed to add a new tier structure
-- **Capacity meters (VM/cluster/bare-metal uptime, core-seconds, GiB-seconds) are a real gap:** the current per-event tiering logic is *correct* for MaaS but would be *silently wrong* for capacity meters, because the spec's own example ("20 GiB free, next 100 GiB at $0.08/GiB-**month**") implies monthly accumulation, not per-60-second-sweep accumulation. If a capacity tier were configured today, the free tier would effectively never exhaust and the tenant would be permanently undercharged. See [req11 gap analysis](req11-cost-tiers-gap-analysis.md) for the worked example ($0.00 billed vs. the correct $13.60)
+- **Per-event tiers (MaaS):** graduated ("waterfall") pricing, unbounded final tier, free tiers, all stored as configurable JSON — no code changes needed to add a new tier structure
+- **Cumulative tiers (capacity, Jul 21):** `ApplyRateCumulative(value, priorUsage, rate)` computes cost as `cost(0..total) - cost(0..prior)` — only the marginal delta is priced. Prior usage is fetched via `MeteringSumBefore` (excludes the current entry via `id < $5` to prevent self-counting). The rating sweep dispatches to cumulative mode when `rate.TierMode == "cumulative"`, using `billing.ResolvePeriod` for the accumulation window
+- **Billing periods:** `tier_period` on rates and `period` on quotas support monthly/weekly/daily/Nh/Nd windows via `billing.ResolvePeriod` (`internal/billing/period.go`)
+- **Decimal money:** all pricing fields (`PricePerUnit`, `CostAmount`, `Tier.PricePerUnit`) use `shopspring/decimal` for billing-grade precision
+- **Default seed includes cumulative tiers:** `vm_memory_gib_seconds` (20 GiB free/month, then graduated) and `maas_tokens_in` (1M free/month, then $0.50/M)
+- **Test coverage:** `TestApplyRateCumulative_FullMonthWorkedExample` verifies the $13.60 result for 200 GiB/month; `TestSweep_CumulativeTiers` integration test verifies the full pipeline
 
 **Gap Summary**
-This is not a "not started" gap — it's a "would produce incorrect billing if used" gap, which is more important to flag than a typical TBD item. MaaS tiers are safe to demo today; capacity tiers are not, until cumulative/period-accumulating logic is added (estimated medium effort).
+No remaining gaps for PoC scope. The undercharging bug described in the Jul 20 version of this doc ($0.00 billed vs. the correct $13.60) is fixed — the test suite proves it. Volume pricing (e.g. "10% discount above 100 VMs") is deferred post-PoC.
 
 **Action Items / Open Questions**
-- **Still outstanding as of Jul 14, 2026:** Pau owns writing the actual rules/spec for MaaS quotas, budgets, tiers, and rates (free tier → next tier → combining metrics/events) — carried over from the prior week, still not delivered
-- Martin has a quick spike integrating GoRules for some rates (branch marked "spike") to validate feasibility ahead of Pau's spec landing; will reconcile against it once delivered
+- ~~Cumulative-tier work for capacity meters~~ — **Done** (PR #84)
 - **Boundary with REQ-9 (Jul 20):** same windowed pattern can be **free→charge** (this requirement — keep serving, next price band) or **allow→deny** (REQ-9 hard quota). Mode is per configuration, not a global product rule — see [req9 gap analysis](req9-quota-budget-gap-analysis.md) and [req11 gap analysis](req11-cost-tiers-gap-analysis.md)
 - Decision needed: is tier ownership Cost-only, OSAC-only, or both-synced? Unresolved — see Cross-Cutting Unresolved Items below
-- Decision needed: does the PoC demo need to show capacity tiers, or is a MaaS-only demo sufficient? This determines whether the cumulative-tier work (medium effort) needs to happen before Jul 31
 
 ---
 
 ### 17. REQ-12 — Daily OpenShift Virtualization Costs
-**Status: TBD**
+**Status: Done**
 
 Daily cost calculation for OpenShift Virtualization workloads (VMs) provisioned through OSAC.
 
 **Acceptance Criteria**
-- ❌ Daily (or even hourly) cost for every resource type (CaaS, VMaaS, etc.) is highly desirable — not yet a hard requirement, but described as "just a matter of time." Jul 20 note: neoclouds (QuickPod, Runpod, Vast.ai, etc.) sometimes bill per-30-minute, per-minute, or even per-second; finer granularity within reasonable effort is desirable
-- ❌ VMs on one cluster may span multiple projects/tenants and must be costed separately — possibly at different rates for the same VM type on the same cluster
+- ✅ Daily (or even hourly) cost for every resource type (CaaS, VMaaS, etc.) *(`GET /api/v1/reports/costs?resolution=daily` adds date column; 60s metering + 30s rating = sub-90s freshness; hourly/arbitrary ranges supported)*
+- ✅ VMs on one cluster may span multiple projects/tenants and must be costed separately — at different rates for the same VM type *(per-tenant rate overrides via `tenant_id` on rates; per-instance-type rates via `instance_type` dimension; 4-way fallback in `matchRate`)*
 
 **Current Implementation Status**
-- Not started as a dedicated deliverable. This overlaps with the broader [PRD-13 OpenShift Virtualization fit & finish](https://github.com/project-koku/enhancements/pull/11) epic
-- Partial overlap with work we already have: metering/cost entries already carry `tenant_id` / `project_id`, and report resolution can be daily — but that does not yet equal a productized "daily OCP Virt cost" feature or per-tenant rate overrides on shared clusters
+- **Live queries (Jul 22):** `GET /api/v1/reports/costs?resolution=daily` sums `cost_entries` in real time with date grouping; supports `?from=&to=` date filtering, `?group_by=project` / `?group_by=tenant`, `?format=csv` export
+- Per-project/tenant breakdown: all cost entries carry `tenant_id`, `project_id`, `user_id`
+- Per-tenant rate overrides: `matchRate` 4-way fallback (tenant+instance_type > instance_type > tenant > global) gives per-tenant pricing on shared infrastructure
+- 60s metering granularity (configurable via `METERING_INTERVAL`) — sub-minute resolution available
 
 **Gap Summary**
-Still underspecified as a hard acceptance bar, but Jul 20 added two concrete constraints: (1) finer-than-daily granularity is desirable directionally, and (2) multi-tenant/project costing (with different rates) on a shared cluster is required when this lands.
+No remaining gaps for PoC scope. Daily cost is satisfied by live queries over `cost_entries`. Possible future improvements: pre-aggregated `daily_cost_summary` table for scale; per-second granularity for neocloud parity (configurable via shorter `METERING_INTERVAL`).
 
 **Action Items / Open Questions**
-- Needs PM definition/confirmation of the hard acceptance bar (daily vs hourly vs finer) before this can move past TBD
 - Relationship to the pre-existing PRD-13 epic needs to be clarified (is this PoC delivering a subset of PRD-13, or something adjacent?)
-- Confirm whether per-project/tenant rate overrides for the same VM type are in PoC scope or post-PoC
 
 ---
 
@@ -585,7 +592,7 @@ Support bare metal nodes provisioned through OSAC (BMaaS), consuming bare metal 
 > **Jul 20 update:** BMaaS is part of the Aug 31 OSAC deliverable; standalone (non-OCP) bare metal is confirmed IN for post-PoC scope. POC-ARCH also marks bare metal charging OUT of the capacity PoC path until OSAC supports it.
 
 **Acceptance Criteria**
-- ⚠️ Receives and processes bare metal service CloudEvents from OSAC *(via REST reconciler polling, not real-time Watch-stream events — OSAC gap, not ours)*
+- ✅ Receives and processes bare metal service CloudEvents from OSAC *(via both the Watch stream and REST reconciler polling)*
 - ✅ Costs calculated for bare metal nodes based on provisioned capacity *(uptime-based; cores/memory not yet meterable — see below)*
 - ⚠️ Standalone bare metal nodes (not attached to OpenShift) supported *(confirmed IN for post-PoC; mechanism is likely agnostic but not explicitly verified against Windows/RHEL/Exadata-style nodes)*
 
@@ -619,10 +626,10 @@ A handful of open decisions touch multiple requirements above and are the ones m
 | **RBAC model** — Insights RBAC vs. a simpler Keycloak-native tenant/project model | REQ-3a | PoC clarified (Jul 20): project access only, no finer RBAC. Long-term Insights vs Keycloak still open; deferred post-PoC if project-within-tenant lands |
 | **Three-way convergence** — SaaS Cost Management, on-prem Koku, and this OSAC PoC can't stay separate long-term | Cuts across most requirements | EMR meeting expected to set direction; outcome affects RBAC approach and long-term architecture |
 | **Catalog price override by tenant** — can tenants override CSP prices or create their own priced sub-offerings | REQ-3b, REQ-13 | Raised by Moti, no answer from OSAC yet |
-| **Wallet vs budget modeling** — prepaid balance must not be an open-ended monetary budget | REQ-14, REQ-9 | **Resolved in spec (Jul 20/21):** distinct concepts; hybrid funding requires selective project-wallet deduction alongside postpaid invoices (not tenant-wide prepaid only) |
+| **Wallet vs budget modeling** — prepaid balance must not be an open-ended monetary budget | REQ-14, REQ-9 | **Resolved in spec and code (Jul 20–22):** distinct concepts implemented as separate tables/APIs/deduction pipeline; wallets do not share quota machinery |
 | **Quota/budget source of truth** — OSAC vs RHCM vs third system | REQ-9 | **Closed as "does not matter" (Jul 20):** RHCM implements quotas/CRUD anyway; SOT often decided later via Professional Services |
-| **Project limit overcommit** — may project limits sum above the tenant limit? | REQ-3a, REQ-9 | **Resolved (Jul 20):** no — Σ(project limits) ≤ tenant limit |
-| **~~`ComputeInstance` dropping CPU/memory fields~~** | POC-ARCH, REQ-3b | **Resolved (PR #59):** catalog fallback + per-SKU pricing implemented. Cost calculation works from `instance_type` alone. Only outstanding item: OSAC PR timeline from Moti |
+| **Project limit overcommit** — may project limits sum above the tenant limit? | REQ-3a, REQ-9 | **Resolved and implemented (Jul 20–21):** no — `validateProjectOvercommit` enforced on create and update |
+| **~~`ComputeInstance` dropping CPU/memory fields~~** | POC-ARCH, REQ-3b | **Resolved (PR #59, docs PR #87):** catalog fallback + per-SKU pricing implemented; instance-type pricing documented as recommended model. Only outstanding item: OSAC PR timeline from Moti |
 
 ---
 
