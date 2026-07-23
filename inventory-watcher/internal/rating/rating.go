@@ -257,7 +257,7 @@ func (r *Rater) tryRuleEngine(ctx context.Context, me inventory.MeteringEntry) (
 		ResourceID:      me.ResourceID,
 		MeterName:       me.MeterName,
 		MeteredValue:    me.Value,
-		CostAmount:      output.CostAmount,
+		CostAmount:      decimal.NewFromFloat(output.CostAmount),
 		Currency:        output.Currency,
 		PeriodStart:     me.PeriodStart,
 		PeriodEnd:       me.PeriodEnd,
