@@ -93,7 +93,9 @@ const dashboardHTML = `<!DOCTYPE html>
 <div class="modal-overlay" id="tokenModal" style="display:none">
   <div class="modal">
     <h2>Bearer Token</h2>
-    <p>Authentication is enabled. Paste the token from <code>scripts/refresh-token.sh</code> or retrieve it with:</p>
+    <p>Authentication is enabled. Run <code>scripts/refresh-token.sh</code> first, then paste from:</p>
+    <div class="modal-hint">cat /tmp/osac_token.txt</div>
+    <p style="margin-top:0.5rem">Or fetch directly from the cluster:</p>
     <div class="modal-hint">oc get secret cost-consumer-secrets -n cost-mgmt -o jsonpath='{.data.osac-token}' | base64 -d</div>
     <textarea id="tokenInput" placeholder="eyJhbGci..."></textarea>
     <div class="modal-btns">
@@ -217,7 +219,14 @@ function showTokenModal() {
   if (!alreadyOpen) $('tokenInput').focus();
 }
 function hideTokenModal() { $('tokenModal').style.display = 'none'; }
-function saveToken() { localStorage.setItem(TOKEN_KEY, $('tokenInput').value.trim()); updateTokenBtn(); hideTokenModal(); refresh(); }
+function saveToken() {
+  // Strip all whitespace — terminals wrap long JWTs with newlines when copying
+  const token = $('tokenInput').value.replace(/\s+/g, '');
+  localStorage.setItem(TOKEN_KEY, token);
+  updateTokenBtn();
+  hideTokenModal();
+  refresh();
+}
 function clearToken() { localStorage.removeItem(TOKEN_KEY); updateTokenBtn(); hideTokenModal(); refresh(); }
 $('tokenModal').addEventListener('click', e => { if (e.target === $('tokenModal')) hideTokenModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTokenModal(); });
