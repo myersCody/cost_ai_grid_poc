@@ -7,6 +7,7 @@ A proof-of-concept integrating [Red Hat Cost Management](https://github.com/proj
 Standalone Go service that consumes OSAC CloudEvents, meters infrastructure and MaaS usage, applies rates, and produces cost/quota data.
 
 **Status:** [Implementation tracking](docs/implementation-status.md)
+
 **Docs:** [Technical guide](docs/index.md)
 
 ## Deployment
