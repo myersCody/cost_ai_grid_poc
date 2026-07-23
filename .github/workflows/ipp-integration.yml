@@ -71,17 +71,14 @@ jobs:
 
       - name: Clone and build IPP
         run: |
-          # Uses upstream repo — breaks here surface upstream breaking changes.
-          # If upstream removes the branch or breaks the build, switch to our
-          # locked fork: martinpovolny/ai-gateway-payload-processing
-          # branch: feat/external-metering-dp (snapshot of PR #320)
-          IPP_REPO="https://github.com/opendatahub-io/ai-gateway-payload-processing.git"
-          IPP_BRANCH="feat/external-metering-dp"
+          # PR #386 (feat/tenant-attribution-fields) adds organization_id and
+          # cost_center to inference.tokens.used CloudEvents — required for
+          # correct tenant attribution in the cost consumer.
+          IPP_REPO="https://github.com/martinpovolny/ai-gateway-payload-processing.git"
+          IPP_BRANCH="feat/tenant-attribution-fields"
 
-          git clone "$IPP_REPO" /tmp/ipp
+          git clone --branch "$IPP_BRANCH" --depth 1 "$IPP_REPO" /tmp/ipp
           cd /tmp/ipp
-          git fetch origin "pull/320/head:$IPP_BRANCH"
-          git checkout "$IPP_BRANCH"
           echo "Using IPP commit: $(git log --oneline -1)"
 
           GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o /tmp/ipp-bin ./cmd

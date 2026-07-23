@@ -76,7 +76,9 @@ echo "--- End-to-end inference (via Istio Gateway) ---"
 BEFORE=$(curl -sf "$CONSUMER/api/v1/reports/summary" 2>/dev/null || echo "{}")
 BEFORE_RAW=$(echo "$BEFORE" | grep -o '"raw_events":[0-9]*' | grep -o '[0-9]*' || echo "0")
 
-# Send inference request through the gateway via test-client pod
+# Send inference request through the gateway via test-client pod.
+# x-maas-organization-id is forwarded by IPP PR #386 as organization_id
+# in the CloudEvent — the consumer uses it for tenant attribution.
 INFERENCE_RESP=$(kubectl exec -n ai-gateway test-client -- \
     curl -s --max-time 30 \
     http://ai-gateway-istio.ai-gateway:80/v1/chat/completions \
@@ -85,6 +87,7 @@ INFERENCE_RESP=$(kubectl exec -n ai-gateway test-client -- \
     -H "x-maas-username: test-user" \
     -H "x-maas-group: test-tenant" \
     -H "x-maas-subscription: test-tenant/premium-plan" \
+    -H "x-maas-organization-id: ci-org" \
     -d '{"model":"test-model","messages":[{"role":"user","content":"hello from CI"}]}' \
     2>/dev/null || echo "CURL_FAILED")
 
@@ -100,6 +103,7 @@ kubectl exec -n ai-gateway test-client -- \
     -H "x-maas-username: test-user" \
     -H "x-maas-group: test-tenant" \
     -H "x-maas-subscription: test-tenant/premium-plan" \
+    -H "x-maas-organization-id: ci-org" \
     -d '{"model":"test-model","messages":[{"role":"user","content":"second request"}]}' \
     >/dev/null 2>&1 || true
 
@@ -136,6 +140,11 @@ check_output "cost entries created" "cost_entries" echo "$REPORT"
 PROM=$(curl -sf "$METRICS/metrics" 2>/dev/null || echo "")
 check_output "events processed metric" "cost_consumer_events_processed_total" echo "$PROM"
 check_output "metering entries metric" "cost_consumer_metering_entries_created_total" echo "$PROM"
+
+# Verify tenant attribution: cost entries must be attributed to ci-org
+# (from x-maas-organization-id → organization_id in CloudEvent via IPP PR #386)
+COST_REPORT=$(curl -sf "$CONSUMER/api/v1/reports/costs" 2>/dev/null || echo "{}")
+check_output "costs attributed to ci-org tenant" "ci-org" echo "$COST_REPORT"
 
 # ── Summary ──
 echo ""
