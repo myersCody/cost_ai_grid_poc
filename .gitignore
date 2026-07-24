@@ -99,3 +99,4 @@ docs/.markdown-viewer-temp.html
 deploy/k3d-ipp-dump-*
 inventory-watcher/cost-event-consumer
 inventory-watcher/koku-sync
+istio-*/
