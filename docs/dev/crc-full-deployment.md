@@ -644,7 +644,7 @@ kubectl top nodes   # check — target < 75% memory before proceeding
 
 ```bash
 # Download istioctl
-curl -sL "https://github.com/istio/istio/releases/download/1.29.2/istioctl-1.29.2-osx-arm64.tar.gz" \
+curl -sL "https://github.com/istio/istio/releases/download/1.29.6/istio-1.29.6-linux-amd64.tar.gz" \
   | tar xz -C /tmp
 
 # Install with OpenShift profile
