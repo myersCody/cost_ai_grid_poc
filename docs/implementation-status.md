@@ -112,7 +112,7 @@ is a separate concern owned by the RHCM team.
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
-| Receive periodic lifecycle CloudEvents via HTTP | Done | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) — `POST /api/v1/events` |
+| Receive periodic lifecycle CloudEvents via HTTP | Done | [`internal/api/handler.go`](../inventory-watcher/internal/api/handler.go) — `POST /api/v1/events` |
 | Parse tenant/project/resource/hardware/duration | Done | MaaS CloudEvents parsed; VM data via Watch stream |
 | First event auto-creates tenant/project | Done | `UpsertModel` / `UpsertComputeInstance` create on first event |
 | Events processed within SLA | Done | <1ms per event; local sweep every 60s |
@@ -252,7 +252,7 @@ OSAC provides a CloudEvent spec for what they want to receive.
 
 | Acceptance Criterion | Status | Implementation |
 |---|---|---|
-| Receive and process MaaS CloudEvents | Done | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) |
+| Receive and process MaaS CloudEvents | Done | [`internal/api/handler.go`](../inventory-watcher/internal/api/handler.go) |
 | Events ingested within 30 seconds | Done | <1ms per event |
 | CloudEvents format parsed and stored | Done | `raw_events` table |
 | MaaS cost computed within 60s | Done | Rating sweep every 30s |

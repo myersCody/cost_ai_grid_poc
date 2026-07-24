@@ -159,7 +159,7 @@ be a broad category (e.g., `gpu_instance`), not a per-SKU identifier.
 
 **Severity:** Low | **Dimension:** Performance | **Effort:** S
 
-**Location:** `internal/ingest/handler.go:157-160`, `internal/custommetrics/custommetrics.go:151-154`
+**Location:** `internal/api/handler.go:157-160`, `internal/custommetrics/custommetrics.go:151-154`
 
 **Description:** When a custom metric event is received, `ce.Data` is
 unmarshaled into `map[string]interface{}` twice:
@@ -178,7 +178,7 @@ parsed map from `ClassifyEvent` into `ProcessEvent` instead of raw bytes.
 
 **Severity:** Low | **Dimension:** Correctness | **Effort:** S
 
-**Location:** `internal/ingest/handler.go:155-161`
+**Location:** `internal/api/handler.go:155-161`
 
 **Description:** The fallback logic checks `resourceID == "" || tenantID == ""`.
 If `classifyEvent` returns a valid `resourceID` but empty `tenantID`, the

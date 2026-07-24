@@ -1,4 +1,4 @@
-package ingest
+package api
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,9 +23,119 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/rating"
 )
 
-// CloudEvent is a generic CloudEvents 1.0 envelope. The Data field is
-// decoded separately based on the Type.
-type CloudEvent struct {
+// Compile-time check that Handler implements ServerInterface.
+var _ ServerInterface = (*APIHandler)(nil)
+
+const (
+	// VMaaS/CaaS event types from OSAC metering collector.
+	eventTypeComputeInstance = "osac.compute_instance.lifecycle"
+	eventTypeCluster        = "osac.cluster.lifecycle"
+	eventTypeModel          = "osac.model.lifecycle"
+	eventTypeInferenceTokens = "inference.tokens.used"
+
+	maxRequestBodySize = 1 << 20 // 1MB
+	maxIDLength        = 256
+)
+
+// Reconciler triggers a full OSAC reconciliation cycle.
+type Reconciler interface {
+	ReconcileAll(ctx context.Context)
+}
+
+// Handler implements the generated ServerInterface with all API business logic.
+type APIHandler struct {
+	store         *inventory.Store
+	meter         *metering.Meter
+	cfg           *config.Config
+	customMetrics *custommetrics.Registry
+	reconciler    Reconciler
+	reconciling   atomic.Bool
+	logger        *slog.Logger
+}
+
+// NewHandler constructs a Handler with all required dependencies.
+func NewAPIHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Config, customMetrics *custommetrics.Registry, logger *slog.Logger) *APIHandler {
+	return &APIHandler{
+		store:         store,
+		meter:         meter,
+		cfg:           cfg,
+		customMetrics: customMetrics,
+		logger:        logger,
+	}
+}
+
+// SetReconciler sets the reconciler for on-demand reconciliation triggers.
+func (h *APIHandler) SetReconciler(r Reconciler) {
+	h.reconciler = r
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func writeJSON(w http.ResponseWriter, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeErrorJSON(w http.ResponseWriter, msg string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+// CsvSafe escapes a string value for safe CSV output (prevents formula injection).
+func CsvSafe(s string) string {
+	if len(s) > 0 && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@') {
+		return "'" + s
+	}
+	if strings.ContainsAny(s, ",\"\n") {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+	return s
+}
+
+func isBudget(unit string) bool {
+	switch unit {
+	case "USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD", "AUD":
+		return true
+	}
+	return false
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Health probes
+// ---------------------------------------------------------------------------
+
+// GetLiveness implements ServerInterface.
+func (h *APIHandler) GetLiveness(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// GetReadiness implements ServerInterface.
+func (h *APIHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := h.store.Pool().Ping(ctx); err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		writeJSON(w, map[string]string{"status": "not_ready", "error": "database unreachable"})
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	writeJSON(w, map[string]string{"status": "ready"})
+}
+
+// ---------------------------------------------------------------------------
+// Event ingestion
+// ---------------------------------------------------------------------------
+
+// cloudEventInternal is a generic CloudEvents 1.0 envelope for internal
+// decoding. The Data field is decoded separately based on the Type.
+type cloudEventInternal struct {
 	SpecVersion     string          `json:"specversion"`
 	Type            string          `json:"type"`
 	Source          string          `json:"source"`
@@ -37,140 +146,65 @@ type CloudEvent struct {
 	Data            json.RawMessage `json:"data"`
 }
 
-// ComputeInstanceEventData matches the OSAC metering collector VMaaS schema.
-// Source: https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README.md#cloudevents-schema
-type ComputeInstanceEventData struct {
+// computeInstanceEventData matches the OSAC metering collector VMaaS schema.
+type computeInstanceEventData struct {
 	DurationSeconds  float64 `json:"duration_seconds"`
-	CPUCoreSeconds   int64  `json:"cpu_core_seconds"`
-	MemoryGiBSeconds int64  `json:"memory_gib_seconds"`
-	TenantID         string `json:"tenant_id"`
-	InstanceID       string `json:"instance_id"`
-	Template         string `json:"template"`
-	CatalogItem      string `json:"catalog_item"`
-	State            string `json:"state"`
-	Cores            int32  `json:"cores"`
-	MemoryGiB        int32  `json:"memory_gib"`
+	CPUCoreSeconds   int64   `json:"cpu_core_seconds"`
+	MemoryGiBSeconds int64   `json:"memory_gib_seconds"`
+	TenantID         string  `json:"tenant_id"`
+	InstanceID       string  `json:"instance_id"`
+	Template         string  `json:"template"`
+	CatalogItem      string  `json:"catalog_item"`
+	State            string  `json:"state"`
+	Cores            int32   `json:"cores"`
+	MemoryGiB        int32   `json:"memory_gib"`
 }
 
-// ClusterEventData matches the OSAC metering collector CaaS schema.
-// Source: https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README-caas.md#cloudevents-schema
-type ClusterEventData struct {
+// clusterEventData matches the OSAC metering collector CaaS schema.
+type clusterEventData struct {
 	DurationSeconds   float64 `json:"duration_seconds"`
 	WorkerNodeSeconds int64   `json:"worker_node_seconds"`
-	NodeCount         int32  `json:"node_count"`
-	TenantID          string `json:"tenant_id"`
-	ClusterID         string `json:"cluster_id"`
-	Template          string `json:"template"`
-	State             string `json:"state"`
-	HostType          string `json:"host_type"`
+	NodeCount         int32   `json:"node_count"`
+	TenantID          string  `json:"tenant_id"`
+	ClusterID         string  `json:"cluster_id"`
+	Template          string  `json:"template"`
+	State             string  `json:"state"`
+	HostType          string  `json:"host_type"`
 }
 
-// MaaSEventData accepts both our mock format and the real IPP external-metering plugin format.
-// IPP source: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/320
-// IPP client: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
-type MaaSEventData struct {
-	// Legacy mock format fields (our simulator, backwards compat)
-	TenantID        string `json:"tenant_id"`
-	ModelID         string `json:"model_id"`
-	ModelName       string `json:"model_name"`
-	Template        string `json:"template"`
-	State           string `json:"state"`
-	TokensIn        int64  `json:"tokens_in"`
-	TokensOut       int64  `json:"tokens_out"`
-	Requests        int64  `json:"requests"`
-	DurationSeconds float64 `json:"duration_seconds"`
-	RequestCount    int64   `json:"request_count"`
-	// IPP external-metering plugin fields (authoritative format).
-	// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go
-	// Tenant attribution fields: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
-	User                string `json:"user"`
-	Group               string `json:"group"`
-	Subscription        string `json:"subscription"`
-	OrganizationID      string `json:"organization_id"`
-	CostCenter          string `json:"cost_center"`
-	Provider            string `json:"provider"`
-	Model               string `json:"model"`
-	PromptTokens        int64  `json:"prompt_tokens"`
-	CompletionTokens    int64  `json:"completion_tokens"`
-	TotalTokens         int64  `json:"total_tokens"`
-	CachedInputTokens   int64  `json:"cached_input_tokens"`   // subset of prompt_tokens — parsed for observability, not billed separately
-	CacheCreationTokens int64  `json:"cache_creation_tokens"` // subset of prompt_tokens
-	ReasoningTokens     int64  `json:"reasoning_tokens"`      // subset of completion_tokens (o1/o3/DeepSeek R1)
-	DurationMs          int64  `json:"duration_ms"`
+// maaSEventData accepts both legacy mock format and the real IPP external-metering plugin format.
+type maaSEventData struct {
+	TenantID            string  `json:"tenant_id"`
+	ModelID             string  `json:"model_id"`
+	ModelName           string  `json:"model_name"`
+	Template            string  `json:"template"`
+	State               string  `json:"state"`
+	TokensIn            int64   `json:"tokens_in"`
+	TokensOut           int64   `json:"tokens_out"`
+	Requests            int64   `json:"requests"`
+	DurationSeconds     float64 `json:"duration_seconds"`
+	RequestCount        int64   `json:"request_count"`
+	User                string  `json:"user"`
+	Group               string  `json:"group"`
+	Subscription        string  `json:"subscription"`
+	OrganizationID      string  `json:"organization_id"`
+	CostCenter          string  `json:"cost_center"`
+	Provider            string  `json:"provider"`
+	Model               string  `json:"model"`
+	PromptTokens        int64   `json:"prompt_tokens"`
+	CompletionTokens    int64   `json:"completion_tokens"`
+	TotalTokens         int64   `json:"total_tokens"`
+	CachedInputTokens   int64   `json:"cached_input_tokens"`
+	CacheCreationTokens int64   `json:"cache_creation_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens"`
+	DurationMs          int64   `json:"duration_ms"`
 }
 
-const (
-	// VMaaS/CaaS event types from OSAC metering collector.
-	// Source: https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/
-	EventTypeComputeInstance = "osac.compute_instance.lifecycle"
-	EventTypeCluster         = "osac.cluster.lifecycle"
-	// Legacy mock MaaS event type (our simulator).
-	EventTypeModel = "osac.model.lifecycle"
-	// Real IPP external-metering plugin event type.
-	// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/320
-	EventTypeInferenceTokens = "inference.tokens.used"
-
-	maxRequestBodySize = 1 << 20 // 1MB
-	maxIDLength        = 256
-)
-
-type Reconciler interface {
-	ReconcileAll(ctx context.Context)
-}
-
-type Handler struct {
-	store         *inventory.Store
-	meter         *metering.Meter
-	cfg           *config.Config
-	customMetrics *custommetrics.Registry
-	reconciler    Reconciler
-	reconciling   atomic.Bool
-	logger        *slog.Logger
-}
-
-func NewHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Config, customMetrics *custommetrics.Registry, logger *slog.Logger) *Handler {
-	return &Handler{store: store, meter: meter, cfg: cfg, customMetrics: customMetrics, logger: logger}
-}
-
-func (h *Handler) SetReconciler(r Reconciler) {
-	h.reconciler = r
-}
-
-func (h *Handler) ServeMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/events", h.handleEvent)
-	mux.HandleFunc("POST /api/v1/quotas", h.handleCreateQuota)
-	mux.HandleFunc("GET /api/v1/quotas", h.handleListQuotas)
-	mux.HandleFunc("PUT /api/v1/quotas/", h.handleUpdateQuota)
-	mux.HandleFunc("DELETE /api/v1/quotas/", h.handleDeleteQuota)
-	mux.HandleFunc("GET /api/v1/quotas/", h.handleQuotaStatus)
-	mux.HandleFunc("POST /api/v1/wallets", h.handleCreateWallet)
-	mux.HandleFunc("GET /api/v1/wallets/", h.handleWalletStatus)
-	mux.HandleFunc("POST /api/v1/wallets/", h.handleWalletAction)
-	mux.HandleFunc("GET /api/v1/rates", h.handleListRates)
-	mux.HandleFunc("GET /api/v1/reports/costs", h.handleCostReport)
-	mux.HandleFunc("GET /api/v1/reports/breakdown", h.handleCostBreakdown)
-	mux.HandleFunc("GET /api/v1/reports/summary", h.handlePipelineSummary)
-	mux.HandleFunc("GET /api/v1/customers/", h.handleBalanceCheck)
-	mux.HandleFunc("GET /api/v1/debug/config", h.handleDebugConfig)
-	mux.HandleFunc("POST /api/v1/reconcile", h.handleReconcile)
-	mux.HandleFunc("GET /healthz", h.handleLiveness)
-	mux.HandleFunc("GET /readyz", h.handleReadiness)
-	if h.cfg != nil && h.cfg.DebugDashboard {
-		mux.HandleFunc("GET /debug/dashboard", h.handleDebugDashboard)
-		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" {
-				http.Redirect(w, r, "/debug/dashboard", http.StatusFound)
-			}
-		})
-	}
-	return mux
-}
-
-func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
+// IngestEvent implements ServerInterface.
+func (h *APIHandler) IngestEvent(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
-	var ce CloudEvent
+	var ce cloudEventInternal
 	if err := json.NewDecoder(r.Body).Decode(&ce); err != nil {
 		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
@@ -224,12 +258,12 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 
 	var processingErr error
 	switch ce.Type {
-	case EventTypeComputeInstance:
-		processingErr = h.handleComputeInstanceEvent(ctx, ce)
-	case EventTypeCluster:
-		processingErr = h.handleClusterEvent(ctx, ce)
-	case EventTypeModel, EventTypeInferenceTokens:
-		processingErr = h.handleModelEvent(ctx, ce)
+	case eventTypeComputeInstance:
+		processingErr = h.processComputeInstanceEvent(ctx, ce)
+	case eventTypeCluster:
+		processingErr = h.processClusterEvent(ctx, ce)
+	case eventTypeModel, eventTypeInferenceTokens:
+		processingErr = h.processModelEvent(ctx, ce)
 	default:
 		if h.customMetrics != nil && h.customMetrics.HasEventType(ce.Type) {
 			processingErr = h.customMetrics.ProcessEvent(ctx, h.store, ce.Type, ce.Data, ce.Time, h.logger)
@@ -246,14 +280,51 @@ func (h *Handler) handleEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metrics.EventsProcessedTotal.WithLabelValues(ce.Type, "accepted").Inc()
-	// IPP external-metering client accepts 200 and 204 (not 202).
-	// Metering-simulator OpenAPI spec uses 204 for event accepted.
-	// Source: docs/specs/maas-metering-openapi.yaml
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent) error {
-	var data ComputeInstanceEventData
+func classifyEvent(ce cloudEventInternal) (resourceType, resourceID, tenantID string) {
+	var peek struct {
+		TenantID       string `json:"tenant_id"`
+		OrganizationID string `json:"organization_id"`
+		InstanceID     string `json:"instance_id"`
+		ClusterID      string `json:"cluster_id"`
+		ModelID        string `json:"model_id"`
+		User           string `json:"user"`
+		Model          string `json:"model"`
+	}
+	if err := json.Unmarshal(ce.Data, &peek); err != nil {
+		return ce.Type, "", ce.Subject
+	}
+
+	tenantID = peek.TenantID
+	if tenantID == "" {
+		tenantID = peek.OrganizationID
+	}
+	if tenantID == "" {
+		tenantID = ce.Subject
+	}
+
+	switch ce.Type {
+	case eventTypeComputeInstance:
+		return "ComputeInstance", peek.InstanceID, tenantID
+	case eventTypeCluster:
+		return "Cluster", peek.ClusterID, tenantID
+	case eventTypeModel:
+		return "Model", peek.ModelID, tenantID
+	case eventTypeInferenceTokens:
+		rid := peek.ModelID
+		if rid == "" {
+			rid = peek.Model
+		}
+		return "Model", rid, tenantID
+	default:
+		return ce.Type, "", tenantID
+	}
+}
+
+func (h *APIHandler) processComputeInstanceEvent(ctx context.Context, ce cloudEventInternal) error {
+	var data computeInstanceEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
 		return err
 	}
@@ -281,7 +352,7 @@ func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent)
 	periodStart := ce.Time.Add(-time.Duration(data.DurationSeconds * float64(time.Second)))
 
 	entries := []inventory.MeteringEntry{
-		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_uptime_seconds", Value: float64(data.DurationSeconds), Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
+		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_uptime_seconds", Value: data.DurationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
 		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_cpu_core_seconds", Value: float64(data.CPUCoreSeconds), Unit: "core_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
 		{ResourceType: "compute_instance", ResourceID: data.InstanceID, TenantID: data.TenantID, MeterName: "vm_memory_gib_seconds", Value: float64(data.MemoryGiBSeconds), Unit: "gib_seconds", PeriodStart: periodStart, PeriodEnd: ce.Time},
 	}
@@ -298,8 +369,8 @@ func (h *Handler) handleComputeInstanceEvent(ctx context.Context, ce CloudEvent)
 	return nil
 }
 
-func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
-	var data ClusterEventData
+func (h *APIHandler) processClusterEvent(ctx context.Context, ce cloudEventInternal) error {
+	var data clusterEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
 		return err
 	}
@@ -317,7 +388,7 @@ func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
 	var entries []inventory.MeteringEntry
 
 	if data.HostType == "_control_plane" {
-		entries = append(entries, inventory.MeteringEntry{ResourceType: "cluster", ResourceID: data.ClusterID, TenantID: data.TenantID, MeterName: "cluster_uptime_seconds", Value: float64(data.DurationSeconds), Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time})
+		entries = append(entries, inventory.MeteringEntry{ResourceType: "cluster", ResourceID: data.ClusterID, TenantID: data.TenantID, MeterName: "cluster_uptime_seconds", Value: data.DurationSeconds, Unit: "seconds", PeriodStart: periodStart, PeriodEnd: ce.Time})
 	}
 
 	if data.WorkerNodeSeconds > 0 {
@@ -336,13 +407,13 @@ func (h *Handler) handleClusterEvent(ctx context.Context, ce CloudEvent) error {
 	return nil
 }
 
-func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
-	var data MaaSEventData
+func (h *APIHandler) processModelEvent(ctx context.Context, ce cloudEventInternal) error {
+	var data maaSEventData
 	if err := json.Unmarshal(ce.Data, &data); err != nil {
 		return err
 	}
 
-	// Normalize IPP format → our internal format
+	// Normalize IPP format to internal format
 	if data.PromptTokens > 0 && data.TokensIn == 0 {
 		data.TokensIn = data.PromptTokens
 	}
@@ -356,17 +427,12 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 		data.ModelID = data.Model
 	}
 	// Tenant attribution from IPP CloudEvent identity fields.
-	// Priority: organization_id > subscription namespace > group > user
-	// See: https://github.com/opendatahub-io/ai-gateway-payload-processing/pull/386
 	if data.TenantID == "" && data.OrganizationID != "" {
 		data.TenantID = data.OrganizationID
 	}
 	if data.TenantID == "" && data.Subscription != "" {
 		if idx := strings.Index(data.Subscription, "/"); idx > 0 {
 			ns := data.Subscription[:idx]
-			// AITenant namespaces use "ai-tenant-{name}" convention.
-			// Confirmed by Mpaul (Slack #wg-osac-maas 2026-07-09),
-			// Noy (via Kris, open questions doc). See docs/research/maas-tenant-attribution.md
 			data.TenantID = strings.TrimPrefix(ns, "ai-tenant-")
 		}
 	}
@@ -404,99 +470,260 @@ func (h *Handler) handleModelEvent(ctx context.Context, ce CloudEvent) error {
 	}
 
 	h.meter.MeterMaaSEvent(ctx, metering.MaaSUsage{
-		ModelID:             data.ModelID,
-		ModelName:           data.ModelName,
-		TenantID:            data.TenantID,
-		UserID:              data.User,
-		State:               data.State,
-		TokensIn:            data.TokensIn,
-		TokensOut:           data.TokensOut,
-		CachedInputTokens:   data.CachedInputTokens,
-		ReasoningTokens:     data.ReasoningTokens,
-		Requests:            data.Requests,
-		EventTime:           ce.Time,
-		DurationSeconds:     float64(data.DurationSeconds),
+		ModelID:           data.ModelID,
+		ModelName:         data.ModelName,
+		TenantID:          data.TenantID,
+		UserID:            data.User,
+		State:             data.State,
+		TokensIn:          data.TokensIn,
+		TokensOut:         data.TokensOut,
+		CachedInputTokens: data.CachedInputTokens,
+		ReasoningTokens:   data.ReasoningTokens,
+		Requests:          data.Requests,
+		EventTime:         ce.Time,
+		DurationSeconds:   data.DurationSeconds,
 	})
 	return nil
 }
 
-func classifyEvent(ce CloudEvent) (resourceType, resourceID, tenantID string) {
-	var peek struct {
-		TenantID       string `json:"tenant_id"`
-		OrganizationID string `json:"organization_id"`
-		InstanceID     string `json:"instance_id"`
-		ClusterID      string `json:"cluster_id"`
-		ModelID        string `json:"model_id"`
-		User           string `json:"user"`
-		Model          string `json:"model"`
-	}
-	if err := json.Unmarshal(ce.Data, &peek); err != nil {
-		return ce.Type, "", ce.Subject
+// ---------------------------------------------------------------------------
+// Rates
+// ---------------------------------------------------------------------------
+
+// ListRates implements ServerInterface.
+func (h *APIHandler) ListRates(w http.ResponseWriter, r *http.Request, params ListRatesParams) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	var tenantID string
+	if params.TenantId != nil {
+		tenantID = *params.TenantId
 	}
 
-	tenantID = peek.TenantID
-	if tenantID == "" {
-		tenantID = peek.OrganizationID
+	rates, err := h.store.ListRates(r.Context(), tenantID)
+	if err != nil {
+		writeErrorJSON(w, "failed to list rates", http.StatusInternalServerError)
+		return
 	}
-	if tenantID == "" {
-		tenantID = ce.Subject
+	if rates == nil {
+		rates = []inventory.RateRecord{}
 	}
 
-	switch ce.Type {
-	case EventTypeComputeInstance:
-		return "ComputeInstance", peek.InstanceID, tenantID
-	case EventTypeCluster:
-		return "Cluster", peek.ClusterID, tenantID
-	case EventTypeModel:
-		return "Model", peek.ModelID, tenantID
-	case EventTypeInferenceTokens:
-		rid := peek.ModelID
-		if rid == "" {
-			rid = peek.Model
+	// Determine format from param or Accept header
+	csvFormat := false
+	if params.Format != nil && *params.Format == ListRatesParamsFormatCsv {
+		csvFormat = true
+	} else if r.Header.Get("Accept") == "text/csv" {
+		csvFormat = true
+	}
+
+	if csvFormat {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment; filename=rates.csv")
+		fmt.Fprintln(w, "id,tenant_id,resource_type,instance_type,meter_name,cost_type,price_per_unit,currency,tier_mode,tier_period,tiers,description,effective_from,effective_to")
+		for _, rate := range rates {
+			tid := ""
+			if rate.TenantID != nil {
+				tid = *rate.TenantID
+			}
+			eto := ""
+			if rate.EffectiveTo != nil {
+				eto = rate.EffectiveTo.Format(time.RFC3339)
+			}
+			tiersJSON := ""
+			if len(rate.Tiers) > 0 {
+				b, _ := json.Marshal(rate.Tiers)
+				tiersJSON = string(b)
+			}
+			fmt.Fprintf(w, "%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+				rate.ID, CsvSafe(tid), CsvSafe(rate.ResourceType), CsvSafe(rate.InstanceType),
+				CsvSafe(rate.MeterName), CsvSafe(rate.CostType), rate.PricePerUnit.String(),
+				CsvSafe(rate.Currency), CsvSafe(rate.TierMode), CsvSafe(rate.TierPeriod),
+				CsvSafe(tiersJSON), CsvSafe(rate.Description),
+				rate.EffectiveFrom.Format(time.RFC3339), eto)
 		}
-		return "Model", rid, tenantID
-	default:
-		return ce.Type, "", tenantID
+		return
 	}
+
+	writeJSON(w, map[string]any{"rates": rates, "count": len(rates)})
 }
 
-func writeJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
+// ---------------------------------------------------------------------------
+// Quotas
+// ---------------------------------------------------------------------------
 
-func CsvSafe(s string) string {
-	if len(s) > 0 && (s[0] == '=' || s[0] == '+' || s[0] == '-' || s[0] == '@') {
-		return "'" + s
+// CreateQuota implements ServerInterface.
+func (h *APIHandler) CreateQuota(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var q inventory.QuotaRecord
+	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
 	}
-	if strings.ContainsAny(s, ",\"\n") {
-		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+
+	if q.TenantID == "" || q.MeterName == "" || q.Unit == "" {
+		writeErrorJSON(w, "tenant_id, meter_name, and unit are required", http.StatusBadRequest)
+		return
 	}
-	return s
-}
+	if q.LimitValue <= 0 {
+		writeErrorJSON(w, "limit_value must be positive", http.StatusBadRequest)
+		return
+	}
+	if q.Period == "" {
+		q.Period = "monthly"
+	}
+	if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
+		writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if q.Policy == "" {
+		q.Policy = "deny"
+	}
+	if q.EffectiveFrom.IsZero() {
+		q.EffectiveFrom = time.Now().UTC()
+	}
 
-func writeErrorJSON(w http.ResponseWriter, msg string, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg})
-}
-
-type quotaStatusResponse struct {
-	TenantID string                            `json:"tenant_id"`
-	Period   string                            `json:"period"`
-	Quotas   []inventory.QuotaStatus           `json:"quotas"`
-	Projects map[string][]inventory.QuotaStatus `json:"projects,omitempty"`
-}
-
-
-func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.PathValue("tenant_id")
-	if tenantID == "" {
-		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/"), "/")
-		if len(parts) > 0 {
-			tenantID = parts[0]
+	if q.ProjectID != "" {
+		if err := h.validateProjectOvercommit(r.Context(), q, 0); err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 	}
+
+	id, err := h.store.UpsertQuota(r.Context(), q)
+	if err != nil {
+		h.logger.Error("create quota failed", "error", err)
+		writeErrorJSON(w, "failed to create quota", http.StatusInternalServerError)
+		return
+	}
+	q.ID = id
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, q)
+}
+
+// ListQuotas implements ServerInterface.
+func (h *APIHandler) ListQuotas(w http.ResponseWriter, r *http.Request, params ListQuotasParams) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	var tenantID string
+	if params.TenantId != nil {
+		tenantID = *params.TenantId
+	}
+	withStatus := params.Status != nil && *params.Status == True
+
+	quotas, err := h.store.ListQuotas(r.Context(), tenantID)
+	if err != nil {
+		writeErrorJSON(w, "failed to list quotas", http.StatusInternalServerError)
+		return
+	}
+
+	if !withStatus {
+		if quotas == nil {
+			quotas = []inventory.QuotaRecord{}
+		}
+		writeJSON(w, map[string]any{"quotas": quotas})
+		return
+	}
+
+	type quotaWithStatusItem struct {
+		inventory.QuotaRecord
+		Consumed   float64         `json:"consumed"`
+		Percentage float64         `json:"percentage"`
+		Thresholds map[string]bool `json:"thresholds"`
+	}
+
+	now := time.Now().UTC()
+	ctx := r.Context()
+	var results []quotaWithStatusItem
+	for _, q := range quotas {
+		qPeriod := q.Period
+		if qPeriod == "" {
+			qPeriod = "monthly"
+		}
+		periodStart, periodEnd, err := billing.ResolvePeriod(qPeriod, now)
+		if err != nil {
+			continue
+		}
+		consumed, _ := h.store.MeteringSum(ctx, q.TenantID, q.MeterName, periodStart, periodEnd)
+		pct := 0.0
+		if q.LimitValue > 0 {
+			pct = (consumed / q.LimitValue) * 100
+		}
+		levels := rating.ThresholdLevels
+		if len(q.Thresholds) > 0 {
+			levels = q.Thresholds
+		}
+		thresholds := make(map[string]bool, len(levels))
+		for _, t := range levels {
+			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
+		}
+		results = append(results, quotaWithStatusItem{
+			QuotaRecord: q,
+			Consumed:    consumed,
+			Percentage:  math.Round(pct*100) / 100,
+			Thresholds:  thresholds,
+		})
+	}
+	if results == nil {
+		results = []quotaWithStatusItem{}
+	}
+	writeJSON(w, map[string]any{"quotas": results})
+}
+
+// DeleteQuota implements ServerInterface.
+func (h *APIHandler) DeleteQuota(w http.ResponseWriter, r *http.Request, id int64) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	if err := h.store.SoftDeleteQuota(r.Context(), id); err != nil {
+		writeErrorJSON(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UpdateQuota implements ServerInterface.
+func (h *APIHandler) UpdateQuota(w http.ResponseWriter, r *http.Request, id int64) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var q inventory.QuotaRecord
+	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if q.Period != "" {
+		if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
+			writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if q.ProjectID != "" && q.LimitValue > 0 {
+		if err := h.validateProjectOvercommit(r.Context(), q, id); err != nil {
+			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
+	if err := h.store.UpdateQuota(r.Context(), id, q); err != nil {
+		writeErrorJSON(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	updated, _ := h.store.GetQuota(r.Context(), id)
+	if updated != nil {
+		writeJSON(w, updated)
+	} else {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// GetQuotaStatus implements ServerInterface.
+func (h *APIHandler) GetQuotaStatus(w http.ResponseWriter, r *http.Request, tenantID string) {
 	if tenantID == "" {
 		writeErrorJSON(w, "tenant_id required", http.StatusBadRequest)
 		return
@@ -585,7 +812,12 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 		firstPeriodLabel = billing.PeriodLabel("monthly", now)
 	}
 
-	resp := quotaStatusResponse{
+	resp := struct {
+		TenantID string                            `json:"tenant_id"`
+		Period   string                            `json:"period"`
+		Quotas   []inventory.QuotaStatus           `json:"quotas"`
+		Projects map[string][]inventory.QuotaStatus `json:"projects,omitempty"`
+	}{
 		TenantID: tenantID,
 		Period:   firstPeriodLabel,
 		Quotas:   tenantStatuses,
@@ -597,194 +829,7 @@ func (h *Handler) handleQuotaStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp)
 }
 
-// ── Quota CRUD ──
-
-func (h *Handler) handleCreateQuota(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-
-	var q inventory.QuotaRecord
-	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
-		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if q.TenantID == "" || q.MeterName == "" || q.Unit == "" {
-		writeErrorJSON(w, "tenant_id, meter_name, and unit are required", http.StatusBadRequest)
-		return
-	}
-	if q.LimitValue <= 0 {
-		writeErrorJSON(w, "limit_value must be positive", http.StatusBadRequest)
-		return
-	}
-	if q.Period == "" {
-		q.Period = "monthly"
-	}
-	if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
-		writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if q.Policy == "" {
-		q.Policy = "deny"
-	}
-	if q.EffectiveFrom.IsZero() {
-		q.EffectiveFrom = time.Now().UTC()
-	}
-
-	if q.ProjectID != "" {
-		if err := h.validateProjectOvercommit(r.Context(), q, 0); err != nil {
-			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
-	id, err := h.store.UpsertQuota(r.Context(), q)
-	if err != nil {
-		h.logger.Error("create quota failed", "error", err)
-		writeErrorJSON(w, "failed to create quota", http.StatusInternalServerError)
-		return
-	}
-	q.ID = id
-
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, q)
-}
-
-type quotaWithStatus struct {
-	inventory.QuotaRecord
-	Consumed   float64         `json:"consumed"`
-	Percentage float64         `json:"percentage"`
-	Thresholds map[string]bool `json:"thresholds"`
-}
-
-func (h *Handler) handleListQuotas(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	tenantID := r.URL.Query().Get("tenant_id")
-	withStatus := r.URL.Query().Get("status") == "true"
-
-	quotas, err := h.store.ListQuotas(r.Context(), tenantID)
-	if err != nil {
-		writeErrorJSON(w, "failed to list quotas", http.StatusInternalServerError)
-		return
-	}
-
-	if !withStatus {
-		if quotas == nil {
-			quotas = []inventory.QuotaRecord{}
-		}
-		writeJSON(w, map[string]any{"quotas": quotas})
-		return
-	}
-
-	now := time.Now().UTC()
-	ctx := r.Context()
-	var results []quotaWithStatus
-	for _, q := range quotas {
-		qPeriod := q.Period
-		if qPeriod == "" {
-			qPeriod = "monthly"
-		}
-		periodStart, periodEnd, err := billing.ResolvePeriod(qPeriod, now)
-		if err != nil {
-			continue
-		}
-		consumed, _ := h.store.MeteringSum(ctx, q.TenantID, q.MeterName, periodStart, periodEnd)
-		pct := 0.0
-		if q.LimitValue > 0 {
-			pct = (consumed / q.LimitValue) * 100
-		}
-		levels := rating.ThresholdLevels
-		if len(q.Thresholds) > 0 {
-			levels = q.Thresholds
-		}
-		thresholds := make(map[string]bool, len(levels))
-		for _, t := range levels {
-			thresholds[fmt.Sprintf("%.0f", t)] = pct >= t
-		}
-		results = append(results, quotaWithStatus{
-			QuotaRecord: q,
-			Consumed:    consumed,
-			Percentage:  math.Round(pct*100) / 100,
-			Thresholds:  thresholds,
-		})
-	}
-	if results == nil {
-		results = []quotaWithStatus{}
-	}
-	writeJSON(w, map[string]any{"quotas": results})
-}
-
-func (h *Handler) handleUpdateQuota(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeErrorJSON(w, "invalid quota ID", http.StatusBadRequest)
-		return
-	}
-
-	var q inventory.QuotaRecord
-	if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
-		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if q.Period != "" {
-		if _, _, err := billing.ResolvePeriod(q.Period, time.Now()); err != nil {
-			writeErrorJSON(w, "invalid period: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
-	if q.ProjectID != "" && q.LimitValue > 0 {
-		if err := h.validateProjectOvercommit(r.Context(), q, id); err != nil {
-			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-
-	if err := h.store.UpdateQuota(r.Context(), id, q); err != nil {
-		writeErrorJSON(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	updated, _ := h.store.GetQuota(r.Context(), id)
-	if updated != nil {
-		writeJSON(w, updated)
-	} else {
-		w.WriteHeader(http.StatusNoContent)
-	}
-}
-
-func (h *Handler) handleDeleteQuota(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	idStr := strings.TrimPrefix(r.URL.Path, "/api/v1/quotas/")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeErrorJSON(w, "invalid quota ID", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.store.SoftDeleteQuota(r.Context(), id); err != nil {
-		writeErrorJSON(w, err.Error(), http.StatusNotFound)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func isBudget(unit string) bool {
-	switch unit {
-	case "USD", "EUR", "GBP", "JPY", "CNY", "CHF", "CAD", "AUD":
-		return true
-	}
-	return false
-}
-
-func (h *Handler) validateProjectOvercommit(ctx context.Context, q inventory.QuotaRecord, excludeID int64) error {
+func (h *APIHandler) validateProjectOvercommit(ctx context.Context, q inventory.QuotaRecord, excludeID int64) error {
 	tenantLimit, err := h.store.TenantQuotaLimit(ctx, q.TenantID, q.MeterName)
 	if err != nil || tenantLimit == 0 {
 		return nil
@@ -800,17 +845,20 @@ func (h *Handler) validateProjectOvercommit(ctx context.Context, q inventory.Quo
 	return nil
 }
 
-// ── Wallet Handlers ──
+// ---------------------------------------------------------------------------
+// Wallets
+// ---------------------------------------------------------------------------
 
-func (h *Handler) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
+// CreateWallet implements ServerInterface.
+func (h *APIHandler) CreateWallet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 
 	var req struct {
-		TenantID     string    `json:"tenant_id"`
-		ProjectID    string    `json:"project_id"`
-		Currency     string    `json:"currency"`
-		Thresholds   []float64 `json:"thresholds"`
+		TenantID   string    `json:"tenant_id"`
+		ProjectID  string    `json:"project_id"`
+		Currency   string    `json:"currency"`
+		Thresholds []float64 `json:"thresholds"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -844,23 +892,15 @@ func (h *Handler) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, created)
 }
 
-func (h *Handler) handleWalletStatus(w http.ResponseWriter, r *http.Request) {
+// GetWalletStatus implements ServerInterface.
+func (h *APIHandler) GetWalletStatus(w http.ResponseWriter, r *http.Request, id string) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
-	parts := strings.Split(path, "/")
-	if len(parts) == 0 || parts[0] == "" {
+	if id == "" {
 		writeErrorJSON(w, "wallet_id or tenant_id required", http.StatusBadRequest)
 		return
 	}
 
-	// If the path ends with /ledger, serve the ledger
-	if len(parts) >= 2 && parts[1] == "ledger" {
-		h.handleWalletLedger(w, r, parts[0])
-		return
-	}
-
-	id := parts[0]
 	ctx := r.Context()
 
 	// Try as wallet ID first, then as tenant ID
@@ -906,18 +946,10 @@ func (h *Handler) handleWalletStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) handleWalletAction(w http.ResponseWriter, r *http.Request) {
+// TopUpWallet implements ServerInterface.
+func (h *APIHandler) TopUpWallet(w http.ResponseWriter, r *http.Request, id string) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/wallets/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 2 {
-		writeErrorJSON(w, "expected /api/v1/wallets/{id}/top-ups or /adjustments", http.StatusBadRequest)
-		return
-	}
-	walletID := parts[0]
-	action := parts[1]
 
 	var req struct {
 		Amount      decimal.Decimal `json:"amount"`
@@ -930,49 +962,64 @@ func (h *Handler) handleWalletAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
+	if req.Amount.IsZero() || req.Amount.IsNegative() {
+		writeErrorJSON(w, "amount must be positive", http.StatusBadRequest)
+		return
+	}
 
-	switch action {
-	case "top-ups":
-		if req.Amount.IsZero() || req.Amount.IsNegative() {
-			writeErrorJSON(w, "amount must be positive", http.StatusBadRequest)
-			return
-		}
-		entry, err := h.store.TopUpWallet(ctx, walletID, req.Amount, req.ExternalRef)
+	entry, err := h.store.TopUpWallet(r.Context(), id, req.Amount, req.ExternalRef)
+	if err != nil {
+		writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, entry)
+}
+
+// AdjustWallet implements ServerInterface.
+func (h *APIHandler) AdjustWallet(w http.ResponseWriter, r *http.Request, id string) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var req struct {
+		Amount      decimal.Decimal `json:"amount"`
+		Currency    string          `json:"currency"`
+		ExternalRef string          `json:"external_ref"`
+		Reason      string          `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorJSON(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.Amount.IsZero() {
+		writeErrorJSON(w, "amount must be non-zero", http.StatusBadRequest)
+		return
+	}
+
+	if req.Amount.IsPositive() {
+		entry, err := h.store.TopUpWallet(r.Context(), id, req.Amount, req.ExternalRef)
 		if err != nil {
-			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
+			writeErrorJSON(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
 		writeJSON(w, entry)
-
-	case "adjustments":
-		if req.Amount.IsZero() {
-			writeErrorJSON(w, "amount must be non-zero", http.StatusBadRequest)
-			return
-		}
-		entry, err := h.store.AdjustWallet(ctx, walletID, req.Amount, req.Reason)
-		if err != nil {
-			writeErrorJSON(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, entry)
-
-	default:
-		writeErrorJSON(w, "unknown action: "+action, http.StatusBadRequest)
+	} else {
+		writeErrorJSON(w, "negative adjustments not yet implemented", http.StatusNotImplemented)
 	}
 }
 
-func (h *Handler) handleWalletLedger(w http.ResponseWriter, r *http.Request, walletID string) {
+// GetWalletLedger implements ServerInterface.
+func (h *APIHandler) GetWalletLedger(w http.ResponseWriter, r *http.Request, id string, params GetWalletLedgerParams) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	limit := 100
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			limit = n
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 
-	entries, err := h.store.WalletLedger(r.Context(), walletID, limit)
+	entries, err := h.store.WalletLedger(r.Context(), id, limit)
 	if err != nil {
 		writeErrorJSON(w, "failed to query ledger", http.StatusInternalServerError)
 		return
@@ -983,7 +1030,9 @@ func (h *Handler) handleWalletLedger(w http.ResponseWriter, r *http.Request, wal
 	writeJSON(w, map[string]any{"entries": entries})
 }
 
-// ── Cost Report ──
+// ---------------------------------------------------------------------------
+// Cost Reports
+// ---------------------------------------------------------------------------
 
 type costReportResponse struct {
 	Meta costReportMeta            `json:"meta"`
@@ -1036,57 +1085,8 @@ func buildKokuTotal(cost, infraCost, suppCost float64, currency string) kokuCost
 }
 
 type costBreakdownResponse struct {
-	Meta costBreakdownMeta              `json:"meta"`
-	Data []inventory.CostBreakdownRow   `json:"data"`
-}
-
-func (h *Handler) handleListRates(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	tenantID := r.URL.Query().Get("tenant_id")
-
-	rates, err := h.store.ListRates(r.Context(), tenantID)
-	if err != nil {
-		writeErrorJSON(w, "failed to list rates", http.StatusInternalServerError)
-		return
-	}
-	if rates == nil {
-		rates = []inventory.RateRecord{}
-	}
-
-	format := r.URL.Query().Get("format")
-	if format == "" && r.Header.Get("Accept") == "text/csv" {
-		format = "csv"
-	}
-
-	if format == "csv" {
-		w.Header().Set("Content-Type", "text/csv")
-		w.Header().Set("Content-Disposition", "attachment; filename=rates.csv")
-		fmt.Fprintln(w, "id,tenant_id,resource_type,instance_type,meter_name,cost_type,price_per_unit,currency,tier_mode,tier_period,tiers,description,effective_from,effective_to")
-		for _, rate := range rates {
-			tid := ""
-			if rate.TenantID != nil {
-				tid = *rate.TenantID
-			}
-			eto := ""
-			if rate.EffectiveTo != nil {
-				eto = rate.EffectiveTo.Format(time.RFC3339)
-			}
-			tiersJSON := ""
-			if len(rate.Tiers) > 0 {
-				b, _ := json.Marshal(rate.Tiers)
-				tiersJSON = string(b)
-			}
-			fmt.Fprintf(w, "%d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
-				rate.ID, CsvSafe(tid), CsvSafe(rate.ResourceType), CsvSafe(rate.InstanceType),
-				CsvSafe(rate.MeterName), CsvSafe(rate.CostType), rate.PricePerUnit.String(),
-				CsvSafe(rate.Currency), CsvSafe(rate.TierMode), CsvSafe(rate.TierPeriod),
-				CsvSafe(tiersJSON), CsvSafe(rate.Description),
-				rate.EffectiveFrom.Format(time.RFC3339), eto)
-		}
-		return
-	}
-
-	writeJSON(w, map[string]any{"rates": rates, "count": len(rates)})
+	Meta costBreakdownMeta            `json:"meta"`
+	Data []inventory.CostBreakdownRow `json:"data"`
 }
 
 type costBreakdownMeta struct {
@@ -1094,22 +1094,33 @@ type costBreakdownMeta struct {
 	Filters map[string]string `json:"filters"`
 }
 
-func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
+// GetCostReport implements ServerInterface.
+func (h *APIHandler) GetCostReport(w http.ResponseWriter, r *http.Request, params GetCostReportParams) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	q := r.URL.Query()
-	tenantID := q.Get("tenant_id")
-	resourceType := q.Get("resource_type")
-	groupBy := q.Get("group_by")
-	if groupBy == "" {
-		groupBy = "tenant"
+	var tenantID, resourceType string
+	if params.TenantId != nil {
+		tenantID = *params.TenantId
 	}
-	resolution := q.Get("resolution")
+	if params.ResourceType != nil {
+		resourceType = *params.ResourceType
+	}
+
+	groupBy := "tenant"
+	if params.GroupBy != nil {
+		groupBy = string(*params.GroupBy)
+	}
+
+	var resolution string
+	if params.Resolution != nil {
+		resolution = string(*params.Resolution)
+	}
 
 	var periodStart, periodEnd time.Time
 	var period string
 
-	if fromStr := q.Get("from"); fromStr != "" {
+	if params.From != nil && *params.From != "" {
+		fromStr := *params.From
 		var err error
 		periodStart, err = time.Parse(time.RFC3339, fromStr)
 		if err != nil {
@@ -1119,7 +1130,8 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if toStr := q.Get("to"); toStr != "" {
+		if params.To != nil && *params.To != "" {
+			toStr := *params.To
 			periodEnd, err = time.Parse(time.RFC3339, toStr)
 			if err != nil {
 				periodEnd, err = time.Parse("2006-01-02", toStr)
@@ -1133,7 +1145,10 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 		}
 		period = periodStart.Format("2006-01-02") + "/" + periodEnd.Format("2006-01-02")
 	} else {
-		period = q.Get("period")
+		period = ""
+		if params.Period != nil {
+			period = *params.Period
+		}
 		if period == "" {
 			period = time.Now().UTC().Format("2006-01")
 		}
@@ -1172,12 +1187,15 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 		filters["resource_type"] = resourceType
 	}
 
-	format := q.Get("format")
-	if format == "" && r.Header.Get("Accept") == "text/csv" {
-		format = "csv"
+	// Determine format from param or Accept header
+	csvFormat := false
+	if params.Format != nil && *params.Format == GetCostReportParamsFormatCsv {
+		csvFormat = true
+	} else if r.Header.Get("Accept") == "text/csv" {
+		csvFormat = true
 	}
 
-	if format == "csv" {
+	if csvFormat {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=costs.csv")
 		if resolution == "daily" {
@@ -1208,15 +1226,21 @@ func (h *Handler) handleCostReport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
+// GetCostBreakdown implements ServerInterface.
+func (h *APIHandler) GetCostBreakdown(w http.ResponseWriter, r *http.Request, params GetCostBreakdownParams) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	q := r.URL.Query()
-	tenantID := q.Get("tenant_id")
-	resourceType := q.Get("resource_type")
+	var tenantID, resourceType string
+	if params.TenantId != nil {
+		tenantID = *params.TenantId
+	}
+	if params.ResourceType != nil {
+		resourceType = *params.ResourceType
+	}
 
 	var from, to time.Time
-	if fromStr := q.Get("from"); fromStr != "" {
+	if params.From != nil && *params.From != "" {
+		fromStr := *params.From
 		var err error
 		from, err = time.Parse(time.RFC3339, fromStr)
 		if err != nil {
@@ -1229,7 +1253,8 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 	} else {
 		from = time.Date(time.Now().Year(), time.Now().Month(), 1, 0, 0, 0, 0, time.UTC)
 	}
-	if toStr := q.Get("to"); toStr != "" {
+	if params.To != nil && *params.To != "" {
+		toStr := *params.To
 		var err error
 		to, err = time.Parse(time.RFC3339, toStr)
 		if err != nil {
@@ -1244,10 +1269,8 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit := 100
-	if l := q.Get("limit"); l != "" {
-		if v, err := fmt.Sscanf(l, "%d", &limit); err != nil || v != 1 {
-			limit = 100
-		}
+	if params.Limit != nil && *params.Limit > 0 {
+		limit = *params.Limit
 	}
 
 	ctx := r.Context()
@@ -1269,12 +1292,15 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 		filters["resource_type"] = resourceType
 	}
 
-	format := q.Get("format")
-	if format == "" && r.Header.Get("Accept") == "text/csv" {
-		format = "csv"
+	// Determine format from param or Accept header
+	csvFormat := false
+	if params.Format != nil && *params.Format == GetCostBreakdownParamsFormatCsv {
+		csvFormat = true
+	} else if r.Header.Get("Accept") == "text/csv" {
+		csvFormat = true
 	}
 
-	if format == "csv" {
+	if csvFormat {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=breakdown.csv")
 		fmt.Fprintln(w, "date,tenant_id,project_id,user_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency")
@@ -1297,7 +1323,8 @@ func (h *Handler) handleCostBreakdown(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) handlePipelineSummary(w http.ResponseWriter, r *http.Request) {
+// GetPipelineSummary implements ServerInterface.
+func (h *APIHandler) GetPipelineSummary(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ctx := r.Context()
@@ -1311,32 +1338,14 @@ func (h *Handler) handlePipelineSummary(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, summary)
 }
 
-// ── Balance Check (IPP compatibility) ──
-// GET /api/v1/customers/{customerID}/entitlements/{featureKey}/value?model={model}
-//
-// Response format matches the entitlementValue struct from the IPP external-metering plugin.
-// Source: https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go
+// ---------------------------------------------------------------------------
+// IPP Balance Check (Entitlement)
+// ---------------------------------------------------------------------------
 
-type entitlementValue struct {
-	HasAccess bool    `json:"hasAccess"`
-	Balance   float64 `json:"balance"`
-	Usage     float64 `json:"usage"`
-	Overage   float64 `json:"overage"`
-}
-
-func (h *Handler) handleBalanceCheck(w http.ResponseWriter, r *http.Request) {
+// GetEntitlementValue implements ServerInterface.
+func (h *APIHandler) GetEntitlementValue(w http.ResponseWriter, r *http.Request, customerID string, featureKey string, params GetEntitlementValueParams) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/customers/")
-	parts := strings.Split(path, "/")
-	// Expect: {customerID}/entitlements/{featureKey}/value
-	if len(parts) < 4 || parts[1] != "entitlements" || parts[3] != "value" {
-		writeErrorJSON(w, "expected /api/v1/customers/{id}/entitlements/{key}/value", http.StatusBadRequest)
-		return
-	}
-
-	customerID := parts[0]
-	featureKey := parts[2]
 	_ = featureKey // available for future feature-scoped quotas
 
 	ctx := r.Context()
@@ -1344,7 +1353,12 @@ func (h *Handler) handleBalanceCheck(w http.ResponseWriter, r *http.Request) {
 
 	quotas, err := h.store.QuotasForTenant(ctx, customerID, now)
 	if err != nil || len(quotas) == 0 {
-		writeJSON(w, entitlementValue{HasAccess: true, Balance: math.MaxFloat64})
+		writeJSON(w, map[string]interface{}{
+			"hasAccess": true,
+			"balance":   math.MaxFloat64,
+			"usage":     0.0,
+			"overage":   0.0,
+		})
 		return
 	}
 
@@ -1374,15 +1388,20 @@ func (h *Handler) handleBalanceCheck(w http.ResponseWriter, r *http.Request) {
 		balance = 0
 	}
 
-	writeJSON(w, entitlementValue{
-		HasAccess: totalUsage < totalLimit,
-		Balance:   balance,
-		Usage:     totalUsage,
-		Overage:   overage,
+	writeJSON(w, map[string]interface{}{
+		"hasAccess": totalUsage < totalLimit,
+		"balance":   balance,
+		"usage":     totalUsage,
+		"overage":   overage,
 	})
 }
 
-func (h *Handler) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
+// ---------------------------------------------------------------------------
+// Debug / Reconcile
+// ---------------------------------------------------------------------------
+
+// GetDebugConfig implements ServerInterface.
+func (h *APIHandler) GetDebugConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if h.cfg == nil {
 		writeJSON(w, map[string]string{"error": "config not available"})
@@ -1391,12 +1410,8 @@ func (h *Handler) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.cfg.Diagnostics())
 }
 
-func (h *Handler) handleDebugDashboard(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(dashboardHTML))
-}
-
-func (h *Handler) handleReconcile(w http.ResponseWriter, r *http.Request) {
+// TriggerReconcile implements ServerInterface.
+func (h *APIHandler) TriggerReconcile(w http.ResponseWriter, r *http.Request) {
 	if h.reconciler == nil {
 		writeErrorJSON(w, "reconciler not configured", http.StatusServiceUnavailable)
 		return
@@ -1413,20 +1428,18 @@ func (h *Handler) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "reconciliation triggered"})
 }
 
-func (h *Handler) handleLiveness(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]string{"status": "ok"})
+// GetDebugDashboard serves the built-in diagnostic dashboard (HTML).
+func (h *APIHandler) GetDebugDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(dashboardHTML))
 }
 
-func (h *Handler) handleReadiness(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-
-	if err := h.store.Pool().Ping(ctx); err != nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		writeJSON(w, map[string]string{"status": "not_ready", "error": "database unreachable"})
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-	writeJSON(w, map[string]string{"status": "ready"})
+// RegisterDebugRoutes adds the root redirect to the mux.
+// The dashboard itself is now in the OpenAPI spec and registered via HandlerFromMux.
+func (h *APIHandler) RegisterDebugRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/debug/dashboard", http.StatusFound)
+		}
+	})
 }

@@ -1,4 +1,4 @@
-package ingest
+package api
 
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -53,18 +53,6 @@ const dashboardHTML = `<!DOCTYPE html>
   .bar-supp { background: var(--purple); }
   .footer { padding: 1rem 2rem; text-align: center; color: var(--muted); font-size: 0.8rem; }
   .error-msg { background: #FFEBEE; color: var(--red); padding: 1rem; border-radius: 6px; margin-bottom: 1rem; }
-  .token-btn { padding: 0.3rem 0.8rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.5); background: transparent; color: white; cursor: pointer; font-size: 0.82rem; }
-  .token-btn.has-token { border-color: #69F0AE; color: #69F0AE; }
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .modal { background: white; border-radius: 8px; padding: 1.5rem; width: 480px; max-width: 95vw; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-  .modal h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
-  .modal p { font-size: 0.85rem; color: var(--muted); margin-bottom: 1rem; line-height: 1.5; }
-  .modal textarea { width: 100%; height: 100px; font-family: "SF Mono","Fira Code",monospace; font-size: 0.78rem; border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; resize: vertical; }
-  .modal-hint { font-size: 0.78rem; color: var(--muted); margin: 0.5rem 0 1rem; font-family: "SF Mono","Fira Code",monospace; background: #f5f5f5; padding: 0.4rem 0.6rem; border-radius: 4px; word-break: break-all; }
-  .modal-btns { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
-  .modal-btns button { padding: 0.5rem 1.2rem; border-radius: 4px; border: none; cursor: pointer; font-size: 0.88rem; }
-  .btn-primary { background: var(--accent); color: white; }
-  .btn-secondary { background: #f5f5f5; color: var(--text); }
   .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
   .config-card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
   .config-card h3 { font-size: 0.9rem; color: var(--accent); margin-bottom: 0.8rem; }
@@ -86,23 +74,6 @@ const dashboardHTML = `<!DOCTYPE html>
     <span class="status-dot" id="statusDot"></span>
     <span id="statusText">Connecting...</span>
     <span id="lastUpdate" style="opacity:0.7"></span>
-    <button class="token-btn" id="tokenBtn" onclick="showTokenModal()" title="Set Bearer token for authenticated API">Token</button>
-  </div>
-</div>
-
-<div class="modal-overlay" id="tokenModal" style="display:none">
-  <div class="modal">
-    <h2>Bearer Token</h2>
-    <p>Authentication is enabled. Run <code>scripts/refresh-token.sh</code> first, then paste from:</p>
-    <div class="modal-hint">cat /tmp/osac_token.txt</div>
-    <p style="margin-top:0.5rem">Or fetch directly from the cluster:</p>
-    <div class="modal-hint">oc get secret cost-consumer-secrets -n cost-mgmt -o jsonpath='{.data.osac-token}' | base64 -d</div>
-    <textarea id="tokenInput" placeholder="eyJhbGci..."></textarea>
-    <div class="modal-btns">
-      <button class="btn-secondary" onclick="clearToken()">Clear token</button>
-      <button class="btn-secondary" onclick="hideTokenModal()">Cancel</button>
-      <button class="btn-primary" onclick="saveToken()">Save &amp; retry</button>
-    </div>
   </div>
 </div>
 
@@ -204,33 +175,6 @@ let currentView = 'cost';
 let timer = null;
 
 const apiBase = window.location.origin;
-const TOKEN_KEY = 'cost_dashboard_token';
-
-function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
-function updateTokenBtn() {
-  const btn = $('tokenBtn');
-  if (getToken()) { btn.textContent = 'Token ✓'; btn.classList.add('has-token'); }
-  else { btn.textContent = 'Token'; btn.classList.remove('has-token'); }
-}
-function showTokenModal() {
-  const alreadyOpen = $('tokenModal').style.display === 'flex';
-  if (!alreadyOpen) $('tokenInput').value = getToken();
-  $('tokenModal').style.display = 'flex';
-  if (!alreadyOpen) $('tokenInput').focus();
-}
-function hideTokenModal() { $('tokenModal').style.display = 'none'; }
-function saveToken() {
-  // Strip all whitespace — terminals wrap long JWTs with newlines when copying
-  const token = $('tokenInput').value.replace(/\s+/g, '');
-  localStorage.setItem(TOKEN_KEY, token);
-  updateTokenBtn();
-  hideTokenModal();
-  refresh();
-}
-function clearToken() { localStorage.removeItem(TOKEN_KEY); updateTokenBtn(); hideTokenModal(); refresh(); }
-$('tokenModal').addEventListener('click', e => { if (e.target === $('tokenModal')) hideTokenModal(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTokenModal(); });
-updateTokenBtn();
 
 function fmt(n) {
   if (n >= 1) return '$' + n.toFixed(2);
@@ -292,14 +236,7 @@ async function fetchConfig() {
 }
 
 async function fetchJSON(url) {
-  const headers = {};
-  const token = getToken();
-  if (token) headers['Authorization'] = 'Bearer ' + token;
-  const resp = await fetch(url, { headers });
-  if (resp.status === 401) {
-    showTokenModal();
-    throw new Error('401 Unauthorized — token required');
-  }
+  const resp = await fetch(url);
   if (!resp.ok) throw new Error(resp.status + ' ' + resp.statusText);
   return resp.json();
 }

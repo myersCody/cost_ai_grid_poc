@@ -204,7 +204,7 @@ escape HTML entities before interpolation.
 ### #44 — Unbounded concurrent reconciliation [HIGH]
 
 **Dimension:** Operational robustness
-**Location:** `internal/ingest/handler.go:709`
+**Location:** `internal/api/handler.go:709`
 
 `go h.reconciler.ReconcileAll(context.Background())` — no concurrency
 guard, no cancellation on shutdown. Repeated POSTs to
@@ -244,7 +244,7 @@ with a unique constraint on `(resource_id, meter_name, period_start)`.
 ### #46 — Negative DurationSeconds not validated [HIGH]
 
 **Dimension:** Correctness
-**Location:** `internal/ingest/handler.go:36,250,256,286`
+**Location:** `internal/api/handler.go:36,250,256,286`
 
 `DurationSeconds` is `int` — can be negative. Used directly in:
 - `periodStart = ce.Time.Add(-time.Duration(data.DurationSeconds) * time.Second)`
@@ -265,7 +265,7 @@ creating a -1 day metering entry that reduces the tenant's bill.
 ### #47 — Cross-tenant data access in quota/balance endpoints [HIGH]
 
 **Dimension:** Security
-**Location:** `internal/ingest/handler.go:445-512,638-688`
+**Location:** `internal/api/handler.go:445-512,638-688`
 
 Quota and balance endpoints extract tenant/customer ID from the URL
 path. JWT claims are stored in context but never checked against the
@@ -304,7 +304,7 @@ until the TCP stack times out.
 ### #49 — `/readyz` does not reflect component health [HIGH]
 
 **Dimension:** Operational robustness
-**Location:** `internal/ingest/handler.go:719-730`
+**Location:** `internal/api/handler.go:719-730`
 
 `/readyz` only pings the database. If the watcher goroutine dies,
 metering sweep stalls, or rating sweep crashes, `/readyz` still
@@ -380,7 +380,7 @@ watcher (data flow), store (data integrity).
 ### #53 — CSV injection in cost report export [MEDIUM]
 
 **Dimension:** Security
-**Location:** `internal/ingest/handler.go:591-598`
+**Location:** `internal/api/handler.go:591-598`
 
 `row.Group` written directly via `fmt.Fprintf` without escaping.
 Values like `=cmd|'/C calc'!A0` in tenant_id execute when opened
@@ -396,7 +396,7 @@ in Excel.
 ### #54 — Wildcard CORS on sensitive endpoints [MEDIUM]
 
 **Dimension:** Security
-**Location:** `internal/ingest/handler.go:537,613,639,691`
+**Location:** `internal/api/handler.go:537,613,639,691`
 
 `Access-Control-Allow-Origin: *` on cost report, pipeline summary,
 balance check, and debug config endpoints. When auth is disabled,
@@ -411,7 +411,7 @@ any website can read cost data from a user's browser.
 ### #55 — No rate limiting on event ingestion [MEDIUM]
 
 **Dimension:** Security
-**Location:** `internal/ingest/handler.go:129`
+**Location:** `internal/api/handler.go:129`
 
 No per-client or per-tenant rate limit on `POST /api/v1/events`.
 Each event causes DB writes. With no event dedup (#45), floods

@@ -68,7 +68,7 @@ model data via two HTTP ingest event types:
 - `inference.tokens.used` — the real IPP external-metering plugin format
   ([source](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go))
 
-Both are handled by `handleModelEvent` in `internal/ingest/handler.go` and
+Both are handled by `handleModelEvent` in `internal/api/handler.go` and
 produce the same 3 meters (`maas_tokens_in`, `maas_tokens_out`, `maas_requests`).
 See [CloudEvents catalog](cloudevents-catalog.md) for the full schema comparison.
 The IPP external-metering plugin is an alternative path that bypasses the

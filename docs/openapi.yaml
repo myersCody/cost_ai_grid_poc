@@ -4,29 +4,64 @@ info:
   version: 1.0.0
   description: >-
     OSAC cost management — event ingestion, metering, rating,
-    quota/budget management, wallet management, and chargeback reporting
+    quota/budget management, wallet management, and chargeback reporting.
+
+
+    The service exposes 21 HTTP endpoints across two servers: the main
+    API server (authenticated via JWT when `AUTH_ISSUER_URL` is set) and
+    a metrics server on a separate port (unauthenticated, default 9000).
+
+
+    **Authentication:** All endpoints on the main API server pass through
+    JWT authentication middleware when `AUTH_ISSUER_URL` is configured.
+    The `/healthz` and `/readyz` probes are exempt (required for
+    Kubernetes probe access without tokens).
+
+
+    **CORS:** All data endpoints include `Access-Control-Allow-Origin: *`
+    headers.
+
+
+    **Body size limits:** All POST/PUT request bodies are limited to 1 MB.
+    ID fields (resource_id, tenant_id) are limited to 256 characters.
+
+
+    **CSV export:** Endpoints that support CSV export (`/api/v1/rates`,
+    `/api/v1/reports/costs`, `/api/v1/reports/breakdown`) can be triggered
+    two ways: query parameter `?format=csv` or `Accept: text/csv` header.
+    CSV responses include a `Content-Disposition: attachment` header with a
+    suggested filename.
+
+
+    **Handler implementation:**
+    [`internal/api/handler.go`](../inventory-watcher/internal/api/handler.go)
+
+    **Response types:**
+    [`internal/inventory/models.go`](../inventory-watcher/internal/inventory/models.go)
 
 servers:
   - url: http://localhost:8020
-    description: Local development
+    description: Local development — main API server
+  - url: http://localhost:9000
+    description: Local development — metrics server (unauthenticated)
 
 tags:
   - name: Health
-    description: Liveness and readiness probes
+    description: Liveness and readiness probes (exempt from JWT authentication)
   - name: Events
-    description: CloudEvents ingestion
+    description: CloudEvents ingestion — stores immutably then processes into inventory and metering
   - name: Rates
-    description: Rate card listing
+    description: Rate card listing with JSON and CSV export
   - name: Quotas
-    description: Quota and budget management
+    description: Quota and budget management with real-time consumption tracking
   - name: Wallets
-    description: Prepaid wallet management
+    description: Prepaid wallet management with ledger audit trail
   - name: Reports
-    description: Cost reports and breakdowns
+    description: Cost reports and breakdowns with Koku-compatible response structure
   - name: IPP
-    description: IPP entitlement / balance check compatibility
+    description: IPP entitlement / balance check compatibility for the external-metering plugin
   - name: Operations
-    description: Reconciliation and debug
+    description: Reconciliation, diagnostics, and debug dashboard
 
 paths:
   # ── Health ──────────────────────────────────────────────────────────────
@@ -35,6 +70,10 @@ paths:
       operationId: getLiveness
       tags: [Health]
       summary: Liveness probe
+      description: >-
+        Kubernetes liveness probe. Returns 200 if the process is alive.
+        No dependency checks are performed — this endpoint only confirms
+        the HTTP server is responding.
       responses:
         "200":
           description: Service is alive
@@ -42,25 +81,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
+              example:
+                status: ok
 
   /readyz:
     get:
       operationId: getReadiness
       tags: [Health]
       summary: Readiness probe (checks database connectivity)
+      description: >-
+        Kubernetes readiness probe. Pings the PostgreSQL connection pool
+        with a 2-second timeout. Returns 503 if the database is
+        unreachable, signaling Kubernetes to stop routing traffic to
+        this pod.
       responses:
         "200":
-          description: Service is ready
+          description: Service is ready — database reachable, ready to accept traffic
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: ready
         "503":
-          description: Service is not ready (database unreachable)
+          description: Service is not ready — database ping failed
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                status: not_ready
+                error: "database unreachable"
 
   # ── Events ──────────────────────────────────────────────────────────────
   /api/v1/events:
@@ -70,26 +121,70 @@ paths:
       summary: Ingest a CloudEvents 1.0 envelope
       description: >-
         Accepts a CloudEvents 1.0 structured-mode JSON envelope.
-        Supported event types: osac.compute_instance.lifecycle,
-        osac.cluster.lifecycle, osac.model.lifecycle,
-        inference.tokens.used, and custom-metric event types.
+        The event is stored immutably in `raw_events`, then processed
+        based on its `type` field: inventory is upserted and metering
+        entries are created.
+
+
+        **Supported event types:**
+
+        | Event Type | Resource | Source |
+        |------------|----------|--------|
+        | `osac.compute_instance.lifecycle` | VMaaS compute instance | OSAC metering collector |
+        | `osac.cluster.lifecycle` | CaaS cluster | OSAC metering collector |
+        | `osac.model.lifecycle` | MaaS model (legacy mock format) | MaaS simulator |
+        | `inference.tokens.used` | MaaS model (IPP format) | IPP external-metering plugin |
+        | *(custom)* | Config-driven | Custom metrics YAML |
+
+
+        **Processing pipeline:** On 204, the event flows through:
+        `raw_events` (immutable store) → inventory upsert →
+        `metering_entries` (3+ entries per event) → `cost_entries`
+        (created asynchronously by the rating sweep).
+
+
+        **Body size limit:** 1 MB.
+
+
+        **Deduplication:** Events are deduplicated by their `id` field.
+        Re-submitting an event with the same ID returns 409 Conflict
+        (idempotent).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/CloudEvent"
+            example:
+              specversion: "1.0"
+              type: inference.tokens.used
+              source: ipp-plugin
+              id: unique-event-id
+              time: "2026-07-01T10:00:00Z"
+              subject: tenant-acme
+              datacontenttype: application/json
+              data:
+                organization_id: org-12345
+                user: alice
+                model: llama-3-8b
+                prompt_tokens: 15000
+                completion_tokens: 8000
+                duration_ms: 1200
       responses:
         "204":
           description: Event accepted and processed
         "400":
-          description: Invalid JSON, missing required fields, or bad event data
+          description: >-
+            Invalid JSON, missing required fields (`id`, `type`), or
+            missing resource/tenant IDs in the event data
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "missing required field: id"
         "409":
-          description: Duplicate event (already ingested)
+          description: Duplicate event — event ID already exists (idempotent deduplication)
           content:
             application/json:
               schema:
@@ -98,8 +193,10 @@ paths:
                   status:
                     type: string
                     example: duplicate
+              example:
+                status: duplicate
         "500":
-          description: Storage or processing failure
+          description: Database or processing error
           content:
             application/json:
               schema:
@@ -112,20 +209,28 @@ paths:
       tags: [Rates]
       summary: List rate records
       description: >-
-        Returns all rate records, optionally filtered by tenant.
-        Supports CSV export via format=csv or Accept: text/csv.
+        Returns all active rate records, optionally filtered by tenant.
+        Supports JSON and CSV output. CSV export is triggered via
+        `?format=csv` or `Accept: text/csv` header. CSV responses
+        include a `Content-Disposition: attachment` header.
       parameters:
         - name: tenant_id
           in: query
           schema:
             type: string
-          description: Filter rates by tenant ID
+            example: tenant-acme
+          description: >-
+            Filter rates by tenant ID. Returns matching tenant-specific
+            rates plus global defaults (where tenant_id is null).
+            Omit to return only global rates.
         - name: format
           in: query
           schema:
             type: string
             enum: [csv]
-          description: Set to "csv" for CSV export
+          description: >-
+            Set to `csv` for CSV download. Also triggered by
+            `Accept: text/csv` header.
       responses:
         "200":
           description: List of rate records
@@ -140,12 +245,39 @@ paths:
                       $ref: "#/components/schemas/RateRecord"
                   count:
                     type: integer
+                    description: Number of rates returned
+              example:
+                rates:
+                  - id: 1
+                    tenant_id: null
+                    resource_type: Model
+                    instance_type: ""
+                    meter_name: maas_tokens_in
+                    koku_metric: cpu_core_request_per_hour
+                    cost_type: Infrastructure
+                    price_per_unit: "0.000003"
+                    currency: USD
+                    tiers:
+                      - up_to: 1000000
+                        price_per_unit: "0.000003"
+                      - up_to: null
+                        price_per_unit: "0.0000025"
+                    tier_mode: volume
+                    tier_period: monthly
+                    description: Input tokens for LLM inference
+                    effective_from: "2026-01-01T00:00:00Z"
+                    effective_to: null
+                count: 1
             text/csv:
               schema:
                 type: string
-                description: CSV with columns id,tenant_id,resource_type,instance_type,meter_name,cost_type,price_per_unit,currency,tier_mode,tier_period,tiers,description,effective_from,effective_to
+                description: >-
+                  CSV with columns:
+                  id, tenant_id, resource_type, instance_type, meter_name,
+                  cost_type, price_per_unit, currency, tier_mode, tier_period,
+                  tiers, description, effective_from, effective_to
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -157,27 +289,56 @@ paths:
       operationId: createQuota
       tags: [Quotas]
       summary: Create a quota or budget
+      description: >-
+        Create a usage or budget quota for a tenant or project.
+        Set `unit` to a currency code (USD, EUR, etc.) to create a
+        budget quota; otherwise it creates a metering-unit quota.
+        Budget quotas with `meter_name="*"` cover total cost across
+        all meters.
+
+
+        The `period` field supports: `monthly`, `daily`, `weekly`,
+        or custom formats like `Nh` (N hours) and `Nd` (N days).
+
+
+        Project-scoped quotas are validated against the parent tenant
+        quota to prevent overcommit.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/QuotaRecord"
+            example:
+              tenant_id: tenant-acme
+              project_id: ""
+              resource_type: Model
+              meter_name: maas_tokens_in
+              limit_value: 5000000
+              unit: tokens
+              period: monthly
+              policy: deny
+              thresholds: [50, 70, 90, 100]
+              effective_from: "2026-07-01T00:00:00Z"
       responses:
         "201":
-          description: Quota created
+          description: Quota created successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/QuotaRecord"
         "400":
-          description: Validation error (missing fields, bad period, overcommit)
+          description: >-
+            Validation error — missing required fields (tenant_id,
+            meter_name, limit_value, unit), invalid period format,
+            or project-level overcommit (project quotas exceed tenant
+            quota)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Storage failure
+          description: Database error
           content:
             application/json:
               schema:
@@ -186,19 +347,27 @@ paths:
       operationId: listQuotas
       tags: [Quotas]
       summary: List all quotas
+      description: >-
+        List all active quotas, optionally filtered by tenant.
+        Supports inline status enrichment when `?status=true` is set,
+        which adds consumed/percentage/thresholds fields to each quota.
       parameters:
         - name: tenant_id
           in: query
           schema:
             type: string
-          description: Filter by tenant ID
+            example: tenant-acme
+          description: Filter by tenant ID. Omit for all tenants.
         - name: status
           in: query
           schema:
             type: string
             enum: ["true", "false"]
           description: >-
-            When "true", enriches each quota with consumed/percentage/thresholds
+            When `true`, enriches each quota with live consumption
+            data: `consumed` (current usage), `percentage` (consumed /
+            limit * 100), and `thresholds` (map of threshold percentage
+            to whether it has been breached).
       responses:
         "200":
           description: List of quotas
@@ -213,8 +382,44 @@ paths:
                       oneOf:
                         - $ref: "#/components/schemas/QuotaRecord"
                         - $ref: "#/components/schemas/QuotaWithStatus"
+              examples:
+                without_status:
+                  summary: Without status enrichment
+                  value:
+                    quotas:
+                      - id: 1
+                        name: ""
+                        tenant_id: tenant-acme
+                        project_id: ""
+                        resource_type: Model
+                        meter_name: maas_tokens_in
+                        limit_value: 5000000
+                        unit: tokens
+                        period: monthly
+                        policy: deny
+                        thresholds: [50, 70, 90, 100]
+                        effective_from: "2026-07-01T00:00:00Z"
+                        effective_to: null
+                with_status:
+                  summary: With status=true enrichment
+                  value:
+                    quotas:
+                      - id: 1
+                        tenant_id: tenant-acme
+                        meter_name: maas_tokens_in
+                        limit_value: 5000000
+                        unit: tokens
+                        period: monthly
+                        policy: deny
+                        consumed: 3200000
+                        percentage: 64.0
+                        thresholds:
+                          "50": true
+                          "70": false
+                          "90": false
+                          "100": false
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -225,6 +430,9 @@ paths:
       operationId: updateQuota
       tags: [Quotas]
       summary: Update an existing quota
+      description: >-
+        Update an existing quota. Only provided fields are changed;
+        omitted fields retain their current values.
       parameters:
         - name: id
           in: path
@@ -239,6 +447,9 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/QuotaRecord"
+            example:
+              limit_value: 10000000
+              thresholds: [25, 50, 75, 100]
       responses:
         "200":
           description: Quota updated
@@ -249,7 +460,9 @@ paths:
         "204":
           description: Updated but record not retrievable
         "400":
-          description: Invalid quota ID, bad JSON, or bad period
+          description: >-
+            Invalid quota ID, bad JSON, invalid period format, or
+            project-level overcommit
           content:
             application/json:
               schema:
@@ -264,6 +477,10 @@ paths:
       operationId: deleteQuota
       tags: [Quotas]
       summary: Soft-delete a quota
+      description: >-
+        Soft-delete a quota by setting `effective_to` to the current
+        time rather than removing the record. The quota stops being
+        enforced but remains in the database for audit purposes.
       parameters:
         - name: id
           in: path
@@ -274,7 +491,7 @@ paths:
           description: Quota record ID
       responses:
         "204":
-          description: Quota deleted
+          description: Quota soft-deleted
         "400":
           description: Invalid quota ID
           content:
@@ -294,22 +511,77 @@ paths:
       tags: [Quotas]
       summary: Get quota status for a tenant
       description: >-
-        Returns consumed/remaining for every quota belonging to the tenant,
-        including per-project breakdowns if project-scoped quotas exist.
+        Returns real-time quota consumption status for a tenant,
+        including threshold checks and fired alerts. Supports both
+        tenant-level and project-level quotas with per-project
+        breakdowns.
+
+
+        **Consumption computation:**
+
+        - Usage quotas: consumed is computed in real-time from
+          `metering_entries` for the current period.
+
+        - Budget quotas (unit is a currency code): consumed is computed
+          from `cost_entries`.
+
+        - Budget quotas with `meter_name="*"` report total cost across
+          all meters.
+
+
+        **Threshold defaults:** If thresholds are not configured on the
+        quota, defaults are `[50, 70, 90, 100]`.
       parameters:
         - name: tenant_id
           in: path
           required: true
           schema:
             type: string
+            example: tenant-acme
           description: Tenant ID
       responses:
         "200":
-          description: Quota status
+          description: Quota status with consumption details
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/QuotaStatusResponse"
+              example:
+                tenant_id: tenant-acme
+                period: "2026-07"
+                quotas:
+                  - meter_name: maas_tokens_in
+                    unit: tokens
+                    limit: 5000000
+                    consumed: 4450000
+                    percentage: 89.0
+                    thresholds:
+                      "50": true
+                      "70": true
+                      "90": false
+                      "100": false
+                    alerts:
+                      - id: 1
+                        tenant_id: tenant-acme
+                        meter_name: maas_tokens_in
+                        threshold_pct: 70
+                        consumed: 3500000
+                        limit_value: 5000000
+                        period: "2026-07"
+                        state: firing
+                        fired_at: "2026-07-15T08:30:00Z"
+                projects:
+                  project-alpha:
+                    - meter_name: maas_tokens_in
+                      unit: tokens
+                      limit: 2000000
+                      consumed: 1200000
+                      percentage: 60.0
+                      thresholds:
+                        "50": true
+                        "70": false
+                        "90": false
+                        "100": false
         "400":
           description: Missing or oversized tenant_id
           content:
@@ -317,7 +589,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -329,12 +601,22 @@ paths:
       operationId: createWallet
       tags: [Wallets]
       summary: Create a prepaid wallet
+      description: >-
+        Create a prepaid wallet for a tenant or project. Wallets start
+        with a zero balance; use the top-up endpoint to add funds.
+        Default thresholds are `[50, 25, 10, 0]` (remaining-balance
+        percentages).
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/CreateWalletRequest"
+            example:
+              tenant_id: tenant-acme
+              project_id: ""
+              currency: USD
+              thresholds: [50, 25, 10, 0]
       responses:
         "201":
           description: Wallet created
@@ -342,14 +624,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WalletRecord"
+              example:
+                id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                tenant_id: tenant-acme
+                project_id: ""
+                currency: USD
+                balance: "0"
+                balance_floor: "0"
+                reference_balance: "0"
+                lifecycle_state: active
+                thresholds: [50, 25, 10, 0]
+                created_at: "2026-07-01T00:00:00Z"
+                updated_at: "2026-07-01T00:00:00Z"
         "400":
-          description: Validation error
+          description: Missing tenant_id or invalid JSON
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Storage failure
+          description: Database error
           content:
             application/json:
               schema:
@@ -361,7 +655,8 @@ paths:
       tags: [Wallets]
       summary: Get wallet status
       description: >-
-        Looks up by wallet ID first, then falls back to tenant ID.
+        Get wallet balance and status. Looks up by wallet UUID first,
+        then falls back to tenant ID lookup (finds the tenant's wallet).
         Returns balance, remaining percentage, and threshold breaches.
       parameters:
         - name: id
@@ -369,7 +664,9 @@ paths:
           required: true
           schema:
             type: string
-          description: Wallet ID or tenant ID
+          description: >-
+            Wallet UUID or tenant ID. The endpoint tries wallet UUID
+            lookup first, then falls back to tenant ID.
       responses:
         "200":
           description: Wallet status
@@ -377,14 +674,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WalletStatus"
+              example:
+                wallet_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                tenant_id: tenant-acme
+                currency: USD
+                balance: "750.00"
+                reference_balance: "1000.00"
+                remaining_pct: 75.0
+                balance_floor: "0"
+                balance_status: ok
+                within_balance: true
+                thresholds:
+                  "50": false
+                  "25": false
+                  "10": false
+                  "0": false
         "400":
-          description: Missing ID
+          description: Missing wallet/tenant ID
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Wallet not found
+          description: Wallet not found for the given ID or tenant
           content:
             application/json:
               schema:
@@ -395,19 +707,27 @@ paths:
       operationId: topUpWallet
       tags: [Wallets]
       summary: Add funds to a wallet
+      description: >-
+        Add funds to a wallet. The amount must be positive. Updates
+        the wallet balance and reference_balance, and creates a ledger
+        entry of type `top_up`.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Wallet ID
+          description: Wallet UUID
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/WalletActionRequest"
+            example:
+              amount: "500.00"
+              currency: USD
+              external_ref: PO-2026-0042
       responses:
         "201":
           description: Top-up recorded
@@ -415,8 +735,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WalletLedgerEntry"
+              example:
+                id: 1
+                wallet_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                entry_type: top_up
+                amount: "500.00"
+                balance_after: "1500.00"
+                currency: USD
+                external_ref: PO-2026-0042
+                created_at: "2026-07-15T10:00:00Z"
         "400":
-          description: Invalid JSON or non-positive amount
+          description: Invalid JSON, non-positive amount, or wallet not found
           content:
             application/json:
               schema:
@@ -428,24 +757,29 @@ paths:
       tags: [Wallets]
       summary: Adjust wallet balance
       description: >-
-        Positive adjustments are applied immediately.
-        Negative adjustments are not yet implemented (returns 501).
+        Apply a manual balance adjustment to a wallet.
+        Positive adjustments are applied immediately and create a
+        ledger entry of type `adjustment`. Negative adjustments are
+        not yet implemented and return 501 Not Implemented.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Wallet ID
+          description: Wallet UUID
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/WalletActionRequest"
+            example:
+              amount: "100.00"
+              reason: Billing correction
       responses:
         "201":
-          description: Adjustment recorded
+          description: Positive adjustment recorded
           content:
             application/json:
               schema:
@@ -468,22 +802,26 @@ paths:
       operationId: getWalletLedger
       tags: [Wallets]
       summary: Get wallet ledger entries
+      description: >-
+        Retrieve the transaction audit trail for a wallet. Returns
+        ledger entries in chronological order. Entry types include
+        `top_up`, `charge`, and `adjustment`.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Wallet ID
+          description: Wallet UUID
         - name: limit
           in: query
           schema:
             type: integer
             default: 100
-          description: Maximum number of entries to return
+          description: Maximum number of entries to return (default 100)
       responses:
         "200":
-          description: Ledger entries
+          description: Ledger entries in chronological order
           content:
             application/json:
               schema:
@@ -493,8 +831,26 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/WalletLedgerEntry"
+              example:
+                entries:
+                  - id: 1
+                    wallet_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    entry_type: top_up
+                    amount: "1000.00"
+                    balance_after: "1000.00"
+                    currency: USD
+                    external_ref: PO-2026-0001
+                    created_at: "2026-07-01T00:00:00Z"
+                  - id: 2
+                    wallet_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                    entry_type: charge
+                    amount: "-25.50"
+                    balance_after: "974.50"
+                    currency: USD
+                    cost_entry_id: 42
+                    created_at: "2026-07-02T12:00:00Z"
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -507,55 +863,83 @@ paths:
       tags: [Reports]
       summary: Aggregated cost report (Koku-compatible)
       description: >-
-        Returns costs grouped by tenant, resource_type, meter, project, or user.
-        Supports daily resolution, custom date ranges, and CSV export.
-        Response meta block follows Koku cost/infrastructure/supplementary structure.
+        Returns costs grouped by the chosen dimension. The response
+        `meta.total` block follows the Koku cost/infrastructure/supplementary
+        structure with `raw`, `markup`, `usage`, and `total` sub-layers
+        for forward compatibility with Koku's cost model.
+
+
+        Supports daily resolution, custom date ranges, and CSV export
+        via `?format=csv` or `Accept: text/csv` header.
+
+
+        **CSV columns (without resolution):**
+        `group, entries, cost, infrastructure_cost, supplementary_cost, currency`
+
+
+        **CSV columns (with resolution=daily):**
+        `date, group, entries, cost, infrastructure_cost, supplementary_cost, currency`
       parameters:
         - name: tenant_id
           in: query
           schema:
             type: string
+            example: tenant-acme
           description: Filter by tenant ID
         - name: resource_type
           in: query
           schema:
             type: string
-          description: Filter by resource type
+            example: Model
+          description: >-
+            Filter by resource type (e.g., `Model`, `ComputeInstance`,
+            `Cluster`)
         - name: group_by
           in: query
           schema:
             type: string
             default: tenant
             enum: [tenant, resource_type, meter, project, user]
-          description: Grouping dimension
+          description: >-
+            Grouping dimension for cost aggregation. Default: `tenant`.
         - name: resolution
           in: query
           schema:
             type: string
             enum: [daily]
-          description: Set to "daily" for per-day rows
+          description: >-
+            Set to `daily` for per-day rows. Omit for period total.
         - name: period
           in: query
           schema:
             type: string
             example: "2026-07"
-          description: Month in YYYY-MM format (default current month)
+          description: >-
+            Month in `YYYY-MM` format. Default: current month.
+            Ignored if `from` is set.
         - name: from
           in: query
           schema:
             type: string
-          description: Start date (YYYY-MM-DD or RFC3339); overrides period
+            example: "2026-07-01"
+          description: >-
+            Start date (`YYYY-MM-DD` or RFC 3339). Overrides `period`.
         - name: to
           in: query
           schema:
             type: string
-          description: End date (YYYY-MM-DD or RFC3339); defaults to now
+            example: "2026-07-31"
+          description: >-
+            End date (`YYYY-MM-DD` or RFC 3339). Default: now.
+            Only used when `from` is set.
         - name: format
           in: query
           schema:
             type: string
             enum: [csv]
-          description: Set to "csv" for CSV export
+          description: >-
+            Set to `csv` for CSV download. Also triggered by
+            `Accept: text/csv` header.
       responses:
         "200":
           description: Cost report
@@ -563,21 +947,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CostReportResponse"
+              example:
+                meta:
+                  total:
+                    cost:
+                      usage: {value: 125.50, units: USD}
+                      total: {value: 125.50, units: USD}
+                      raw: {value: 0, units: USD}
+                      markup: {value: 0, units: USD}
+                    infrastructure:
+                      usage: {value: 100.00, units: USD}
+                      total: {value: 100.00, units: USD}
+                      raw: {value: 0, units: USD}
+                      markup: {value: 0, units: USD}
+                    supplementary:
+                      usage: {value: 25.50, units: USD}
+                      total: {value: 25.50, units: USD}
+                      raw: {value: 0, units: USD}
+                      markup: {value: 0, units: USD}
+                    cost_units: USD
+                  period: "2026-07"
+                  group_by: tenant
+                  resolution: ""
+                  filters: {tenant_id: tenant-acme}
+                data:
+                  - group: tenant-acme
+                    entries: 1500
+                    cost: 125.50
+                    infrastructure_cost: 100.00
+                    supplementary_cost: 25.50
+                    currency: USD
             text/csv:
               schema:
                 type: string
                 description: >-
                   CSV columns vary by resolution.
-                  Without resolution: group,entries,cost,infrastructure_cost,supplementary_cost,currency.
-                  With resolution=daily: date,group,entries,cost,infrastructure_cost,supplementary_cost,currency.
+                  Without resolution: group, entries, cost,
+                  infrastructure_cost, supplementary_cost, currency.
+                  With resolution=daily: date, group, entries, cost,
+                  infrastructure_cost, supplementary_cost, currency.
         "400":
-          description: Invalid date format
+          description: Invalid date format for period, from, or to
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -589,41 +1005,57 @@ paths:
       tags: [Reports]
       summary: Line-item cost breakdown
       description: >-
-        Returns individual cost entries with meter-level detail.
-        Supports CSV export via format=csv or Accept: text/csv.
+        Returns individual cost entries with meter-level detail
+        showing per-resource cost line items. Supports CSV export
+        via `?format=csv` or `Accept: text/csv` header.
+
+
+        **CSV columns:**
+        `date, tenant_id, project_id, user_id, resource_type,
+        resource_id, meter_name, metered_value, cost_amount,
+        cost_type, currency`
       parameters:
         - name: tenant_id
           in: query
           schema:
             type: string
+            example: tenant-acme
           description: Filter by tenant ID
         - name: resource_type
           in: query
           schema:
             type: string
+            example: Model
           description: Filter by resource type
         - name: from
           in: query
           schema:
             type: string
-          description: Start date (YYYY-MM-DD or RFC3339); defaults to first of current month
+            example: "2026-07-01"
+          description: >-
+            Start date (`YYYY-MM-DD` or RFC 3339). Default: first of
+            current month.
         - name: to
           in: query
           schema:
             type: string
-          description: End date (YYYY-MM-DD or RFC3339); defaults to now
+            example: "2026-07-31"
+          description: >-
+            End date (`YYYY-MM-DD` or RFC 3339). Default: now.
         - name: limit
           in: query
           schema:
             type: integer
             default: 100
-          description: Maximum rows to return
+          description: Maximum rows to return (default 100)
         - name: format
           in: query
           schema:
             type: string
             enum: [csv]
-          description: Set to "csv" for CSV export
+          description: >-
+            Set to `csv` for CSV download. Also triggered by
+            `Accept: text/csv` header.
       responses:
         "200":
           description: Cost breakdown rows
@@ -631,19 +1063,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CostBreakdownResponse"
+              example:
+                meta:
+                  count: 3
+                  filters: {tenant_id: tenant-acme}
+                data:
+                  - date: "2026-07-15"
+                    tenant_id: tenant-acme
+                    project_id: project-alpha
+                    user_id: alice
+                    resource_type: Model
+                    resource_id: llama-3-8b
+                    meter_name: maas_tokens_in
+                    metered_value: 15000
+                    cost_amount: 0.045
+                    cost_type: Infrastructure
+                    currency: USD
             text/csv:
               schema:
                 type: string
                 description: >-
-                  CSV columns: date,tenant_id,project_id,user_id,resource_type,resource_id,meter_name,metered_value,cost_amount,cost_type,currency
+                  CSV columns: date, tenant_id, project_id, user_id,
+                  resource_type, resource_id, meter_name, metered_value,
+                  cost_amount, cost_type, currency
         "400":
-          description: Invalid date format
+          description: Invalid date format for from or to
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -655,8 +1105,10 @@ paths:
       tags: [Reports]
       summary: Pipeline summary counts
       description: >-
-        Returns aggregate counts across all pipeline tables
-        (raw events, metering entries, cost entries, rates, live resources).
+        Returns aggregate record counts across all pipeline tables
+        (raw events, metering entries, cost entries, rates, and live
+        resources). Used for operational monitoring and pipeline
+        health checks.
       responses:
         "200":
           description: Pipeline summary
@@ -664,8 +1116,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PipelineSummary"
+              example:
+                raw_events: 12500
+                metering_entries: 37500
+                cost_entries: 37500
+                rates: 12
+                live_vms: 45
+                live_clusters: 3
+                live_models: 8
         "500":
-          description: Query failure
+          description: Database query failed
           content:
             application/json:
               schema:
@@ -679,26 +1139,43 @@ paths:
       summary: IPP-compatible balance / entitlement check
       description: >-
         Returns an entitlementValue response compatible with the
-        IPP external-metering plugin client. Checks all quotas for
-        the customer and returns aggregate balance, usage, and overage.
+        [IPP external-metering plugin client](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/client.go).
+        Checks all quotas for the customer and returns aggregate
+        balance, usage, and overage.
+
+
+        **No quotas defined:** If the tenant has no quotas, returns
+        `hasAccess: true` with `balance` set to the maximum float64
+        value (effectively unlimited access).
+
+
+        **Aggregation:** Aggregates across all quotas for the tenant
+        within their respective periods.
       parameters:
         - name: customerID
           in: path
           required: true
           schema:
             type: string
+            example: tenant-acme
           description: Customer / tenant ID
         - name: featureKey
           in: path
           required: true
           schema:
             type: string
-          description: Feature key (reserved for future feature-scoped quotas)
+            example: inference
+          description: >-
+            Feature key. Accepted but not currently used for filtering;
+            reserved for future feature-scoped quotas.
         - name: model
           in: query
           schema:
             type: string
-          description: Model name (informational, not yet used for filtering)
+            example: llama-3-8b
+          description: >-
+            Model name. Informational only; not yet used for filtering.
+            Reserved for future model-scoped quota support.
       responses:
         "200":
           description: Entitlement value
@@ -706,8 +1183,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EntitlementValue"
+              example:
+                hasAccess: true
+                balance: 550000
+                usage: 4450000
+                overage: 0
         "400":
-          description: Malformed path
+          description: Malformed path (missing customerID or featureKey)
           content:
             application/json:
               schema:
@@ -720,11 +1202,29 @@ paths:
       tags: [Operations]
       summary: Trigger a full OSAC reconciliation
       description: >-
-        Starts a background reconciliation run. Returns 429 if one is
-        already in progress.
+        Trigger a manual OSAC reconciliation. The reconciler performs
+        a full List-based sync against the OSAC fulfillment-service to
+        correct any drift in inventory state.
+
+
+        **Execution:** The reconciliation runs asynchronously in a
+        background goroutine. Returns immediately with 202 Accepted.
+
+
+        **Concurrency:** Only one reconciliation can run at a time,
+        enforced via an atomic flag. Returns 429 if one is already
+        in progress.
+
+
+        **Prerequisites:** The OSAC watcher and reconciler must be
+        enabled (not in `DISABLE_COMPONENTS`). Returns 503 if the
+        reconciler is not configured.
+      requestBody:
+        description: No request body required.
+        content: {}
       responses:
         "202":
-          description: Reconciliation triggered
+          description: Reconciliation started in background
           content:
             application/json:
               schema:
@@ -733,18 +1233,24 @@ paths:
                   status:
                     type: string
                     example: reconciliation triggered
+              example:
+                status: reconciliation triggered
         "429":
           description: Reconciliation already in progress
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: reconciliation already in progress
         "503":
-          description: Reconciler not configured
+          description: Reconciler not configured (not in active components)
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: reconciler not configured
 
   /api/v1/debug/config:
     get:
@@ -753,7 +1259,9 @@ paths:
       summary: Return runtime configuration (sanitized)
       description: >-
         Returns a sanitized view of the running configuration.
-        Secrets are masked or shown as boolean flags.
+        Useful for verifying deployment settings. Secrets are masked
+        (database credentials replaced with `****`) or shown as
+        boolean flags (`osac_token_set`, `splunk_token_set`).
       responses:
         "200":
           description: Diagnostic configuration
@@ -761,15 +1269,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DiagnosticInfo"
+              example:
+                osac_base_url: "http://localhost:8011"
+                inventory_db_host: "postgres://****@localhost:5434/costdb"
+                reconcile_interval: 1h0m0s
+                metering_interval: 45s
+                rating_interval: 20s
+                log_level: info
+                log_format: text
+                ingest_listen_addr: "localhost:8020"
+                metrics_port: "9000"
+                custom_metrics_config_path: ""
+                auth_issuer_url: ""
+                debug_dashboard: true
+                osac_token_set: true
+                osac_ca_cert_set: false
+                splunk_hec_url: ""
+                splunk_token_set: false
+                splunk_index: ""
+
+  /debug/dashboard:
+    get:
+      operationId: getDebugDashboard
+      tags: [Operations]
+      summary: Built-in diagnostic dashboard (HTML)
+      description: >-
+        Built-in diagnostic dashboard rendered as a single-page HTML
+        application. Provides a live view of inventory, metering,
+        costs, quotas, and wallet status.
+
+
+        **Availability:** Only registered when `DEBUG_DASHBOARD=true`
+        (default: enabled). When enabled, `GET /` redirects to
+        `/debug/dashboard`.
+      responses:
+        "200":
+          description: Dashboard HTML page
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Dashboard is disabled (`DEBUG_DASHBOARD=false`)
 
 components:
   schemas:
     # ── Common ────────────────────────────────────────────────────────────
     ErrorResponse:
       type: object
+      description: >-
+        Standard error response format used by all endpoints.
       properties:
         error:
           type: string
+          description: Human-readable error message
+          example: descriptive error message
       required: [error]
 
     StatusResponse:
@@ -785,44 +1339,65 @@ components:
         status:
           type: string
           enum: [ready, not_ready]
+          example: ready
         error:
           type: string
-          description: Present only when not ready
+          description: Present only when status is `not_ready`
+          example: database unreachable
 
     # ── CloudEvent ────────────────────────────────────────────────────────
     CloudEvent:
       type: object
-      description: CloudEvents 1.0 structured-mode JSON envelope
+      description: >-
+        CloudEvents 1.0 structured-mode JSON envelope. The `data`
+        payload shape depends on the `type` field. The `subject`
+        field serves as a fallback tenant ID when the data payload
+        does not contain a tenant identifier.
       required: [specversion, type, source, id]
       properties:
         specversion:
           type: string
+          description: CloudEvents specification version; always `"1.0"`
           example: "1.0"
         type:
           type: string
           description: >-
-            Event type. Known types: osac.compute_instance.lifecycle,
-            osac.cluster.lifecycle, osac.model.lifecycle,
-            inference.tokens.used
+            Event type that determines the processing path.
+            Known types: `osac.compute_instance.lifecycle`,
+            `osac.cluster.lifecycle`, `osac.model.lifecycle`,
+            `inference.tokens.used`. Custom types are also accepted
+            when configured via custom metrics YAML.
           example: inference.tokens.used
         source:
           type: string
+          description: Event producer identifier
           example: /osac/metering-collector
         id:
           type: string
+          description: >-
+            Unique event ID used for deduplication. Re-submitting
+            the same ID returns 409 Conflict.
           example: evt-abc123
         time:
           type: string
           format: date-time
+          description: Event timestamp (ISO 8601)
+          example: "2026-07-01T10:00:00Z"
         subject:
           type: string
+          description: >-
+            Fallback tenant ID if `data.tenant_id` and other
+            tenant attribution fields are not present.
+          example: tenant-acme
         datacontenttype:
           type: string
+          description: Always `application/json`
           example: application/json
         data:
           description: >-
-            Event payload; shape depends on type. See
-            ComputeInstanceEventData, ClusterEventData, MaaSEventData.
+            Event payload; shape depends on `type`.
+            See ComputeInstanceEventData (VMaaS),
+            ClusterEventData (CaaS), MaaSEventData (MaaS/IPP).
           oneOf:
             - $ref: "#/components/schemas/ComputeInstanceEventData"
             - $ref: "#/components/schemas/ClusterEventData"
@@ -830,129 +1405,226 @@ components:
 
     ComputeInstanceEventData:
       type: object
-      description: OSAC metering collector VMaaS schema
+      description: >-
+        OSAC metering collector VMaaS schema
+        (`osac.compute_instance.lifecycle`). Metered when the instance
+        is in a billable state.
       properties:
-        duration_seconds:
-          type: number
-          format: double
-        cpu_core_seconds:
-          type: integer
-          format: int64
-        memory_gib_seconds:
-          type: integer
-          format: int64
         tenant_id:
           type: string
+          description: Tenant identifier
+          example: tenant-acme
         instance_id:
           type: string
-        template:
-          type: string
-        catalog_item:
-          type: string
+          description: Compute instance ID
+          example: vm-12345
         state:
           type: string
+          description: Instance state (metered when billable)
+          example: VM_STATE_RUNNING
         cores:
           type: integer
           format: int32
+          description: Number of CPU cores
+          example: 4
         memory_gib:
           type: integer
           format: int32
-
-    ClusterEventData:
-      type: object
-      description: OSAC metering collector CaaS schema
-      properties:
+          description: Memory in GiB
+          example: 16
         duration_seconds:
           type: number
           format: double
+          description: Interval length in seconds (must be positive)
+          example: 60.0
+        cpu_core_seconds:
+          type: integer
+          format: int64
+          description: CPU core-seconds consumed
+          example: 240
+        memory_gib_seconds:
+          type: integer
+          format: int64
+          description: Memory GiB-seconds consumed
+          example: 960
+        template:
+          type: string
+          description: VMaaS template reference
+        catalog_item:
+          type: string
+          description: Catalog item name
+
+    ClusterEventData:
+      type: object
+      description: >-
+        OSAC metering collector CaaS schema
+        (`osac.cluster.lifecycle`). Metered when the cluster is in
+        a billable state.
+      properties:
+        tenant_id:
+          type: string
+          description: Tenant identifier
+          example: tenant-acme
+        cluster_id:
+          type: string
+          description: Cluster ID
+          example: cluster-001
+        state:
+          type: string
+          description: Cluster state (metered when billable)
+          example: CLUSTER_STATE_RUNNING
+        duration_seconds:
+          type: number
+          format: double
+          description: Interval length in seconds (must be positive)
+          example: 60.0
         worker_node_seconds:
           type: integer
           format: int64
+          description: Worker node-seconds consumed
+          example: 180
         node_count:
           type: integer
           format: int32
-        tenant_id:
-          type: string
-        cluster_id:
-          type: string
+          description: Current node count
+          example: 3
         template:
           type: string
-        state:
-          type: string
+          description: Cluster template
         host_type:
           type: string
+          description: >-
+            Host type. `"_control_plane"` triggers uptime metering
+            instead of node-count metering.
 
     MaaSEventData:
       type: object
       description: >-
-        MaaS / IPP external-metering event data. Accepts both legacy
-        mock format and the real IPP external-metering plugin format.
+        MaaS / IPP external-metering event data. Accepts both the
+        legacy mock format (`osac.model.lifecycle`) and the real IPP
+        external-metering plugin format (`inference.tokens.used`).
+
+
+        **Tenant attribution priority:** `organization_id` >
+        `subscription` (namespace extracted) > `group` > `user` >
+        `tenant_id` > CloudEvent `subject`.
       properties:
         # Legacy mock fields
         tenant_id:
           type: string
+          description: >-
+            Tenant ID (legacy format). Falls back to
+            `organization_id`, subscription namespace, `group`, or
+            `user` in that priority order.
+          example: tenant-acme
         model_id:
           type: string
+          description: >-
+            Model deployment ID (legacy). Falls back to `model`.
+          example: llama-3-8b
         model_name:
           type: string
+          description: Human-readable model name (legacy)
         template:
           type: string
+          description: MaaS template reference
         state:
           type: string
+          description: >-
+            Model state. Defaults to `"MODEL_STATE_RUNNING"` if
+            omitted.
         tokens_in:
           type: integer
           format: int64
+          description: Input tokens (legacy format)
         tokens_out:
           type: integer
           format: int64
+          description: Output tokens (legacy format)
         requests:
           type: integer
           format: int64
+          description: Number of inference requests (legacy)
         duration_seconds:
           type: number
           format: double
+          description: >-
+            Interval length in seconds (legacy). Falls back from
+            `duration_ms` (converted to seconds).
         request_count:
           type: integer
           format: int64
+          description: Number of inference requests (alias for `requests`)
         # IPP external-metering plugin fields
         user:
           type: string
+          description: IPP user identity
+          example: alice
         group:
           type: string
+          description: IPP group identity
         subscription:
           type: string
+          description: IPP subscription (namespace extracted as tenant)
         organization_id:
           type: string
+          description: >-
+            IPP organization ID. Highest-priority tenant attribution
+            field.
+          example: org-12345
         cost_center:
           type: string
+          description: IPP cost center
         provider:
           type: string
+          description: LLM provider name
+          example: red_hat
         model:
           type: string
+          description: >-
+            Model name (IPP format). Used as model_id when
+            `model_id` is not set.
+          example: llama-3-8b
         prompt_tokens:
           type: integer
           format: int64
+          description: >-
+            Input tokens (IPP format). Maps to `tokens_in`
+            internally.
+          example: 15000
         completion_tokens:
           type: integer
           format: int64
+          description: >-
+            Output tokens (IPP format). Maps to `tokens_out`
+            internally.
+          example: 8000
         total_tokens:
           type: integer
           format: int64
+          description: Total tokens (informational)
+          example: 23000
         cached_input_tokens:
           type: integer
           format: int64
-          description: Subset of prompt_tokens; parsed for observability, not billed separately
+          description: >-
+            Subset of prompt_tokens served from cache. Parsed for
+            observability metrics but not billed separately.
         cache_creation_tokens:
           type: integer
           format: int64
-          description: Subset of prompt_tokens
+          description: Subset of prompt_tokens used for cache creation
         reasoning_tokens:
           type: integer
           format: int64
-          description: Subset of completion_tokens (o1/o3/DeepSeek R1)
+          description: >-
+            Subset of completion_tokens used for reasoning
+            (o1/o3/DeepSeek R1 models)
         duration_ms:
           type: integer
           format: int64
+          description: Interval length in milliseconds (IPP format)
+          example: 1200
 
     # ── Rates ─────────────────────────────────────────────────────────────
     Tier:
@@ -962,10 +1634,15 @@ components:
           type: number
           format: double
           nullable: true
-          description: Upper bound of tier; null means unlimited
+          description: >-
+            Upper bound of this tier. `null` means unlimited (the
+            final catch-all tier).
+          example: 1000000
         price_per_unit:
           type: string
           format: decimal
+          description: Price per unit within this tier
+          example: "0.000003"
       required: [price_per_unit]
 
     RateRecord:
@@ -974,42 +1651,86 @@ components:
         id:
           type: integer
           format: int64
+          description: Rate record ID
+          example: 1
         tenant_id:
           type: string
           nullable: true
+          description: >-
+            Tenant-specific override. `null` means this is a global
+            default rate that applies to all tenants.
         resource_type:
           type: string
+          description: >-
+            Resource type this rate applies to (e.g., `ComputeInstance`,
+            `Cluster`, `Model`)
+          example: Model
         instance_type:
           type: string
+          description: >-
+            Instance type filter. Empty string means the rate applies
+            to all instance types.
+          example: ""
         meter_name:
           type: string
+          description: Meter name this rate applies to
+          example: maas_tokens_in
         koku_metric:
           type: string
+          description: >-
+            Koku-compatible metric name for alignment with
+            Koku's cost model schema
+          example: cpu_core_request_per_hour
         cost_type:
           type: string
-          description: "Infrastructure or Supplementary"
+          description: >-
+            Koku cost layer: `Infrastructure` or `Supplementary`
+          example: Infrastructure
         price_per_unit:
           type: string
           format: decimal
+          description: Price per unit of metered value (flat rate or base rate)
+          example: "0.000003"
         currency:
           type: string
+          description: Currency code
+          example: USD
         tiers:
           type: array
           items:
             $ref: "#/components/schemas/Tier"
+          description: >-
+            Tiered pricing tiers. Empty array means flat rate
+            (uses `price_per_unit` directly).
         tier_mode:
           type: string
+          description: >-
+            Tier calculation mode: `volume` (entire usage priced at
+            the matching tier) or `graduated` (each tier priced
+            independently)
+          example: volume
         tier_period:
           type: string
+          description: >-
+            Period for tier accumulation (e.g., `monthly`). Usage
+            resets at the start of each period.
+          example: monthly
         description:
           type: string
+          description: Human-readable description of the rate
+          example: Input tokens for LLM inference
         effective_from:
           type: string
           format: date-time
+          description: Rate effective start date
+          example: "2026-01-01T00:00:00Z"
         effective_to:
           type: string
           format: date-time
           nullable: true
+          description: >-
+            Rate effective end date. `null` means no expiry
+            (rate is active indefinitely).
 
     # ── Quotas ────────────────────────────────────────────────────────────
     QuotaRecord:
@@ -1018,71 +1739,131 @@ components:
         id:
           type: integer
           format: int64
+          description: Quota record ID
+          example: 1
         name:
           type: string
+          description: Optional human-readable quota name
         tenant_id:
           type: string
+          description: Tenant identifier
+          example: tenant-acme
         project_id:
           type: string
+          description: >-
+            Project scope. Empty string means tenant-wide quota.
+            Project-scoped quotas are validated against the parent
+            tenant quota to prevent overcommit.
+          example: ""
         resource_type:
           type: string
+          description: Resource type filter
+          example: Model
         meter_name:
           type: string
+          description: >-
+            Meter to limit. Use `"*"` for budget quotas covering
+            total cost across all meters.
+          example: maas_tokens_in
         limit_value:
           type: number
           format: double
+          description: Maximum allowed value (must be positive)
+          example: 5000000
         unit:
           type: string
           description: >-
-            Unit of the quota. Currency codes (USD, EUR, etc.) indicate
-            a budget quota; otherwise a metering unit.
+            Unit of measurement. Currency codes (USD, EUR, etc.)
+            create budget quotas that track cost rather than usage.
+            Otherwise treated as a metering unit (e.g., `tokens`,
+            `core_seconds`).
+          example: tokens
         period:
           type: string
           description: >-
-            Billing period: monthly, weekly, daily, or custom.
-            Defaults to "monthly" if omitted.
+            Billing period: `monthly`, `weekly`, `daily`, or custom
+            formats like `Nh` (N hours) and `Nd` (N days). Default:
+            `monthly`.
+          example: monthly
         policy:
           type: string
-          description: Enforcement policy. Defaults to "deny".
+          description: >-
+            Enforcement policy: `deny` (block access when exceeded)
+            or `warn` (alert only). Default: `deny`.
+          example: deny
         thresholds:
           type: array
           items:
             type: number
             format: double
-          description: Alert threshold percentages
+          description: >-
+            Alert threshold percentages. Default: `[50, 70, 90, 100]`.
+            Alerts fire when consumption crosses these levels.
+          example: [50, 70, 90, 100]
         effective_from:
           type: string
           format: date-time
+          description: "When the quota takes effect. Default: now."
         effective_to:
           type: string
           format: date-time
           nullable: true
+          description: >-
+            When the quota expires. `null` means no expiry. Set to
+            current time on soft-delete.
 
     QuotaStatus:
       type: object
+      description: >-
+        Real-time consumption status for a single quota, including
+        threshold breach flags and fired alerts.
       properties:
         meter_name:
           type: string
+          description: Meter this quota applies to
+          example: maas_tokens_in
         unit:
           type: string
+          description: Unit of measurement
+          example: tokens
         limit:
           type: number
           format: double
+          description: Quota limit for the current period
+          example: 5000000
         consumed:
           type: number
           format: double
+          description: >-
+            Current consumption. Computed from `metering_entries`
+            for usage quotas, or `cost_entries` for budget quotas
+            (where unit is a currency code).
+          example: 4450000
         percentage:
           type: number
           format: double
+          description: >-
+            `consumed / limit * 100`, rounded to 2 decimal places
+          example: 89.0
         thresholds:
           type: object
           additionalProperties:
             type: boolean
-          description: Threshold percentage keys mapped to breached (true/false)
+          description: >-
+            Map of threshold percentage to whether it has been
+            reached (true = breached)
+          example:
+            "50": true
+            "70": true
+            "90": false
+            "100": false
         alerts:
           type: array
           items:
             $ref: "#/components/schemas/AlertRecord"
+          description: >-
+            Threshold alerts fired for this meter in the current
+            period (omitted if none)
 
     AlertRecord:
       type: object
@@ -1090,48 +1871,74 @@ components:
         id:
           type: integer
           format: int64
+          example: 1
         tenant_id:
           type: string
+          example: tenant-acme
         meter_name:
           type: string
+          example: maas_tokens_in
         threshold_pct:
           type: number
           format: double
+          description: The threshold percentage that was breached
+          example: 70
         consumed:
           type: number
           format: double
+          description: Consumption at the time the alert fired
+          example: 3500000
         limit_value:
           type: number
           format: double
+          description: Quota limit at the time the alert fired
+          example: 5000000
         period:
           type: string
+          description: Billing period label
+          example: "2026-07"
         state:
           type: string
+          description: Alert state (e.g., `firing`, `resolved`)
+          example: firing
         fired_at:
           type: string
           format: date-time
+          example: "2026-07-15T08:30:00Z"
 
     QuotaStatusResponse:
       type: object
+      description: >-
+        Quota consumption status for a tenant, including threshold
+        checks and project-level breakdowns.
       properties:
         tenant_id:
           type: string
+          example: tenant-acme
         period:
           type: string
+          description: Current billing period label
+          example: "2026-07"
         quotas:
           type: array
           items:
             $ref: "#/components/schemas/QuotaStatus"
+          description: Tenant-level quota statuses
         projects:
           type: object
           additionalProperties:
             type: array
             items:
               $ref: "#/components/schemas/QuotaStatus"
-          description: Per-project quota statuses (present only when project-scoped quotas exist)
+          description: >-
+            Per-project quota statuses. Present only when
+            project-scoped quotas exist. Keyed by project ID.
 
     QuotaWithStatus:
-      description: QuotaRecord enriched with live consumption data
+      description: >-
+        QuotaRecord enriched with live consumption data. Returned
+        when the `?status=true` query parameter is set on the
+        list quotas endpoint.
       allOf:
         - $ref: "#/components/schemas/QuotaRecord"
         - type: object
@@ -1139,13 +1946,22 @@ components:
             consumed:
               type: number
               format: double
+              description: Current consumption for the quota's period
+              example: 3200000
             percentage:
               type: number
               format: double
+              description: >-
+                `consumed / limit_value * 100`, rounded to 2 decimal
+                places
+              example: 64.0
             thresholds:
               type: object
               additionalProperties:
                 type: boolean
+              description: >-
+                Map of threshold percentage to whether it has been
+                breached
 
     # ── Wallets ───────────────────────────────────────────────────────────
     CreateWalletRequest:
@@ -1154,16 +1970,27 @@ components:
       properties:
         tenant_id:
           type: string
+          description: Tenant identifier
+          example: tenant-acme
         project_id:
           type: string
+          description: Project scope (empty = tenant-wide)
+          example: ""
         currency:
           type: string
           default: USD
+          description: Currency code. Default `USD`.
+          example: USD
         thresholds:
           type: array
           items:
             type: number
             format: double
+          description: >-
+            Remaining-balance alert thresholds (percentages). Default:
+            `[50, 25, 10, 0]`. Alerts fire when `remaining_pct`
+            drops to or below these levels.
+          example: [50, 25, 10, 0]
 
     WalletRecord:
       type: object
@@ -1171,28 +1998,49 @@ components:
         id:
           type: string
           format: uuid
+          description: Wallet UUID
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         tenant_id:
           type: string
+          description: Owning tenant
+          example: tenant-acme
         project_id:
           type: string
+          description: Project scope (empty = tenant-wide)
         currency:
           type: string
+          description: Currency code
+          example: USD
         balance:
           type: string
           format: decimal
+          description: Current balance
+          example: "0"
         balance_floor:
           type: string
           format: decimal
+          description: >-
+            Minimum balance threshold. Balance at or below this
+            value is considered depleted.
+          example: "0"
         reference_balance:
           type: string
           format: decimal
+          description: >-
+            Total funds ever added. Used as the baseline for
+            remaining percentage calculation.
+          example: "0"
         lifecycle_state:
           type: string
+          description: Wallet lifecycle state
+          example: active
         thresholds:
           type: array
           items:
             type: number
             format: double
+          description: Remaining-balance alert thresholds (percentages)
+          example: [50, 25, 10, 0]
         created_at:
           type: string
           format: date-time
@@ -1202,77 +2050,151 @@ components:
 
     WalletLedgerEntry:
       type: object
+      description: >-
+        A single transaction in the wallet audit trail. Entry types:
+        `top_up` (funds added), `charge` (cost deducted),
+        `adjustment` (manual correction).
       properties:
         id:
           type: integer
           format: int64
+          description: Ledger entry ID
+          example: 1
         wallet_id:
           type: string
+          description: Wallet UUID
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         entry_type:
           type: string
+          description: >-
+            Transaction type: `top_up`, `charge`, or `adjustment`
+          example: top_up
         amount:
           type: string
           format: decimal
+          description: >-
+            Transaction amount. Positive for credits (top_up,
+            positive adjustment), negative for charges.
+          example: "500.00"
         balance_after:
           type: string
           format: decimal
+          description: Wallet balance after this transaction
+          example: "1500.00"
         currency:
           type: string
+          description: Currency code
+          example: USD
         cost_entry_id:
           type: integer
           format: int64
           nullable: true
+          description: >-
+            Linked cost entry ID (present for `charge` entries only)
         external_ref:
           type: string
+          description: >-
+            External reference (e.g., purchase order number).
+            Used for top-ups and adjustments.
+          example: PO-2026-0042
         reason:
           type: string
+          description: Reason for the transaction (used for adjustments)
         created_at:
           type: string
           format: date-time
 
     WalletActionRequest:
       type: object
+      description: >-
+        Request body for wallet top-up and adjustment operations.
       properties:
         amount:
           type: string
           format: decimal
+          description: >-
+            Amount for the operation. Must be positive for top-ups.
+            For adjustments, positive adds funds, negative (not yet
+            implemented) would deduct.
+          example: "500.00"
         currency:
           type: string
+          description: Currency code
+          example: USD
         external_ref:
           type: string
+          description: >-
+            External reference (e.g., purchase order number)
+          example: PO-2026-0042
         reason:
           type: string
+          description: Reason for the adjustment
+          example: Billing correction
 
     WalletStatus:
       type: object
+      description: >-
+        Wallet balance and status snapshot including threshold checks.
       properties:
         wallet_id:
           type: string
+          description: Wallet UUID
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
         tenant_id:
           type: string
+          description: Owning tenant
+          example: tenant-acme
         currency:
           type: string
+          description: Currency code
+          example: USD
         balance:
           type: string
           format: decimal
+          description: Current balance
+          example: "750.00"
         reference_balance:
           type: string
           format: decimal
+          description: >-
+            Total funds ever added (baseline for percentage
+            calculation)
+          example: "1000.00"
         remaining_pct:
           type: number
           format: double
+          description: >-
+            `balance / reference_balance * 100`, rounded to 2
+            decimal places
+          example: 75.0
         balance_floor:
           type: string
           format: decimal
+          description: Minimum balance threshold
+          example: "0"
         balance_status:
           type: string
           enum: [ok, depleted]
+          description: >-
+            `ok` if balance > balance_floor, `depleted` otherwise
+          example: ok
         within_balance:
           type: boolean
+          description: >-
+            `true` if balance > balance_floor
+          example: true
         thresholds:
           type: object
           additionalProperties:
             type: boolean
+          description: >-
+            Map of threshold percentage to whether `remaining_pct`
+            is at or below that level
+          example:
+            "50": false
+            "25": false
+            "10": false
+            "0": false
 
     # ── Reports ───────────────────────────────────────────────────────────
     CostReportRow:
@@ -1280,34 +2202,62 @@ components:
       properties:
         date:
           type: string
-          description: Present only when resolution=daily
+          description: >-
+            Date string. Present only when `resolution=daily` is set.
+          example: "2026-07-15"
         group:
           type: string
+          description: >-
+            Group key value (tenant ID, resource type, meter name,
+            project ID, or user ID depending on `group_by`)
+          example: tenant-acme
         entries:
           type: integer
+          description: Number of cost entries in this group
+          example: 1500
         cost:
           type: number
           format: double
+          description: >-
+            Total cost (infrastructure + supplementary)
+          example: 125.50
         infrastructure_cost:
           type: number
           format: double
+          description: >-
+            Infrastructure cost (Koku cost layer)
+          example: 100.00
         supplementary_cost:
           type: number
           format: double
+          description: >-
+            Supplementary cost (Koku cost layer)
+          example: 25.50
         currency:
           type: string
+          description: Currency code
+          example: USD
 
     KokuCostLayer:
       type: object
+      description: >-
+        A single cost layer in the Koku cost model (raw, markup,
+        usage, or total).
       properties:
         value:
           type: number
           format: double
+          example: 125.50
         units:
           type: string
+          example: USD
 
     KokuCostBlock:
       type: object
+      description: >-
+        Koku cost block with raw, markup, usage, and total
+        sub-layers. The `raw` and `markup` layers are reserved
+        for forward compatibility with Koku's full cost model.
       properties:
         raw:
           $ref: "#/components/schemas/KokuCostLayer"
@@ -1320,6 +2270,9 @@ components:
 
     KokuCostTotal:
       type: object
+      description: >-
+        Koku-compatible cost total with cost, infrastructure,
+        and supplementary blocks.
       properties:
         cost:
           $ref: "#/components/schemas/KokuCostBlock"
@@ -1329,6 +2282,7 @@ components:
           $ref: "#/components/schemas/KokuCostBlock"
         cost_units:
           type: string
+          example: USD
 
     CostReportMeta:
       type: object
@@ -1337,17 +2291,30 @@ components:
           $ref: "#/components/schemas/KokuCostTotal"
         period:
           type: string
+          description: Reporting period label
+          example: "2026-07"
         group_by:
           type: string
+          description: Grouping dimension used
+          example: tenant
         resolution:
           type: string
+          description: >-
+            Time resolution. Empty string for period total, `daily`
+            for per-day rows.
+          example: ""
         filters:
           type: object
           additionalProperties:
             type: string
+          description: Active filters applied to the query
 
     CostReportResponse:
       type: object
+      description: >-
+        Aggregated cost report with Koku-compatible meta block.
+        The `meta.total` structure follows Koku's
+        cost/infrastructure/supplementary layout.
       properties:
         meta:
           $ref: "#/components/schemas/CostReportMeta"
@@ -1361,41 +2328,70 @@ components:
       properties:
         date:
           type: string
+          description: Date of the cost entry
+          example: "2026-07-15"
         tenant_id:
           type: string
+          description: Tenant identifier
+          example: tenant-acme
         project_id:
           type: string
+          description: Project identifier (empty if not set)
+          example: project-alpha
         user_id:
           type: string
+          description: User identifier (empty if not set)
+          example: alice
         resource_type:
           type: string
+          description: Resource type
+          example: Model
         resource_id:
           type: string
+          description: Resource identifier
+          example: llama-3-8b
         meter_name:
           type: string
+          description: Meter name
+          example: maas_tokens_in
         metered_value:
           type: number
           format: double
+          description: Raw metered value
+          example: 15000
         cost_amount:
           type: number
           format: double
+          description: Calculated cost amount
+          example: 0.045
         cost_type:
           type: string
+          description: >-
+            Koku cost layer: `Infrastructure` or `Supplementary`
+          example: Infrastructure
         currency:
           type: string
+          description: Currency code
+          example: USD
 
     CostBreakdownMeta:
       type: object
       properties:
         count:
           type: integer
+          description: Number of rows returned
+          example: 3
         filters:
           type: object
           additionalProperties:
             type: string
+          description: Active filters applied to the query
 
     CostBreakdownResponse:
       type: object
+      description: >-
+        Line-item cost breakdown showing individual metering and
+        cost entries with meter-level detail.
       properties:
         meta:
           $ref: "#/components/schemas/CostBreakdownMeta"
@@ -1406,77 +2402,148 @@ components:
 
     PipelineSummary:
       type: object
+      description: >-
+        Aggregate record counts across all pipeline tables. Used
+        for operational monitoring and pipeline health checks.
       properties:
         raw_events:
           type: integer
+          description: Total raw events stored in the immutable event log
+          example: 12500
         metering_entries:
           type: integer
+          description: Total metering entries generated from events
+          example: 37500
         cost_entries:
           type: integer
+          description: Total cost entries created by the rating sweep
+          example: 37500
         rates:
           type: integer
+          description: Number of active rate records
+          example: 12
         live_vms:
           type: integer
+          description: Active compute instances (non-deleted)
+          example: 45
         live_clusters:
           type: integer
+          description: Active clusters (non-deleted)
+          example: 3
         live_models:
           type: integer
+          description: Active model deployments (non-deleted)
+          example: 8
 
     # ── IPP ───────────────────────────────────────────────────────────────
     EntitlementValue:
       type: object
       description: >-
-        IPP-compatible entitlement value. Matches the entitlementValue
-        struct from the IPP external-metering plugin client.
+        IPP-compatible entitlement value. Matches the
+        `entitlementValue` struct from the
+        [IPP external-metering plugin client](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/client.go).
+        When the tenant has no quotas, `hasAccess` is `true` and
+        `balance` is set to the maximum float64 value (effectively
+        unlimited).
       properties:
         hasAccess:
           type: boolean
+          description: >-
+            `true` if total usage is below total quota limit
+            (or if no quotas are defined)
+          example: true
         balance:
           type: number
           format: double
+          description: >-
+            Remaining quota balance (limit - usage, floored at 0).
+            Set to max float64 when no quotas are defined.
+          example: 550000
         usage:
           type: number
           format: double
+          description: Total consumption across all quotas for this tenant
+          example: 4450000
         overage:
           type: number
           format: double
+          description: >-
+            Amount exceeding quota limit (0 if within limits)
+          example: 0
 
     # ── Operations ────────────────────────────────────────────────────────
     DiagnosticInfo:
       type: object
+      description: >-
+        Sanitized runtime configuration. Secrets are masked
+        (database credentials replaced with `****`) or shown as
+        boolean flags.
       properties:
         osac_base_url:
           type: string
+          description: OSAC fulfillment-service base URL
+          example: "http://localhost:8011"
         inventory_db_host:
           type: string
-          description: Database URL with credentials masked
+          description: Database connection string with credentials masked
+          example: "postgres://****@localhost:5434/costdb"
         reconcile_interval:
           type: string
+          description: How often the reconciler runs a full List-based sync
+          example: 1h0m0s
         metering_interval:
           type: string
+          description: How often the metering sweep runs
+          example: 45s
         rating_interval:
           type: string
+          description: How often the rating sweep runs
+          example: 20s
         log_level:
           type: string
+          description: Current log level (debug, info, warn, error)
+          example: info
         log_format:
           type: string
+          description: Log output format (text or json)
+          example: text
         ingest_listen_addr:
           type: string
+          description: HTTP API listen address
+          example: "localhost:8020"
         metrics_port:
           type: string
+          description: Prometheus metrics port
+          example: "9000"
         custom_metrics_config_path:
           type: string
+          description: Path to custom metrics YAML config (empty if not set)
+          example: ""
         auth_issuer_url:
           type: string
+          description: JWT issuer URL for authentication (empty if disabled)
+          example: ""
         debug_dashboard:
           type: boolean
+          description: Whether the debug dashboard is enabled
+          example: true
         osac_token_set:
           type: boolean
+          description: Whether an OSAC bearer token is configured
+          example: true
         osac_ca_cert_set:
           type: boolean
+          description: Whether a custom CA certificate is configured
+          example: false
         splunk_hec_url:
           type: string
+          description: Splunk HEC endpoint URL (empty if disabled)
+          example: ""
         splunk_token_set:
           type: boolean
+          description: Whether a Splunk HEC token is configured
+          example: false
         splunk_index:
           type: string
+          description: Splunk index name
+          example: ""

@@ -17,10 +17,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/osac-project/cost-event-consumer/internal/api"
 	"github.com/osac-project/cost-event-consumer/internal/authn"
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
-	"github.com/osac-project/cost-event-consumer/internal/ingest"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
 	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
@@ -166,7 +166,7 @@ func main() {
 	}
 
 	if cfg.IngestListenAddr != "" {
-		h := ingest.NewHandler(store, m, cfg, cmRegistry, logger)
+		h := api.NewAPIHandler(store, m, cfg, cmRegistry, logger)
 		if r != nil {
 			h.SetReconciler(r)
 		}
@@ -177,9 +177,15 @@ func main() {
 			os.Exit(1)
 		}
 
+		mux := http.NewServeMux()
+		api.HandlerFromMux(h, mux)
+		if cfg.DebugDashboard {
+			h.RegisterDebugRoutes(mux)
+		}
+
 		srv := &http.Server{
 			Addr:           cfg.IngestListenAddr,
-			Handler:        metrics.RequestLogger(logger, metrics.HTTPMiddleware(panicRecovery(logger, auth.Wrap(h.ServeMux())))),
+			Handler:        metrics.RequestLogger(logger, metrics.HTTPMiddleware(panicRecovery(logger, auth.Wrap(mux)))),
 			ReadTimeout:    10 * time.Second,
 			WriteTimeout:   10 * time.Second,
 			MaxHeaderBytes: 1 << 20,

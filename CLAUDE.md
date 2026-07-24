@@ -126,7 +126,8 @@ When modifying source code, keep the corresponding docs in sync:
 - Update [docs/grpc-messages-catalog.md](docs/grpc-messages-catalog.md) —
   event types handled, resource fields consumed, handler mappings
 
-### When modifying `internal/ingest/handler.go`:
+### When adding or modifying API endpoints:
+- Update `docs/openapi.yaml` first (source of truth), then regenerate
 - Update [docs/api-reference.md](docs/api-reference.md) — endpoint list,
   request/response schemas, handler links
 
@@ -180,12 +181,33 @@ inventory-watcher/
     rating/rating.go             Rate engine, tiered pricing, seeding
     inventory/store.go           PostgreSQL schema + all queries
     inventory/models.go          All Go struct types
-    ingest/handler.go            HTTP API (events, quotas, health)
+    api/server.gen.go            Generated ServerInterface from OpenAPI spec (DO NOT EDIT)
+    api/handler.go               HTTP API handlers implementing ServerInterface
+    api/handler_test.go          API handler tests
+    ingest/                      (removed — replaced by api/)
     custommetrics/custommetrics.go Config-driven metric extraction (REQ-13)
     config/config.go             Environment variable config
     metrics/metrics.go           Prometheus metric definitions
     metrics/middleware.go        HTTP metrics + request logging middleware
+  oapi-codegen.yaml              OpenAPI → Go codegen config
+  docs/openapi.yaml              OpenAPI 3.0.3 spec (source of truth for API contract)
 ```
+
+## API Contract
+
+The OpenAPI spec at `docs/openapi.yaml` is the source of truth for the
+HTTP API. The Go server interface is generated from it using
+[oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)
+([ADR-005](docs/decisions/005-oapi-codegen-spec-first-api.md)).
+
+To regenerate after editing the spec:
+
+```bash
+cd inventory-watcher
+oapi-codegen --config=oapi-codegen.yaml ../docs/openapi.yaml
+```
+
+CI checks that the generated code matches the committed spec.
 
 ## Spec References
 
