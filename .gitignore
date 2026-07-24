@@ -100,3 +100,5 @@ deploy/k3d-ipp-dump-*
 inventory-watcher/cost-event-consumer
 inventory-watcher/koku-sync
 istio-*/
+.claude/
+.playwright-mcp/
