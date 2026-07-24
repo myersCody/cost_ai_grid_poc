@@ -404,11 +404,14 @@ async function loadCostByOrg() {
 
   const d = await api(url);
   const total = d.meta.total;
-  $('kTotal').textContent = fmt(parseFloat(total.cost) || 0);
-  $('kInfra').textContent = fmt(parseFloat(total.infrastructure_cost) || 0);
-  $('kSupp').textContent = fmt(parseFloat(total.supplementary_cost) || 0);
+  // API returns nested {cost: {total: {value: n}}} or flat {cost: n} depending on version
+  function tv(f) { return parseFloat(f?.total?.value ?? f?.value ?? f) || 0; }
+  const tc = tv(total.cost), ti = tv(total.infrastructure), ts = tv(total.supplementary);
+  $('kTotal').textContent = fmt(tc);
+  $('kInfra').textContent = fmt(ti);
+  $('kSupp').textContent = fmt(ts);
   $('orgPeriodLabel').textContent = d.meta.period || '';
-  updateDonut(parseFloat(total.infrastructure_cost) || 0, parseFloat(total.supplementary_cost) || 0);
+  updateDonut(ti, ts);
   updateBarChart(d.data);
 
   // Populate org filter
@@ -449,7 +452,8 @@ async function loadCostByResource() {
   let url = '/api/v1/reports/costs?group_by=resource_type';
   if (period) url += '&period=' + period;
   const d = await api(url);
-  const total = parseFloat(d.meta.total.cost) || 0.001;
+  function tv2(f) { return parseFloat(f?.total?.value ?? f?.value ?? f) || 0; }
+  const total = tv2(d.meta.total.cost) || 0.001;
 
   $('resourceBody').innerHTML = d.data.length === 0
     ? '<tr><td colspan="3" class="empty">No data</td></tr>'
