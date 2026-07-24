@@ -1440,9 +1440,13 @@ func (h *APIHandler) RegisterDebugRoutes(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(dashboardHTML))
 	})
+	mux.HandleFunc("GET /reports", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(reportsHTML))
+	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			http.Redirect(w, r, "/debug/dashboard", http.StatusFound)
+			http.Redirect(w, r, "/reports", http.StatusFound)
 		}
 	})
 }

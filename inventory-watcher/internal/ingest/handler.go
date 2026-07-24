@@ -156,13 +156,14 @@ func (h *Handler) ServeMux() *http.ServeMux {
 	mux.HandleFunc("POST /api/v1/reconcile", h.handleReconcile)
 	mux.HandleFunc("GET /healthz", h.handleLiveness)
 	mux.HandleFunc("GET /readyz", h.handleReadiness)
+	mux.HandleFunc("GET /reports", h.handleReports)
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/reports", http.StatusFound)
+		}
+	})
 	if h.cfg != nil && h.cfg.DebugDashboard {
 		mux.HandleFunc("GET /debug/dashboard", h.handleDebugDashboard)
-		mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" {
-				http.Redirect(w, r, "/debug/dashboard", http.StatusFound)
-			}
-		})
 	}
 	return mux
 }
@@ -1394,6 +1395,11 @@ func (h *Handler) handleDebugConfig(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleDebugDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(dashboardHTML))
+}
+
+func (h *Handler) handleReports(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(reportsHTML))
 }
 
 func (h *Handler) handleReconcile(w http.ResponseWriter, r *http.Request) {
