@@ -119,24 +119,10 @@ jobs:
       - name: Validate OpenAPI spec
         run: |
           pip install openapi-spec-validator -q
-          python3 -c "
-          from openapi_spec_validator import validate
-          import yaml
-          with open('docs/openapi.yaml') as f:
-              spec = yaml.safe_load(f)
-          validate(spec)
-          print('OpenAPI spec valid')
-          "
+          cd inventory-watcher && make validate-spec
 
       - name: Check generated code is up to date
-        run: |
-          cd inventory-watcher
-          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
-          oapi-codegen --config=oapi-codegen.yaml ../docs/openapi.yaml
-          if ! git diff --exit-code internal/api/server.gen.go; then
-            echo "::error::Generated code is stale. Run 'oapi-codegen --config=oapi-codegen.yaml ../docs/openapi.yaml' and commit the result."
-            exit 1
-          fi
+        run: cd inventory-watcher && make check-generated
 
   container-build:
     name: Container Build
