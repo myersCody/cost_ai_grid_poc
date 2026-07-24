@@ -124,6 +124,16 @@ jobs:
       - name: Check generated code is up to date
         run: cd inventory-watcher && make check-generated
 
+      - name: Check generated code is up to date
+        run: |
+          cd inventory-watcher
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+          oapi-codegen --config=oapi-codegen.yaml ../docs/openapi.yaml
+          if ! git diff --exit-code internal/api/server.gen.go; then
+            echo "::error::Generated code is stale. Run 'oapi-codegen --config=oapi-codegen.yaml ../docs/openapi.yaml' and commit the result."
+            exit 1
+          fi
+
   container-build:
     name: Container Build
     runs-on: ubuntu-latest
