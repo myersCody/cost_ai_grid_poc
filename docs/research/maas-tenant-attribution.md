@@ -260,7 +260,7 @@ tenant ID. No upstream changes needed.
 
 **Changes:**
 
-1. **`internal/ingest/handler.go` — `handleModelEvent` normalization block:**
+1. **`internal/api/handler.go` — `handleModelEvent` normalization block:**
    ```go
    // Derive tenant from subscription namespace
    // subscription format: "{namespace}/{name}" or "{ns}/{name}@{modelNs}/{modelName}"
@@ -271,11 +271,11 @@ tenant ID. No upstream changes needed.
    }
    ```
 
-2. **`internal/ingest/handler.go` — `classifyEvent` for `EventTypeInferenceTokens`:**
+2. **`internal/api/handler.go` — `classifyEvent` for `EventTypeInferenceTokens`:**
    Add `Subscription` to the peek struct, extract tenant from it before
    falling back to `ce.Subject`.
 
-3. **`internal/ingest/handler.go` — `handleBalanceCheck`:**
+3. **`internal/api/handler.go` — `handleBalanceCheck`:**
    The `customerID` from the URL path may be a username. If subscription
    info is available (e.g., query param or header), parse namespace as
    tenant for quota lookup.

@@ -1,0 +1,70 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - generic [ref=f1e4]: Cost Management
+      - generic [ref=f1e5]: Reports
+    - button "Token" [ref=f1e7] [cursor=pointer]
+  - generic [ref=f1e8]:
+    - generic [ref=f1e9]:
+      - text: Period
+      - textbox "Period" [ref=f1e10]: 2026-07
+    - generic [ref=f1e11]:
+      - text: Organization
+      - combobox "Organization" [ref=f1e12]:
+        - option "All organizations" [selected]
+    - generic [ref=f1e13]: Loading...
+  - generic [ref=f1e14]:
+    - generic [ref=f1e15]:
+      - generic [ref=f1e16]: —
+      - generic [ref=f1e17]: Total Cost
+    - generic [ref=f1e18]:
+      - generic [ref=f1e19]: —
+      - generic [ref=f1e20]: Infrastructure
+    - generic [ref=f1e21]:
+      - generic [ref=f1e22]: —
+      - generic [ref=f1e23]: AI Inference & Usage
+    - generic [ref=f1e24]:
+      - generic [ref=f1e25]: —
+      - generic [ref=f1e26]: Active Resources
+  - generic [ref=f1e27]:
+    - generic [ref=f1e28]:
+      - generic [ref=f1e29] [cursor=pointer]: By Organization
+      - generic [ref=f1e30] [cursor=pointer]: By Resource Type
+      - generic [ref=f1e31] [cursor=pointer]: Quota Status
+    - generic [ref=f1e33]:
+      - generic [ref=f1e34]: Cost by Organization
+      - table [ref=f1e35]:
+        - rowgroup [ref=f1e36]:
+          - row [ref=f1e37]:
+            - columnheader "Organization" [ref=f1e38]
+            - columnheader "Total Cost" [ref=f1e39]
+            - columnheader "Infrastructure" [ref=f1e40]
+            - columnheader "AI Inference & Usage" [ref=f1e41]
+            - columnheader "Breakdown" [ref=f1e42]
+        - rowgroup [ref=f1e43]:
+          - row [ref=f1e44]:
+            - cell "Loading…" [ref=f1e45]
+  - generic [ref=f1e47]:
+    - generic [ref=f1e48]:
+      - generic [ref=f1e49]: Cost Split
+      - img [ref=f1e50]:
+        - generic [ref=f1e54]: infra
+        - generic [ref=f1e55]: —%
+      - generic [ref=f1e56]:
+        - generic [ref=f1e57]: Infra
+        - generic [ref=f1e59]: Usage
+    - generic [ref=f1e61]: Cost by Organization
+  - generic [ref=f1e65]:
+    - heading "Authentication Required" [level=2] [ref=f1e66]
+    - paragraph [ref=f1e67]:
+      - text: This report requires a Bearer token. Run
+      - code [ref=f1e68]: scripts/refresh-token.sh
+      - text: "then paste from:"
+    - generic [ref=f1e69]: cat /tmp/osac_token.txt
+    - paragraph [ref=f1e70]: "Or retrieve directly:"
+    - generic [ref=f1e71]: "oc get secret cost-consumer-secrets -n cost-mgmt -o jsonpath='{.data.osac-token}' | base64 -d"
+    - textbox "eyJhbGci…" [active] [ref=f1e72]
+    - generic [ref=f1e73]:
+      - button "Clear" [ref=f1e74] [cursor=pointer]
+      - button "Cancel" [ref=f1e75] [cursor=pointer]
+      - button "Save & load" [ref=f1e76] [cursor=pointer]

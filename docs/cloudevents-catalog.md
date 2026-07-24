@@ -7,7 +7,7 @@
 
 **Type:** `osac.compute_instance.lifecycle`
 **Source:** OSAC metering collector ([schema](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README.md#cloudevents-schema))
-**Our handler:** `internal/ingest/handler.go` → `handleComputeInstanceEvent`
+**Our handler:** `internal/api/handler.go` → `handleComputeInstanceEvent`
 
 ```json
 {
@@ -45,7 +45,7 @@
 
 **Type:** `osac.cluster.lifecycle`
 **Source:** OSAC metering collector ([schema](https://github.com/masayag/osac-metering-discover-poc/blob/main/collector/README-caas.md#cloudevents-schema))
-**Our handler:** `internal/ingest/handler.go` → `handleClusterEvent`
+**Our handler:** `internal/api/handler.go` → `handleClusterEvent`
 
 ### Control Plane Event
 
@@ -105,7 +105,7 @@ Worker → `cluster_worker_node_seconds` (node_count × duration).
 **Source:** IPP external-metering plugin
 ([plugin.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/plugin.go),
 [client.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/client.go))
-**Our handler:** `internal/ingest/handler.go` → `handleModelEvent`
+**Our handler:** `internal/api/handler.go` → `handleModelEvent`
 
 ```json
 {
@@ -233,7 +233,7 @@ struct tag, not `has_access` (snake_case).
 
 **Type:** `osac.model.lifecycle`
 **Source:** Our `maas-simulator` (`cmd/maas-simulator/main.go`)
-**Our handler:** `internal/ingest/handler.go` → `handleModelEvent`
+**Our handler:** `internal/api/handler.go` → `handleModelEvent`
 
 ```json
 {

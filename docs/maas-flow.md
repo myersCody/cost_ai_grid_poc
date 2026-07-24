@@ -82,8 +82,8 @@ two endpoints that the IPP external-metering plugin calls:
 
 | Endpoint | When | Purpose | Handler |
 |----------|------|---------|---------|
-| `GET /api/v1/customers/{id}/entitlements/{key}/value` | Before every inference request | Balance check — does the user have budget? | [`handleBalanceCheck`](../inventory-watcher/internal/ingest/handler.go) |
-| `POST /api/v1/events` | After every inference response | Usage report — CloudEvent with token counts | [`handleEvent`](../inventory-watcher/internal/ingest/handler.go) |
+| `GET /api/v1/customers/{id}/entitlements/{key}/value` | Before every inference request | Balance check — does the user have budget? | [`handleBalanceCheck`](../inventory-watcher/internal/api/handler.go) |
+| `POST /api/v1/events` | After every inference response | Usage report — CloudEvent with token counts | [`handleEvent`](../inventory-watcher/internal/api/handler.go) |
 
 Contract verified against:
 - [IPP client.go](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/61b6160/pkg/plugins/external-metering/client.go) — struct tags for response format

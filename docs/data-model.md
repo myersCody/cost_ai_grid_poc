@@ -23,7 +23,7 @@ Optional goroutines are activated by env vars.
 |-----------|----------|---------|--------|
 | **watcher** | continuous | Consumes OSAC Watch stream (gRPC). Upserts inventory on VM/cluster/BM lifecycle events. | [`internal/watcher/watcher.go`](../inventory-watcher/internal/watcher/watcher.go) |
 | **reconciler** | 1h | Periodic List calls to OSAC to catch missed events (drift correction). | [`internal/reconciler/reconciler.go`](../inventory-watcher/internal/reconciler/reconciler.go) |
-| **ingest** | HTTP server | Accepts CloudEvents via `POST /api/v1/events`. Serves report API, balance check, debug dashboard. | [`internal/ingest/handler.go`](../inventory-watcher/internal/ingest/handler.go) |
+| **ingest** | HTTP server | Accepts CloudEvents via `POST /api/v1/events`. Serves report API, balance check, debug dashboard. | [`internal/api/handler.go`](../inventory-watcher/internal/api/handler.go) |
 | **metering** | 60s | Sweeps billable VMs/clusters/BM, produces time-based metering entries (uptime, CPU, memory). | [`internal/metering/metering.go`](../inventory-watcher/internal/metering/metering.go) |
 | **rating** | 30s | Picks up unrated metering entries, applies rates (flat or tiered), writes cost entries. | [`internal/rating/rating.go`](../inventory-watcher/internal/rating/rating.go) |
 | **splunk** | 10s | Forwards raw events to Splunk HEC (cursor-based). Opt-in via `SPLUNK_HEC_URL`. | [`internal/splunk/forwarder.go`](../inventory-watcher/internal/splunk/forwarder.go) |

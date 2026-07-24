@@ -166,80 +166,190 @@ func (e GetCostReportParamsFormat) Valid() bool {
 
 // AlertRecord defines model for AlertRecord.
 type AlertRecord struct {
-	Consumed     *float64   `json:"consumed,omitempty"`
-	FiredAt      *time.Time `json:"fired_at,omitempty"`
-	Id           *int64     `json:"id,omitempty"`
-	LimitValue   *float64   `json:"limit_value,omitempty"`
-	MeterName    *string    `json:"meter_name,omitempty"`
-	Period       *string    `json:"period,omitempty"`
-	State        *string    `json:"state,omitempty"`
-	TenantId     *string    `json:"tenant_id,omitempty"`
-	ThresholdPct *float64   `json:"threshold_pct,omitempty"`
+	// Consumed Consumption at the time the alert fired
+	//
+	// Example: 3500000
+	Consumed *float64 `json:"consumed,omitempty"`
+
+	// FiredAt Example: 2026-07-15T08:30:00Z
+	FiredAt *time.Time `json:"fired_at,omitempty"`
+
+	// Id Example: 1
+	Id *int64 `json:"id,omitempty"`
+
+	// LimitValue Quota limit at the time the alert fired
+	//
+	// Example: 5000000
+	LimitValue *float64 `json:"limit_value,omitempty"`
+
+	// MeterName Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// Period Billing period label
+	//
+	// Example: 2026-07
+	Period *string `json:"period,omitempty"`
+
+	// State Alert state (e.g., `firing`, `resolved`)
+	//
+	// Example: firing
+	State *string `json:"state,omitempty"`
+
+	// TenantId Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// ThresholdPct The threshold percentage that was breached
+	//
+	// Example: 70
+	ThresholdPct *float64 `json:"threshold_pct,omitempty"`
 }
 
-// CloudEvent CloudEvents 1.0 structured-mode JSON envelope
+// CloudEvent CloudEvents 1.0 structured-mode JSON envelope. The `data` payload shape depends on the `type` field. The `subject` field serves as a fallback tenant ID when the data payload does not contain a tenant identifier.
 type CloudEvent struct {
-	// Data Event payload; shape depends on type. See ComputeInstanceEventData, ClusterEventData, MaaSEventData.
+	// Data Event payload; shape depends on `type`. See ComputeInstanceEventData (VMaaS), ClusterEventData (CaaS), MaaSEventData (MaaS/IPP).
 	Data *CloudEvent_Data `json:"data,omitempty"`
 
-	// Datacontenttype Example: application/json
+	// Datacontenttype Always `application/json`
+	//
+	// Example: application/json
 	Datacontenttype *string `json:"datacontenttype,omitempty"`
 
-	// Id Example: evt-abc123
+	// Id Unique event ID used for deduplication. Re-submitting the same ID returns 409 Conflict.
+	//
+	// Example: evt-abc123
 	Id string `json:"id"`
 
-	// Source Example: /osac/metering-collector
+	// Source Event producer identifier
+	//
+	// Example: /osac/metering-collector
 	Source string `json:"source"`
 
-	// Specversion Example: 1.0
-	Specversion string     `json:"specversion"`
-	Subject     *string    `json:"subject,omitempty"`
-	Time        *time.Time `json:"time,omitempty"`
+	// Specversion CloudEvents specification version; always `"1.0"`
+	//
+	// Example: 1.0
+	Specversion string `json:"specversion"`
 
-	// Type Event type. Known types: osac.compute_instance.lifecycle, osac.cluster.lifecycle, osac.model.lifecycle, inference.tokens.used
+	// Subject Fallback tenant ID if `data.tenant_id` and other tenant attribution fields are not present.
+	//
+	// Example: tenant-acme
+	Subject *string `json:"subject,omitempty"`
+
+	// Time Event timestamp (ISO 8601)
+	//
+	// Example: 2026-07-01T10:00:00Z
+	Time *time.Time `json:"time,omitempty"`
+
+	// Type Event type that determines the processing path. Known types: `osac.compute_instance.lifecycle`, `osac.cluster.lifecycle`, `osac.model.lifecycle`, `inference.tokens.used`. Custom types are also accepted when configured via custom metrics YAML.
 	//
 	// Example: inference.tokens.used
 	Type string `json:"type"`
 }
 
-// CloudEvent_Data Event payload; shape depends on type. See ComputeInstanceEventData, ClusterEventData, MaaSEventData.
+// CloudEvent_Data Event payload; shape depends on `type`. See ComputeInstanceEventData (VMaaS), ClusterEventData (CaaS), MaaSEventData (MaaS/IPP).
 type CloudEvent_Data struct {
 	union json.RawMessage
 }
 
-// ClusterEventData OSAC metering collector CaaS schema
+// ClusterEventData OSAC metering collector CaaS schema (`osac.cluster.lifecycle`). Metered when the cluster is in a billable state.
 type ClusterEventData struct {
-	ClusterId         *string  `json:"cluster_id,omitempty"`
-	DurationSeconds   *float64 `json:"duration_seconds,omitempty"`
-	HostType          *string  `json:"host_type,omitempty"`
-	NodeCount         *int32   `json:"node_count,omitempty"`
-	State             *string  `json:"state,omitempty"`
-	Template          *string  `json:"template,omitempty"`
-	TenantId          *string  `json:"tenant_id,omitempty"`
-	WorkerNodeSeconds *int64   `json:"worker_node_seconds,omitempty"`
+	// ClusterId Cluster ID
+	//
+	// Example: cluster-001
+	ClusterId *string `json:"cluster_id,omitempty"`
+
+	// DurationSeconds Interval length in seconds (must be positive)
+	//
+	// Example: 60
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+
+	// HostType Host type. `"_control_plane"` triggers uptime metering instead of node-count metering.
+	HostType *string `json:"host_type,omitempty"`
+
+	// NodeCount Current node count
+	//
+	// Example: 3
+	NodeCount *int32 `json:"node_count,omitempty"`
+
+	// State Cluster state (metered when billable)
+	//
+	// Example: CLUSTER_STATE_RUNNING
+	State *string `json:"state,omitempty"`
+
+	// Template Cluster template
+	Template *string `json:"template,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// WorkerNodeSeconds Worker node-seconds consumed
+	//
+	// Example: 180
+	WorkerNodeSeconds *int64 `json:"worker_node_seconds,omitempty"`
 }
 
-// ComputeInstanceEventData OSAC metering collector VMaaS schema
+// ComputeInstanceEventData OSAC metering collector VMaaS schema (`osac.compute_instance.lifecycle`). Metered when the instance is in a billable state.
 type ComputeInstanceEventData struct {
-	CatalogItem      *string  `json:"catalog_item,omitempty"`
-	Cores            *int32   `json:"cores,omitempty"`
-	CpuCoreSeconds   *int64   `json:"cpu_core_seconds,omitempty"`
-	DurationSeconds  *float64 `json:"duration_seconds,omitempty"`
-	InstanceId       *string  `json:"instance_id,omitempty"`
-	MemoryGib        *int32   `json:"memory_gib,omitempty"`
-	MemoryGibSeconds *int64   `json:"memory_gib_seconds,omitempty"`
-	State            *string  `json:"state,omitempty"`
-	Template         *string  `json:"template,omitempty"`
-	TenantId         *string  `json:"tenant_id,omitempty"`
+	// CatalogItem Catalog item name
+	CatalogItem *string `json:"catalog_item,omitempty"`
+
+	// Cores Number of CPU cores
+	//
+	// Example: 4
+	Cores *int32 `json:"cores,omitempty"`
+
+	// CpuCoreSeconds CPU core-seconds consumed
+	//
+	// Example: 240
+	CpuCoreSeconds *int64 `json:"cpu_core_seconds,omitempty"`
+
+	// DurationSeconds Interval length in seconds (must be positive)
+	//
+	// Example: 60
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+
+	// InstanceId Compute instance ID
+	//
+	// Example: vm-12345
+	InstanceId *string `json:"instance_id,omitempty"`
+
+	// MemoryGib Memory in GiB
+	//
+	// Example: 16
+	MemoryGib *int32 `json:"memory_gib,omitempty"`
+
+	// MemoryGibSeconds Memory GiB-seconds consumed
+	//
+	// Example: 960
+	MemoryGibSeconds *int64 `json:"memory_gib_seconds,omitempty"`
+
+	// State Instance state (metered when billable)
+	//
+	// Example: VM_STATE_RUNNING
+	State *string `json:"state,omitempty"`
+
+	// Template VMaaS template reference
+	Template *string `json:"template,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
 }
 
 // CostBreakdownMeta defines model for CostBreakdownMeta.
 type CostBreakdownMeta struct {
-	Count   *int               `json:"count,omitempty"`
+	// Count Number of rows returned
+	//
+	// Example: 3
+	Count *int `json:"count,omitempty"`
+
+	// Filters Active filters applied to the query
 	Filters *map[string]string `json:"filters,omitempty"`
 }
 
-// CostBreakdownResponse defines model for CostBreakdownResponse.
+// CostBreakdownResponse Line-item cost breakdown showing individual metering and cost entries with meter-level detail.
 type CostBreakdownResponse struct {
 	Data *[]CostBreakdownRow `json:"data,omitempty"`
 	Meta *CostBreakdownMeta  `json:"meta,omitempty"`
@@ -247,29 +357,87 @@ type CostBreakdownResponse struct {
 
 // CostBreakdownRow defines model for CostBreakdownRow.
 type CostBreakdownRow struct {
-	CostAmount   *float64 `json:"cost_amount,omitempty"`
-	CostType     *string  `json:"cost_type,omitempty"`
-	Currency     *string  `json:"currency,omitempty"`
-	Date         *string  `json:"date,omitempty"`
-	MeterName    *string  `json:"meter_name,omitempty"`
+	// CostAmount Calculated cost amount
+	//
+	// Example: 0.045
+	CostAmount *float64 `json:"cost_amount,omitempty"`
+
+	// CostType Koku cost layer: `Infrastructure` or `Supplementary`
+	//
+	// Example: Infrastructure
+	CostType *string `json:"cost_type,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// Date Date of the cost entry
+	//
+	// Example: 2026-07-15
+	Date *string `json:"date,omitempty"`
+
+	// MeterName Meter name
+	//
+	// Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// MeteredValue Raw metered value
+	//
+	// Example: 15000
 	MeteredValue *float64 `json:"metered_value,omitempty"`
-	ProjectId    *string  `json:"project_id,omitempty"`
-	ResourceId   *string  `json:"resource_id,omitempty"`
-	ResourceType *string  `json:"resource_type,omitempty"`
-	TenantId     *string  `json:"tenant_id,omitempty"`
-	UserId       *string  `json:"user_id,omitempty"`
+
+	// ProjectId Project identifier (empty if not set)
+	//
+	// Example: project-alpha
+	ProjectId *string `json:"project_id,omitempty"`
+
+	// ResourceId Resource identifier
+	//
+	// Example: llama-3-8b
+	ResourceId *string `json:"resource_id,omitempty"`
+
+	// ResourceType Resource type
+	//
+	// Example: Model
+	ResourceType *string `json:"resource_type,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// UserId User identifier (empty if not set)
+	//
+	// Example: alice
+	UserId *string `json:"user_id,omitempty"`
 }
 
 // CostReportMeta defines model for CostReportMeta.
 type CostReportMeta struct {
-	Filters    *map[string]string `json:"filters,omitempty"`
-	GroupBy    *string            `json:"group_by,omitempty"`
-	Period     *string            `json:"period,omitempty"`
-	Resolution *string            `json:"resolution,omitempty"`
-	Total      *KokuCostTotal     `json:"total,omitempty"`
+	// Filters Active filters applied to the query
+	Filters *map[string]string `json:"filters,omitempty"`
+
+	// GroupBy Grouping dimension used
+	//
+	// Example: tenant
+	GroupBy *string `json:"group_by,omitempty"`
+
+	// Period Reporting period label
+	//
+	// Example: 2026-07
+	Period *string `json:"period,omitempty"`
+
+	// Resolution Time resolution. Empty string for period total, `daily` for per-day rows.
+	//
+	// Example:
+	Resolution *string `json:"resolution,omitempty"`
+
+	// Total Koku-compatible cost total with cost, infrastructure, and supplementary blocks.
+	Total *KokuCostTotal `json:"total,omitempty"`
 }
 
-// CostReportResponse defines model for CostReportResponse.
+// CostReportResponse Aggregated cost report with Koku-compatible meta block. The `meta.total` structure follows Koku's cost/infrastructure/supplementary layout.
 type CostReportResponse struct {
 	Data *[]CostReportRow `json:"data,omitempty"`
 	Meta *CostReportMeta  `json:"meta,omitempty"`
@@ -277,228 +445,627 @@ type CostReportResponse struct {
 
 // CostReportRow defines model for CostReportRow.
 type CostReportRow struct {
-	Cost     *float64 `json:"cost,omitempty"`
-	Currency *string  `json:"currency,omitempty"`
+	// Cost Total cost (infrastructure + supplementary)
+	//
+	// Example: 125.5
+	Cost *float64 `json:"cost,omitempty"`
 
-	// Date Present only when resolution=daily
-	Date               *string  `json:"date,omitempty"`
-	Entries            *int     `json:"entries,omitempty"`
-	Group              *string  `json:"group,omitempty"`
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// Date Date string. Present only when `resolution=daily` is set.
+	//
+	// Example: 2026-07-15
+	Date *string `json:"date,omitempty"`
+
+	// Entries Number of cost entries in this group
+	//
+	// Example: 1500
+	Entries *int `json:"entries,omitempty"`
+
+	// Group Group key value (tenant ID, resource type, meter name, project ID, or user ID depending on `group_by`)
+	//
+	// Example: tenant-acme
+	Group *string `json:"group,omitempty"`
+
+	// InfrastructureCost Infrastructure cost (Koku cost layer)
+	//
+	// Example: 100
 	InfrastructureCost *float64 `json:"infrastructure_cost,omitempty"`
-	SupplementaryCost  *float64 `json:"supplementary_cost,omitempty"`
+
+	// SupplementaryCost Supplementary cost (Koku cost layer)
+	//
+	// Example: 25.5
+	SupplementaryCost *float64 `json:"supplementary_cost,omitempty"`
 }
 
 // CreateWalletRequest defines model for CreateWalletRequest.
 type CreateWalletRequest struct {
-	Currency   *string    `json:"currency,omitempty"`
-	ProjectId  *string    `json:"project_id,omitempty"`
-	TenantId   string     `json:"tenant_id"`
+	// Currency Currency code. Default `USD`.
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// ProjectId Project scope (empty = tenant-wide)
+	//
+	// Example:
+	ProjectId *string `json:"project_id,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId string `json:"tenant_id"`
+
+	// Thresholds Remaining-balance alert thresholds (percentages). Default: `[50, 25, 10, 0]`. Alerts fire when `remaining_pct` drops to or below these levels.
+	//
+	// Example: [50,25,10,0]
 	Thresholds *[]float64 `json:"thresholds,omitempty"`
 }
 
-// DiagnosticInfo defines model for DiagnosticInfo.
+// DiagnosticInfo Sanitized runtime configuration. Secrets are masked (database credentials replaced with `****`) or shown as boolean flags.
 type DiagnosticInfo struct {
-	AuthIssuerUrl           *string `json:"auth_issuer_url,omitempty"`
+	// AuthIssuerUrl JWT issuer URL for authentication (empty if disabled)
+	//
+	// Example:
+	AuthIssuerUrl *string `json:"auth_issuer_url,omitempty"`
+
+	// CustomMetricsConfigPath Path to custom metrics YAML config (empty if not set)
+	//
+	// Example:
 	CustomMetricsConfigPath *string `json:"custom_metrics_config_path,omitempty"`
-	DebugDashboard          *bool   `json:"debug_dashboard,omitempty"`
-	IngestListenAddr        *string `json:"ingest_listen_addr,omitempty"`
 
-	// InventoryDbHost Database URL with credentials masked
-	InventoryDbHost   *string `json:"inventory_db_host,omitempty"`
-	LogFormat         *string `json:"log_format,omitempty"`
-	LogLevel          *string `json:"log_level,omitempty"`
-	MeteringInterval  *string `json:"metering_interval,omitempty"`
-	MetricsPort       *string `json:"metrics_port,omitempty"`
-	OsacBaseUrl       *string `json:"osac_base_url,omitempty"`
-	OsacCaCertSet     *bool   `json:"osac_ca_cert_set,omitempty"`
-	OsacTokenSet      *bool   `json:"osac_token_set,omitempty"`
-	RatingInterval    *string `json:"rating_interval,omitempty"`
+	// DebugDashboard Whether the debug dashboard is enabled
+	//
+	// Example: true
+	DebugDashboard *bool `json:"debug_dashboard,omitempty"`
+
+	// IngestListenAddr HTTP API listen address
+	//
+	// Example: localhost:8020
+	IngestListenAddr *string `json:"ingest_listen_addr,omitempty"`
+
+	// InventoryDbHost Database connection string with credentials masked
+	//
+	// Example: postgres://****@localhost:5434/costdb
+	InventoryDbHost *string `json:"inventory_db_host,omitempty"`
+
+	// LogFormat Log output format (text or json)
+	//
+	// Example: text
+	LogFormat *string `json:"log_format,omitempty"`
+
+	// LogLevel Current log level (debug, info, warn, error)
+	//
+	// Example: info
+	LogLevel *string `json:"log_level,omitempty"`
+
+	// MeteringInterval How often the metering sweep runs
+	//
+	// Example: 45s
+	MeteringInterval *string `json:"metering_interval,omitempty"`
+
+	// MetricsPort Prometheus metrics port
+	//
+	// Example: 9000
+	MetricsPort *string `json:"metrics_port,omitempty"`
+
+	// OsacBaseUrl OSAC fulfillment-service base URL
+	//
+	// Example: http://localhost:8011
+	OsacBaseUrl *string `json:"osac_base_url,omitempty"`
+
+	// OsacCaCertSet Whether a custom CA certificate is configured
+	//
+	// Example: false
+	OsacCaCertSet *bool `json:"osac_ca_cert_set,omitempty"`
+
+	// OsacTokenSet Whether an OSAC bearer token is configured
+	//
+	// Example: true
+	OsacTokenSet *bool `json:"osac_token_set,omitempty"`
+
+	// RatingInterval How often the rating sweep runs
+	//
+	// Example: 20s
+	RatingInterval *string `json:"rating_interval,omitempty"`
+
+	// ReconcileInterval How often the reconciler runs a full List-based sync
+	//
+	// Example: 1h0m0s
 	ReconcileInterval *string `json:"reconcile_interval,omitempty"`
-	SplunkHecUrl      *string `json:"splunk_hec_url,omitempty"`
-	SplunkIndex       *string `json:"splunk_index,omitempty"`
-	SplunkTokenSet    *bool   `json:"splunk_token_set,omitempty"`
+
+	// SplunkHecUrl Splunk HEC endpoint URL (empty if disabled)
+	//
+	// Example:
+	SplunkHecUrl *string `json:"splunk_hec_url,omitempty"`
+
+	// SplunkIndex Splunk index name
+	//
+	// Example:
+	SplunkIndex *string `json:"splunk_index,omitempty"`
+
+	// SplunkTokenSet Whether a Splunk HEC token is configured
+	//
+	// Example: false
+	SplunkTokenSet *bool `json:"splunk_token_set,omitempty"`
 }
 
-// EntitlementValue IPP-compatible entitlement value. Matches the entitlementValue struct from the IPP external-metering plugin client.
+// EntitlementValue IPP-compatible entitlement value. Matches the `entitlementValue` struct from the [IPP external-metering plugin client](https://github.com/opendatahub-io/ai-gateway-payload-processing/blob/main/pkg/plugins/external-metering/client.go). When the tenant has no quotas, `hasAccess` is `true` and `balance` is set to the maximum float64 value (effectively unlimited).
 type EntitlementValue struct {
-	Balance   *float64 `json:"balance,omitempty"`
-	HasAccess *bool    `json:"hasAccess,omitempty"`
-	Overage   *float64 `json:"overage,omitempty"`
-	Usage     *float64 `json:"usage,omitempty"`
+	// Balance Remaining quota balance (limit - usage, floored at 0). Set to max float64 when no quotas are defined.
+	//
+	// Example: 550000
+	Balance *float64 `json:"balance,omitempty"`
+
+	// HasAccess `true` if total usage is below total quota limit (or if no quotas are defined)
+	//
+	// Example: true
+	HasAccess *bool `json:"hasAccess,omitempty"`
+
+	// Overage Amount exceeding quota limit (0 if within limits)
+	//
+	// Example: 0
+	Overage *float64 `json:"overage,omitempty"`
+
+	// Usage Total consumption across all quotas for this tenant
+	//
+	// Example: 4450000
+	Usage *float64 `json:"usage,omitempty"`
 }
 
-// ErrorResponse defines model for ErrorResponse.
+// ErrorResponse Standard error response format used by all endpoints.
 type ErrorResponse struct {
+	// Error Human-readable error message
+	//
+	// Example: descriptive error message
 	Error string `json:"error"`
 }
 
-// KokuCostBlock defines model for KokuCostBlock.
+// KokuCostBlock Koku cost block with raw, markup, usage, and total sub-layers. The `raw` and `markup` layers are reserved for forward compatibility with Koku's full cost model.
 type KokuCostBlock struct {
+	// Markup A single cost layer in the Koku cost model (raw, markup, usage, or total).
 	Markup *KokuCostLayer `json:"markup,omitempty"`
-	Raw    *KokuCostLayer `json:"raw,omitempty"`
-	Total  *KokuCostLayer `json:"total,omitempty"`
-	Usage  *KokuCostLayer `json:"usage,omitempty"`
+
+	// Raw A single cost layer in the Koku cost model (raw, markup, usage, or total).
+	Raw *KokuCostLayer `json:"raw,omitempty"`
+
+	// Total A single cost layer in the Koku cost model (raw, markup, usage, or total).
+	Total *KokuCostLayer `json:"total,omitempty"`
+
+	// Usage A single cost layer in the Koku cost model (raw, markup, usage, or total).
+	Usage *KokuCostLayer `json:"usage,omitempty"`
 }
 
-// KokuCostLayer defines model for KokuCostLayer.
+// KokuCostLayer A single cost layer in the Koku cost model (raw, markup, usage, or total).
 type KokuCostLayer struct {
-	Units *string  `json:"units,omitempty"`
+	// Units Example: USD
+	Units *string `json:"units,omitempty"`
+
+	// Value Example: 125.5
 	Value *float64 `json:"value,omitempty"`
 }
 
-// KokuCostTotal defines model for KokuCostTotal.
+// KokuCostTotal Koku-compatible cost total with cost, infrastructure, and supplementary blocks.
 type KokuCostTotal struct {
-	Cost           *KokuCostBlock `json:"cost,omitempty"`
-	CostUnits      *string        `json:"cost_units,omitempty"`
+	// Cost Koku cost block with raw, markup, usage, and total sub-layers. The `raw` and `markup` layers are reserved for forward compatibility with Koku's full cost model.
+	Cost *KokuCostBlock `json:"cost,omitempty"`
+
+	// CostUnits Example: USD
+	CostUnits *string `json:"cost_units,omitempty"`
+
+	// Infrastructure Koku cost block with raw, markup, usage, and total sub-layers. The `raw` and `markup` layers are reserved for forward compatibility with Koku's full cost model.
 	Infrastructure *KokuCostBlock `json:"infrastructure,omitempty"`
-	Supplementary  *KokuCostBlock `json:"supplementary,omitempty"`
+
+	// Supplementary Koku cost block with raw, markup, usage, and total sub-layers. The `raw` and `markup` layers are reserved for forward compatibility with Koku's full cost model.
+	Supplementary *KokuCostBlock `json:"supplementary,omitempty"`
 }
 
-// MaaSEventData MaaS / IPP external-metering event data. Accepts both legacy mock format and the real IPP external-metering plugin format.
+// MaaSEventData MaaS / IPP external-metering event data. Accepts both the legacy mock format (`osac.model.lifecycle`) and the real IPP external-metering plugin format (`inference.tokens.used`).
+//
+// **Tenant attribution priority:** `organization_id` > `subscription` (namespace extracted) > `group` > `user` > `tenant_id` > CloudEvent `subject`.
 type MaaSEventData struct {
-	// CacheCreationTokens Subset of prompt_tokens
+	// CacheCreationTokens Subset of prompt_tokens used for cache creation
 	CacheCreationTokens *int64 `json:"cache_creation_tokens,omitempty"`
 
-	// CachedInputTokens Subset of prompt_tokens; parsed for observability, not billed separately
-	CachedInputTokens *int64   `json:"cached_input_tokens,omitempty"`
-	CompletionTokens  *int64   `json:"completion_tokens,omitempty"`
-	CostCenter        *string  `json:"cost_center,omitempty"`
-	DurationMs        *int64   `json:"duration_ms,omitempty"`
-	DurationSeconds   *float64 `json:"duration_seconds,omitempty"`
-	Group             *string  `json:"group,omitempty"`
-	Model             *string  `json:"model,omitempty"`
-	ModelId           *string  `json:"model_id,omitempty"`
-	ModelName         *string  `json:"model_name,omitempty"`
-	OrganizationId    *string  `json:"organization_id,omitempty"`
-	PromptTokens      *int64   `json:"prompt_tokens,omitempty"`
-	Provider          *string  `json:"provider,omitempty"`
+	// CachedInputTokens Subset of prompt_tokens served from cache. Parsed for observability metrics but not billed separately.
+	CachedInputTokens *int64 `json:"cached_input_tokens,omitempty"`
 
-	// ReasoningTokens Subset of completion_tokens (o1/o3/DeepSeek R1)
-	ReasoningTokens *int64  `json:"reasoning_tokens,omitempty"`
-	RequestCount    *int64  `json:"request_count,omitempty"`
-	Requests        *int64  `json:"requests,omitempty"`
-	State           *string `json:"state,omitempty"`
-	Subscription    *string `json:"subscription,omitempty"`
-	Template        *string `json:"template,omitempty"`
-	TenantId        *string `json:"tenant_id,omitempty"`
-	TokensIn        *int64  `json:"tokens_in,omitempty"`
-	TokensOut       *int64  `json:"tokens_out,omitempty"`
-	TotalTokens     *int64  `json:"total_tokens,omitempty"`
-	User            *string `json:"user,omitempty"`
+	// CompletionTokens Output tokens (IPP format). Maps to `tokens_out` internally.
+	//
+	// Example: 8000
+	CompletionTokens *int64 `json:"completion_tokens,omitempty"`
+
+	// CostCenter IPP cost center
+	CostCenter *string `json:"cost_center,omitempty"`
+
+	// DurationMs Interval length in milliseconds (IPP format)
+	//
+	// Example: 1200
+	DurationMs *int64 `json:"duration_ms,omitempty"`
+
+	// DurationSeconds Interval length in seconds (legacy). Falls back from `duration_ms` (converted to seconds).
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+
+	// Group IPP group identity
+	Group *string `json:"group,omitempty"`
+
+	// Model Model name (IPP format). Used as model_id when `model_id` is not set.
+	//
+	// Example: llama-3-8b
+	Model *string `json:"model,omitempty"`
+
+	// ModelId Model deployment ID (legacy). Falls back to `model`.
+	//
+	// Example: llama-3-8b
+	ModelId *string `json:"model_id,omitempty"`
+
+	// ModelName Human-readable model name (legacy)
+	ModelName *string `json:"model_name,omitempty"`
+
+	// OrganizationId IPP organization ID. Highest-priority tenant attribution field.
+	//
+	// Example: org-12345
+	OrganizationId *string `json:"organization_id,omitempty"`
+
+	// PromptTokens Input tokens (IPP format). Maps to `tokens_in` internally.
+	//
+	// Example: 15000
+	PromptTokens *int64 `json:"prompt_tokens,omitempty"`
+
+	// Provider LLM provider name
+	//
+	// Example: red_hat
+	Provider *string `json:"provider,omitempty"`
+
+	// ReasoningTokens Subset of completion_tokens used for reasoning (o1/o3/DeepSeek R1 models)
+	ReasoningTokens *int64 `json:"reasoning_tokens,omitempty"`
+
+	// RequestCount Number of inference requests (alias for `requests`)
+	RequestCount *int64 `json:"request_count,omitempty"`
+
+	// Requests Number of inference requests (legacy)
+	Requests *int64 `json:"requests,omitempty"`
+
+	// State Model state. Defaults to `"MODEL_STATE_RUNNING"` if omitted.
+	State *string `json:"state,omitempty"`
+
+	// Subscription IPP subscription (namespace extracted as tenant)
+	Subscription *string `json:"subscription,omitempty"`
+
+	// Template MaaS template reference
+	Template *string `json:"template,omitempty"`
+
+	// TenantId Tenant ID (legacy format). Falls back to `organization_id`, subscription namespace, `group`, or `user` in that priority order.
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// TokensIn Input tokens (legacy format)
+	TokensIn *int64 `json:"tokens_in,omitempty"`
+
+	// TokensOut Output tokens (legacy format)
+	TokensOut *int64 `json:"tokens_out,omitempty"`
+
+	// TotalTokens Total tokens (informational)
+	//
+	// Example: 23000
+	TotalTokens *int64 `json:"total_tokens,omitempty"`
+
+	// User IPP user identity
+	//
+	// Example: alice
+	User *string `json:"user,omitempty"`
 }
 
-// PipelineSummary defines model for PipelineSummary.
+// PipelineSummary Aggregate record counts across all pipeline tables. Used for operational monitoring and pipeline health checks.
 type PipelineSummary struct {
-	CostEntries     *int `json:"cost_entries,omitempty"`
-	LiveClusters    *int `json:"live_clusters,omitempty"`
-	LiveModels      *int `json:"live_models,omitempty"`
-	LiveVms         *int `json:"live_vms,omitempty"`
+	// CostEntries Total cost entries created by the rating sweep
+	//
+	// Example: 37500
+	CostEntries *int `json:"cost_entries,omitempty"`
+
+	// LiveClusters Active clusters (non-deleted)
+	//
+	// Example: 3
+	LiveClusters *int `json:"live_clusters,omitempty"`
+
+	// LiveModels Active model deployments (non-deleted)
+	//
+	// Example: 8
+	LiveModels *int `json:"live_models,omitempty"`
+
+	// LiveVms Active compute instances (non-deleted)
+	//
+	// Example: 45
+	LiveVms *int `json:"live_vms,omitempty"`
+
+	// MeteringEntries Total metering entries generated from events
+	//
+	// Example: 37500
 	MeteringEntries *int `json:"metering_entries,omitempty"`
-	Rates           *int `json:"rates,omitempty"`
-	RawEvents       *int `json:"raw_events,omitempty"`
+
+	// Rates Number of active rate records
+	//
+	// Example: 12
+	Rates *int `json:"rates,omitempty"`
+
+	// RawEvents Total raw events stored in the immutable event log
+	//
+	// Example: 12500
+	RawEvents *int `json:"raw_events,omitempty"`
 }
 
 // QuotaRecord defines model for QuotaRecord.
 type QuotaRecord struct {
+	// EffectiveFrom When the quota takes effect. Default: now.
 	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
-	EffectiveTo   *time.Time `json:"effective_to,omitempty"`
-	Id            *int64     `json:"id,omitempty"`
-	LimitValue    *float64   `json:"limit_value,omitempty"`
-	MeterName     *string    `json:"meter_name,omitempty"`
-	Name          *string    `json:"name,omitempty"`
 
-	// Period Billing period: monthly, weekly, daily, or custom. Defaults to "monthly" if omitted.
+	// EffectiveTo When the quota expires. `null` means no expiry. Set to current time on soft-delete.
+	EffectiveTo *time.Time `json:"effective_to,omitempty"`
+
+	// Id Quota record ID
+	//
+	// Example: 1
+	Id *int64 `json:"id,omitempty"`
+
+	// LimitValue Maximum allowed value (must be positive)
+	//
+	// Example: 5000000
+	LimitValue *float64 `json:"limit_value,omitempty"`
+
+	// MeterName Meter to limit. Use `"*"` for budget quotas covering total cost across all meters.
+	//
+	// Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// Name Optional human-readable quota name
+	Name *string `json:"name,omitempty"`
+
+	// Period Billing period: `monthly`, `weekly`, `daily`, or custom formats like `Nh` (N hours) and `Nd` (N days). Default: `monthly`.
+	//
+	// Example: monthly
 	Period *string `json:"period,omitempty"`
 
-	// Policy Enforcement policy. Defaults to "deny".
-	Policy       *string `json:"policy,omitempty"`
-	ProjectId    *string `json:"project_id,omitempty"`
-	ResourceType *string `json:"resource_type,omitempty"`
-	TenantId     *string `json:"tenant_id,omitempty"`
+	// Policy Enforcement policy: `deny` (block access when exceeded) or `warn` (alert only). Default: `deny`.
+	//
+	// Example: deny
+	Policy *string `json:"policy,omitempty"`
 
-	// Thresholds Alert threshold percentages
+	// ProjectId Project scope. Empty string means tenant-wide quota. Project-scoped quotas are validated against the parent tenant quota to prevent overcommit.
+	//
+	// Example:
+	ProjectId *string `json:"project_id,omitempty"`
+
+	// ResourceType Resource type filter
+	//
+	// Example: Model
+	ResourceType *string `json:"resource_type,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// Thresholds Alert threshold percentages. Default: `[50, 70, 90, 100]`. Alerts fire when consumption crosses these levels.
+	//
+	// Example: [50,70,90,100]
 	Thresholds *[]float64 `json:"thresholds,omitempty"`
 
-	// Unit Unit of the quota. Currency codes (USD, EUR, etc.) indicate a budget quota; otherwise a metering unit.
+	// Unit Unit of measurement. Currency codes (USD, EUR, etc.) create budget quotas that track cost rather than usage. Otherwise treated as a metering unit (e.g., `tokens`, `core_seconds`).
+	//
+	// Example: tokens
 	Unit *string `json:"unit,omitempty"`
 }
 
-// QuotaStatus defines model for QuotaStatus.
+// QuotaStatus Real-time consumption status for a single quota, including threshold breach flags and fired alerts.
 type QuotaStatus struct {
-	Alerts     *[]AlertRecord `json:"alerts,omitempty"`
-	Consumed   *float64       `json:"consumed,omitempty"`
-	Limit      *float64       `json:"limit,omitempty"`
-	MeterName  *string        `json:"meter_name,omitempty"`
-	Percentage *float64       `json:"percentage,omitempty"`
+	// Alerts Threshold alerts fired for this meter in the current period (omitted if none)
+	Alerts *[]AlertRecord `json:"alerts,omitempty"`
 
-	// Thresholds Threshold percentage keys mapped to breached (true/false)
+	// Consumed Current consumption. Computed from `metering_entries` for usage quotas, or `cost_entries` for budget quotas (where unit is a currency code).
+	//
+	// Example: 4450000
+	Consumed *float64 `json:"consumed,omitempty"`
+
+	// Limit Quota limit for the current period
+	//
+	// Example: 5000000
+	Limit *float64 `json:"limit,omitempty"`
+
+	// MeterName Meter this quota applies to
+	//
+	// Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// Percentage `consumed / limit * 100`, rounded to 2 decimal places
+	//
+	// Example: 89
+	Percentage *float64 `json:"percentage,omitempty"`
+
+	// Thresholds Map of threshold percentage to whether it has been reached (true = breached)
+	//
+	// Example: {"100":false,"50":true,"70":true,"90":false}
 	Thresholds *map[string]bool `json:"thresholds,omitempty"`
-	Unit       *string          `json:"unit,omitempty"`
+
+	// Unit Unit of measurement
+	//
+	// Example: tokens
+	Unit *string `json:"unit,omitempty"`
 }
 
-// QuotaStatusResponse defines model for QuotaStatusResponse.
+// QuotaStatusResponse Quota consumption status for a tenant, including threshold checks and project-level breakdowns.
 type QuotaStatusResponse struct {
+	// Period Current billing period label
+	//
+	// Example: 2026-07
 	Period *string `json:"period,omitempty"`
 
-	// Projects Per-project quota statuses (present only when project-scoped quotas exist)
+	// Projects Per-project quota statuses. Present only when project-scoped quotas exist. Keyed by project ID.
 	Projects *map[string][]QuotaStatus `json:"projects,omitempty"`
-	Quotas   *[]QuotaStatus            `json:"quotas,omitempty"`
-	TenantId *string                   `json:"tenant_id,omitempty"`
+
+	// Quotas Tenant-level quota statuses
+	Quotas *[]QuotaStatus `json:"quotas,omitempty"`
+
+	// TenantId Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
 }
 
-// QuotaWithStatus QuotaRecord enriched with live consumption data
+// QuotaWithStatus QuotaRecord enriched with live consumption data. Returned when the `?status=true` query parameter is set on the list quotas endpoint.
 type QuotaWithStatus struct {
-	Consumed      *float64   `json:"consumed,omitempty"`
-	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
-	EffectiveTo   *time.Time `json:"effective_to,omitempty"`
-	Id            *int64     `json:"id,omitempty"`
-	LimitValue    *float64   `json:"limit_value,omitempty"`
-	MeterName     *string    `json:"meter_name,omitempty"`
-	Name          *string    `json:"name,omitempty"`
-	Percentage    *float64   `json:"percentage,omitempty"`
+	// Consumed Current consumption for the quota's period
+	//
+	// Example: 3200000
+	Consumed *float64 `json:"consumed,omitempty"`
 
-	// Period Billing period: monthly, weekly, daily, or custom. Defaults to "monthly" if omitted.
+	// EffectiveFrom When the quota takes effect. Default: now.
+	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
+
+	// EffectiveTo When the quota expires. `null` means no expiry. Set to current time on soft-delete.
+	EffectiveTo *time.Time `json:"effective_to,omitempty"`
+
+	// Id Quota record ID
+	//
+	// Example: 1
+	Id *int64 `json:"id,omitempty"`
+
+	// LimitValue Maximum allowed value (must be positive)
+	//
+	// Example: 5000000
+	LimitValue *float64 `json:"limit_value,omitempty"`
+
+	// MeterName Meter to limit. Use `"*"` for budget quotas covering total cost across all meters.
+	//
+	// Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// Name Optional human-readable quota name
+	Name *string `json:"name,omitempty"`
+
+	// Percentage `consumed / limit_value * 100`, rounded to 2 decimal places
+	//
+	// Example: 64
+	Percentage *float64 `json:"percentage,omitempty"`
+
+	// Period Billing period: `monthly`, `weekly`, `daily`, or custom formats like `Nh` (N hours) and `Nd` (N days). Default: `monthly`.
+	//
+	// Example: monthly
 	Period *string `json:"period,omitempty"`
 
-	// Policy Enforcement policy. Defaults to "deny".
-	Policy       *string          `json:"policy,omitempty"`
-	ProjectId    *string          `json:"project_id,omitempty"`
-	ResourceType *string          `json:"resource_type,omitempty"`
-	TenantId     *string          `json:"tenant_id,omitempty"`
-	Thresholds   *map[string]bool `json:"thresholds,omitempty"`
+	// Policy Enforcement policy: `deny` (block access when exceeded) or `warn` (alert only). Default: `deny`.
+	//
+	// Example: deny
+	Policy *string `json:"policy,omitempty"`
 
-	// Unit Unit of the quota. Currency codes (USD, EUR, etc.) indicate a budget quota; otherwise a metering unit.
+	// ProjectId Project scope. Empty string means tenant-wide quota. Project-scoped quotas are validated against the parent tenant quota to prevent overcommit.
+	//
+	// Example:
+	ProjectId *string `json:"project_id,omitempty"`
+
+	// ResourceType Resource type filter
+	//
+	// Example: Model
+	ResourceType *string `json:"resource_type,omitempty"`
+
+	// TenantId Tenant identifier
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// Thresholds Map of threshold percentage to whether it has been breached
+	Thresholds *map[string]bool `json:"thresholds,omitempty"`
+
+	// Unit Unit of measurement. Currency codes (USD, EUR, etc.) create budget quotas that track cost rather than usage. Otherwise treated as a metering unit (e.g., `tokens`, `core_seconds`).
+	//
+	// Example: tokens
 	Unit *string `json:"unit,omitempty"`
 }
 
 // RateRecord defines model for RateRecord.
 type RateRecord struct {
-	// CostType Infrastructure or Supplementary
-	CostType      *string    `json:"cost_type,omitempty"`
-	Currency      *string    `json:"currency,omitempty"`
-	Description   *string    `json:"description,omitempty"`
+	// CostType Koku cost layer: `Infrastructure` or `Supplementary`
+	//
+	// Example: Infrastructure
+	CostType *string `json:"cost_type,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// Description Human-readable description of the rate
+	//
+	// Example: Input tokens for LLM inference
+	Description *string `json:"description,omitempty"`
+
+	// EffectiveFrom Rate effective start date
+	//
+	// Example: 2026-01-01T00:00:00Z
 	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
-	EffectiveTo   *time.Time `json:"effective_to,omitempty"`
-	Id            *int64     `json:"id,omitempty"`
-	InstanceType  *string    `json:"instance_type,omitempty"`
-	KokuMetric    *string    `json:"koku_metric,omitempty"`
-	MeterName     *string    `json:"meter_name,omitempty"`
-	PricePerUnit  *string    `json:"price_per_unit,omitempty"`
-	ResourceType  *string    `json:"resource_type,omitempty"`
-	TenantId      *string    `json:"tenant_id,omitempty"`
-	TierMode      *string    `json:"tier_mode,omitempty"`
-	TierPeriod    *string    `json:"tier_period,omitempty"`
-	Tiers         *[]Tier    `json:"tiers,omitempty"`
+
+	// EffectiveTo Rate effective end date. `null` means no expiry (rate is active indefinitely).
+	EffectiveTo *time.Time `json:"effective_to,omitempty"`
+
+	// Id Rate record ID
+	//
+	// Example: 1
+	Id *int64 `json:"id,omitempty"`
+
+	// InstanceType Instance type filter. Empty string means the rate applies to all instance types.
+	//
+	// Example:
+	InstanceType *string `json:"instance_type,omitempty"`
+
+	// KokuMetric Koku-compatible metric name for alignment with Koku's cost model schema
+	//
+	// Example: cpu_core_request_per_hour
+	KokuMetric *string `json:"koku_metric,omitempty"`
+
+	// MeterName Meter name this rate applies to
+	//
+	// Example: maas_tokens_in
+	MeterName *string `json:"meter_name,omitempty"`
+
+	// PricePerUnit Price per unit of metered value (flat rate or base rate)
+	//
+	// Example: 0.000003
+	PricePerUnit *string `json:"price_per_unit,omitempty"`
+
+	// ResourceType Resource type this rate applies to (e.g., `ComputeInstance`, `Cluster`, `Model`)
+	//
+	// Example: Model
+	ResourceType *string `json:"resource_type,omitempty"`
+
+	// TenantId Tenant-specific override. `null` means this is a global default rate that applies to all tenants.
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// TierMode Tier calculation mode: `volume` (entire usage priced at the matching tier) or `graduated` (each tier priced independently)
+	//
+	// Example: volume
+	TierMode *string `json:"tier_mode,omitempty"`
+
+	// TierPeriod Period for tier accumulation (e.g., `monthly`). Usage resets at the start of each period.
+	//
+	// Example: monthly
+	TierPeriod *string `json:"tier_period,omitempty"`
+
+	// Tiers Tiered pricing tiers. Empty array means flat rate (uses `price_per_unit` directly).
+	Tiers *[]Tier `json:"tiers,omitempty"`
 }
 
 // ReadinessResponse defines model for ReadinessResponse.
 type ReadinessResponse struct {
-	// Error Present only when not ready
-	Error  *string                  `json:"error,omitempty"`
+	// Error Present only when status is `not_ready`
+	//
+	// Example: database unreachable
+	Error *string `json:"error,omitempty"`
+
+	// Status Example: ready
 	Status *ReadinessResponseStatus `json:"status,omitempty"`
 }
 
-// ReadinessResponseStatus defines model for ReadinessResponse.Status.
+// ReadinessResponseStatus Example: ready
 type ReadinessResponseStatus string
 
 // StatusResponse defines model for StatusResponse.
@@ -509,78 +1076,203 @@ type StatusResponse struct {
 
 // Tier defines model for Tier.
 type Tier struct {
+	// PricePerUnit Price per unit within this tier
+	//
+	// Example: 0.000003
 	PricePerUnit string `json:"price_per_unit"`
 
-	// UpTo Upper bound of tier; null means unlimited
+	// UpTo Upper bound of this tier. `null` means unlimited (the final catch-all tier).
+	//
+	// Example: 1000000
 	UpTo *float64 `json:"up_to,omitempty"`
 }
 
-// WalletActionRequest defines model for WalletActionRequest.
+// WalletActionRequest Request body for wallet top-up and adjustment operations.
 type WalletActionRequest struct {
-	Amount      *string `json:"amount,omitempty"`
-	Currency    *string `json:"currency,omitempty"`
+	// Amount Amount for the operation. Must be positive for top-ups. For adjustments, positive adds funds, negative (not yet implemented) would deduct.
+	//
+	// Example: 500.00
+	Amount *string `json:"amount,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// ExternalRef External reference (e.g., purchase order number)
+	//
+	// Example: PO-2026-0042
 	ExternalRef *string `json:"external_ref,omitempty"`
-	Reason      *string `json:"reason,omitempty"`
+
+	// Reason Reason for the adjustment
+	//
+	// Example: Billing correction
+	Reason *string `json:"reason,omitempty"`
 }
 
-// WalletLedgerEntry defines model for WalletLedgerEntry.
+// WalletLedgerEntry A single transaction in the wallet audit trail. Entry types: `top_up` (funds added), `charge` (cost deducted), `adjustment` (manual correction).
 type WalletLedgerEntry struct {
-	Amount       *string    `json:"amount,omitempty"`
-	BalanceAfter *string    `json:"balance_after,omitempty"`
-	CostEntryId  *int64     `json:"cost_entry_id,omitempty"`
-	CreatedAt    *time.Time `json:"created_at,omitempty"`
-	Currency     *string    `json:"currency,omitempty"`
-	EntryType    *string    `json:"entry_type,omitempty"`
-	ExternalRef  *string    `json:"external_ref,omitempty"`
-	Id           *int64     `json:"id,omitempty"`
-	Reason       *string    `json:"reason,omitempty"`
-	WalletId     *string    `json:"wallet_id,omitempty"`
+	// Amount Transaction amount. Positive for credits (top_up, positive adjustment), negative for charges.
+	//
+	// Example: 500.00
+	Amount *string `json:"amount,omitempty"`
+
+	// BalanceAfter Wallet balance after this transaction
+	//
+	// Example: 1500.00
+	BalanceAfter *string `json:"balance_after,omitempty"`
+
+	// CostEntryId Linked cost entry ID (present for `charge` entries only)
+	CostEntryId *int64     `json:"cost_entry_id,omitempty"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// EntryType Transaction type: `top_up`, `charge`, or `adjustment`
+	//
+	// Example: top_up
+	EntryType *string `json:"entry_type,omitempty"`
+
+	// ExternalRef External reference (e.g., purchase order number). Used for top-ups and adjustments.
+	//
+	// Example: PO-2026-0042
+	ExternalRef *string `json:"external_ref,omitempty"`
+
+	// Id Ledger entry ID
+	//
+	// Example: 1
+	Id *int64 `json:"id,omitempty"`
+
+	// Reason Reason for the transaction (used for adjustments)
+	Reason *string `json:"reason,omitempty"`
+
+	// WalletId Wallet UUID
+	//
+	// Example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+	WalletId *string `json:"wallet_id,omitempty"`
 }
 
 // WalletRecord defines model for WalletRecord.
 type WalletRecord struct {
-	Balance          *string             `json:"balance,omitempty"`
-	BalanceFloor     *string             `json:"balance_floor,omitempty"`
-	CreatedAt        *time.Time          `json:"created_at,omitempty"`
-	Currency         *string             `json:"currency,omitempty"`
-	Id               *openapi_types.UUID `json:"id,omitempty"`
-	LifecycleState   *string             `json:"lifecycle_state,omitempty"`
-	ProjectId        *string             `json:"project_id,omitempty"`
-	ReferenceBalance *string             `json:"reference_balance,omitempty"`
-	TenantId         *string             `json:"tenant_id,omitempty"`
-	Thresholds       *[]float64          `json:"thresholds,omitempty"`
-	UpdatedAt        *time.Time          `json:"updated_at,omitempty"`
+	// Balance Current balance
+	//
+	// Example: 0
+	Balance *string `json:"balance,omitempty"`
+
+	// BalanceFloor Minimum balance threshold. Balance at or below this value is considered depleted.
+	//
+	// Example: 0
+	BalanceFloor *string    `json:"balance_floor,omitempty"`
+	CreatedAt    *time.Time `json:"created_at,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// Id Wallet UUID
+	//
+	// Example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+	Id *openapi_types.UUID `json:"id,omitempty"`
+
+	// LifecycleState Wallet lifecycle state
+	//
+	// Example: active
+	LifecycleState *string `json:"lifecycle_state,omitempty"`
+
+	// ProjectId Project scope (empty = tenant-wide)
+	ProjectId *string `json:"project_id,omitempty"`
+
+	// ReferenceBalance Total funds ever added. Used as the baseline for remaining percentage calculation.
+	//
+	// Example: 0
+	ReferenceBalance *string `json:"reference_balance,omitempty"`
+
+	// TenantId Owning tenant
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// Thresholds Remaining-balance alert thresholds (percentages)
+	//
+	// Example: [50,25,10,0]
+	Thresholds *[]float64 `json:"thresholds,omitempty"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 }
 
-// WalletStatus defines model for WalletStatus.
+// WalletStatus Wallet balance and status snapshot including threshold checks.
 type WalletStatus struct {
-	Balance          *string                    `json:"balance,omitempty"`
-	BalanceFloor     *string                    `json:"balance_floor,omitempty"`
-	BalanceStatus    *WalletStatusBalanceStatus `json:"balance_status,omitempty"`
-	Currency         *string                    `json:"currency,omitempty"`
-	ReferenceBalance *string                    `json:"reference_balance,omitempty"`
-	RemainingPct     *float64                   `json:"remaining_pct,omitempty"`
-	TenantId         *string                    `json:"tenant_id,omitempty"`
-	Thresholds       *map[string]bool           `json:"thresholds,omitempty"`
-	WalletId         *string                    `json:"wallet_id,omitempty"`
-	WithinBalance    *bool                      `json:"within_balance,omitempty"`
+	// Balance Current balance
+	//
+	// Example: 750.00
+	Balance *string `json:"balance,omitempty"`
+
+	// BalanceFloor Minimum balance threshold
+	//
+	// Example: 0
+	BalanceFloor *string `json:"balance_floor,omitempty"`
+
+	// BalanceStatus `ok` if balance > balance_floor, `depleted` otherwise
+	//
+	// Example: ok
+	BalanceStatus *WalletStatusBalanceStatus `json:"balance_status,omitempty"`
+
+	// Currency Currency code
+	//
+	// Example: USD
+	Currency *string `json:"currency,omitempty"`
+
+	// ReferenceBalance Total funds ever added (baseline for percentage calculation)
+	//
+	// Example: 1000.00
+	ReferenceBalance *string `json:"reference_balance,omitempty"`
+
+	// RemainingPct `balance / reference_balance * 100`, rounded to 2 decimal places
+	//
+	// Example: 75
+	RemainingPct *float64 `json:"remaining_pct,omitempty"`
+
+	// TenantId Owning tenant
+	//
+	// Example: tenant-acme
+	TenantId *string `json:"tenant_id,omitempty"`
+
+	// Thresholds Map of threshold percentage to whether `remaining_pct` is at or below that level
+	//
+	// Example: {"0":false,"10":false,"25":false,"50":false}
+	Thresholds *map[string]bool `json:"thresholds,omitempty"`
+
+	// WalletId Wallet UUID
+	//
+	// Example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+	WalletId *string `json:"wallet_id,omitempty"`
+
+	// WithinBalance `true` if balance > balance_floor
+	//
+	// Example: true
+	WithinBalance *bool `json:"within_balance,omitempty"`
 }
 
-// WalletStatusBalanceStatus defines model for WalletStatus.BalanceStatus.
+// WalletStatusBalanceStatus `ok` if balance > balance_floor, `depleted` otherwise
+//
+// Example: ok
 type WalletStatusBalanceStatus string
 
 // GetEntitlementValueParams defines parameters for GetEntitlementValue.
 type GetEntitlementValueParams struct {
-	// Model Model name (informational, not yet used for filtering)
+	// Model Model name. Informational only; not yet used for filtering. Reserved for future model-scoped quota support.
 	Model *string `form:"model,omitempty" json:"model,omitempty"`
 }
 
 // ListQuotasParams defines parameters for ListQuotas.
 type ListQuotasParams struct {
-	// TenantId Filter by tenant ID
+	// TenantId Filter by tenant ID. Omit for all tenants.
 	TenantId *string `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
 
-	// Status When "true", enriches each quota with consumed/percentage/thresholds
+	// Status When `true`, enriches each quota with live consumption data: `consumed` (current usage), `percentage` (consumed / limit * 100), and `thresholds` (map of threshold percentage to whether it has been breached).
 	Status *ListQuotasParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
@@ -594,10 +1286,10 @@ type ListQuotas200JSONResponseBody_Quotas_Item struct {
 
 // ListRatesParams defines parameters for ListRates.
 type ListRatesParams struct {
-	// TenantId Filter rates by tenant ID
+	// TenantId Filter rates by tenant ID. Returns matching tenant-specific rates plus global defaults (where tenant_id is null). Omit to return only global rates.
 	TenantId *string `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
 
-	// Format Set to "csv" for CSV export
+	// Format Set to `csv` for CSV download. Also triggered by `Accept: text/csv` header.
 	Format *ListRatesParamsFormat `form:"format,omitempty" json:"format,omitempty"`
 }
 
@@ -612,16 +1304,16 @@ type GetCostBreakdownParams struct {
 	// ResourceType Filter by resource type
 	ResourceType *string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
 
-	// From Start date (YYYY-MM-DD or RFC3339); defaults to first of current month
+	// From Start date (`YYYY-MM-DD` or RFC 3339). Default: first of current month.
 	From *string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To End date (YYYY-MM-DD or RFC3339); defaults to now
+	// To End date (`YYYY-MM-DD` or RFC 3339). Default: now.
 	To *string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Limit Maximum rows to return
+	// Limit Maximum rows to return (default 100)
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 
-	// Format Set to "csv" for CSV export
+	// Format Set to `csv` for CSV download. Also triggered by `Accept: text/csv` header.
 	Format *GetCostBreakdownParamsFormat `form:"format,omitempty" json:"format,omitempty"`
 }
 
@@ -633,25 +1325,25 @@ type GetCostReportParams struct {
 	// TenantId Filter by tenant ID
 	TenantId *string `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
 
-	// ResourceType Filter by resource type
+	// ResourceType Filter by resource type (e.g., `Model`, `ComputeInstance`, `Cluster`)
 	ResourceType *string `form:"resource_type,omitempty" json:"resource_type,omitempty"`
 
-	// GroupBy Grouping dimension
+	// GroupBy Grouping dimension for cost aggregation. Default: `tenant`.
 	GroupBy *GetCostReportParamsGroupBy `form:"group_by,omitempty" json:"group_by,omitempty"`
 
-	// Resolution Set to "daily" for per-day rows
+	// Resolution Set to `daily` for per-day rows. Omit for period total.
 	Resolution *GetCostReportParamsResolution `form:"resolution,omitempty" json:"resolution,omitempty"`
 
-	// Period Month in YYYY-MM format (default current month)
+	// Period Month in `YYYY-MM` format. Default: current month. Ignored if `from` is set.
 	Period *string `form:"period,omitempty" json:"period,omitempty"`
 
-	// From Start date (YYYY-MM-DD or RFC3339); overrides period
+	// From Start date (`YYYY-MM-DD` or RFC 3339). Overrides `period`.
 	From *string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To End date (YYYY-MM-DD or RFC3339); defaults to now
+	// To End date (`YYYY-MM-DD` or RFC 3339). Default: now. Only used when `from` is set.
 	To *string `form:"to,omitempty" json:"to,omitempty"`
 
-	// Format Set to "csv" for CSV export
+	// Format Set to `csv` for CSV download. Also triggered by `Accept: text/csv` header.
 	Format *GetCostReportParamsFormat `form:"format,omitempty" json:"format,omitempty"`
 }
 
@@ -666,7 +1358,7 @@ type GetCostReportParamsFormat string
 
 // GetWalletLedgerParams defines parameters for GetWalletLedger.
 type GetWalletLedgerParams struct {
-	// Limit Maximum number of entries to return
+	// Limit Maximum number of entries to return (default 100)
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
@@ -894,6 +1586,9 @@ type ServerInterface interface {
 	// TopUpWallet Add funds to a wallet
 	// (POST /api/v1/wallets/{id}/top-ups)
 	TopUpWallet(w http.ResponseWriter, r *http.Request, id string)
+	// GetDebugDashboard Built-in diagnostic dashboard (HTML)
+	// (GET /debug/dashboard)
+	GetDebugDashboard(w http.ResponseWriter, r *http.Request)
 	// GetLiveness Liveness probe
 	// (GET /healthz)
 	GetLiveness(w http.ResponseWriter, r *http.Request)
@@ -1558,6 +2253,20 @@ func (siw *ServerInterfaceWrapper) TopUpWallet(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// GetDebugDashboard operation middleware
+func (siw *ServerInterfaceWrapper) GetDebugDashboard(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDebugDashboard(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLiveness operation middleware
 func (siw *ServerInterfaceWrapper) GetLiveness(w http.ResponseWriter, r *http.Request) {
 
@@ -1726,6 +2435,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/customers/{customerID}/entitlements/{featureKey}/value", wrapper.GetEntitlementValue)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/reconcile", wrapper.TriggerReconcile)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/debug/config", wrapper.GetDebugConfig)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/debug/dashboard", wrapper.GetDebugDashboard)
 
 	return m
 }
@@ -1735,95 +2445,230 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"63mNfpy7m7v/DQAA//8=",
+	"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",
+	"qj1PS/nw7sP/CwAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

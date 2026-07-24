@@ -422,14 +422,19 @@ func TestQuotaStatus(t *testing.T) {
 }
 
 func TestQuotaStatusMissingTenant(t *testing.T) {
-	resp, err := http.Get(testServer.URL + "/api/v1/quotas/")
+	// With the generated router, GET /api/v1/quotas/{tenant_id} requires a
+	// non-empty path param. GET /api/v1/quotas/ (trailing slash) routes to
+	// the list endpoint instead. Test with an overly-long tenant_id to verify
+	// the handler's own validation still works.
+	longTenant := strings.Repeat("x", 300)
+	resp, err := http.Get(testServer.URL + "/api/v1/quotas/" + longTenant)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("expected 400 for missing tenant, got %d", resp.StatusCode)
+		t.Errorf("expected 400 for overly-long tenant_id, got %d", resp.StatusCode)
 	}
 }
 

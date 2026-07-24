@@ -103,12 +103,7 @@ func isBudget(unit string) bool {
 	return false
 }
 
-func ptrStr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
+
 
 // ---------------------------------------------------------------------------
 // Health probes
@@ -1433,16 +1428,22 @@ func (h *APIHandler) TriggerReconcile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "reconciliation triggered"})
 }
 
-// RegisterDebugRoutes adds the debug dashboard and root redirect to the mux.
+// GetDebugDashboard serves the built-in diagnostic dashboard (HTML).
+func (h *APIHandler) GetDebugDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(dashboardHTML))
+}
+
+// RegisterDebugRoutes adds the reports UI, debug dashboard, and root redirect.
 // These are not in the OpenAPI spec so they're registered separately.
 func (h *APIHandler) RegisterDebugRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /debug/dashboard", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(dashboardHTML))
-	})
 	mux.HandleFunc("GET /reports", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(reportsHTML))
+	})
+	mux.HandleFunc("GET /debug/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(dashboardHTML))
 	})
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {

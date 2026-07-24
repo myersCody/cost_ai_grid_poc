@@ -69,7 +69,7 @@ Needs hardening before production.
 ### #1 — No authentication on API endpoints
 **Severity:** Critical | **Dimension:** Security | **Effort:** M
 
-**Location:** `internal/ingest/handler.go` — `ServeMux()` (line 51)
+**Location:** `internal/api/handler.go` — `ServeMux()` (line 51)
 
 **Description:** All HTTP endpoints (`POST /api/v1/events`, `GET /api/v1/quotas/{tenant_id}`,
 `GET /api/v1/health`) are unauthenticated. Any network-accessible client can
@@ -89,7 +89,7 @@ the requested tenant's data.
 ### #2 — Silent error swallowing in ingest handlers
 **Severity:** Critical | **Dimension:** Correctness | **Effort:** S
 
-**Location:** `internal/ingest/handler.go` — lines 153, 161, 204, 271, 280
+**Location:** `internal/api/handler.go` — lines 153, 161, 204, 271, 280
 
 **Description:** Store operations in event handlers discard errors with `_ =`.
 If a database write fails (e.g., `UpsertComputeInstance`, `UpdateLastMetered`),
@@ -192,7 +192,7 @@ percentage calculation in `evaluateThresholds`.
 ### #7 — Missing input validation on tenant/resource IDs
 **Severity:** High | **Dimension:** Security | **Effort:** S
 
-**Location:** `internal/ingest/handler.go` — `classifyEvent()` (line 295)
+**Location:** `internal/api/handler.go` — `classifyEvent()` (line 295)
 
 **Description:** Tenant IDs, resource IDs, and model IDs from incoming
 CloudEvents are used directly in database operations without validation.
@@ -231,7 +231,7 @@ sub-reconciliation failed. For production, expose a metric.
 ### #9 — No transaction boundaries in multi-insert operations
 **Severity:** Medium | **Dimension:** Correctness | **Effort:** M
 
-**Location:** `internal/ingest/handler.go` — `handleComputeInstanceEvent` (lines 165-210)
+**Location:** `internal/api/handler.go` — `handleComputeInstanceEvent` (lines 165-210)
 
 **Description:** A single event produces multiple database writes (raw_event +
 inventory upsert + 3 metering entries + last_metered_at update). These are
@@ -249,7 +249,7 @@ pgxpool supports `pool.Begin()` for this.
 ### #10 — JSON injection in error responses
 **Severity:** Medium | **Dimension:** Security | **Effort:** S
 
-**Location:** `internal/ingest/handler.go` — lines 98, 118
+**Location:** `internal/api/handler.go` — lines 98, 118
 
 **Description:** Error messages are interpolated into JSON strings without
 escaping: `fmt.Sprintf('{"error":"%s"}', err)`. If the error message
@@ -293,13 +293,13 @@ loop.
 ### #13 — Duplicate event type constants
 **Severity:** Low | **Dimension:** Maintainability | **Effort:** S
 
-**Location:** `internal/ingest/handler.go` lines 68-72, `internal/osac/types.go` lines 131-135
+**Location:** `internal/api/handler.go` lines 68-72, `internal/osac/types.go` lines 131-135
 
 **Description:** Event type string constants are defined in two separate
 packages with different names. No single source of truth.
 
 **Recommendation:** Define all event type constants in `internal/osac/types.go`
-and import them in `internal/ingest/handler.go`.
+and import them in `internal/api/handler.go`.
 
 ---
 

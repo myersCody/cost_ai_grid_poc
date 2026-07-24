@@ -99,7 +99,7 @@ PR: [opendatahub-io/ai-gateway-payload-processing#386](https://github.com/openda
 
 | File | Change |
 |---|---|
-| `internal/ingest/handler.go` | Add `OrganizationID`, `CostCenter` to `MaaSEventData`. Add `OrganizationID` to `classifyEvent` peek struct. Prefer `organization_id` over subscription/group/user in tenant attribution |
+| `internal/api/handler.go` | Add `OrganizationID`, `CostCenter` to `MaaSEventData`. Add `OrganizationID` to `classifyEvent` peek struct. Prefer `organization_id` over subscription/group/user in tenant attribution |
 
 PR: [myersCody/cost_ai_grid_poc#39](https://github.com/myersCody/cost_ai_grid_poc/pull/39)
 

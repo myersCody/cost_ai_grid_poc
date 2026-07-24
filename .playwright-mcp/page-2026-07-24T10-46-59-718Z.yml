@@ -1,0 +1,144 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e2]:
+    - generic [ref=f3e3]:
+      - generic [ref=f3e4]: Cost Management
+      - generic [ref=f3e5]: Reports
+    - generic [ref=f3e6]:
+      - generic [ref=f3e7]: 12:46:59
+      - button "Token ✓" [ref=f3e8] [cursor=pointer]
+  - generic [ref=f3e9]:
+    - generic [ref=f3e10]:
+      - text: Period
+      - textbox "Period" [ref=f3e11]: 2026-07
+    - generic [ref=f3e12]:
+      - text: Organization
+      - combobox "Organization" [ref=f3e13]:
+        - option "All organizations" [selected]
+        - option "bob"
+        - option "carol"
+        - option "platform-eng"
+        - option "alice"
+        - option "acme-corp"
+        - option "org-demo"
+        - option "org-1"
+    - generic [ref=f3e14]: Updated 12:46:59
+  - generic [ref=f3e15]:
+    - generic [ref=f3e16]:
+      - generic [ref=f3e17]: $0.0291
+      - generic [ref=f3e18]: Total Cost
+    - generic [ref=f3e19]:
+      - generic [ref=f3e20]: $0.00
+      - generic [ref=f3e21]: Infrastructure
+    - generic [ref=f3e22]:
+      - generic [ref=f3e23]: $0.0291
+      - generic [ref=f3e24]: AI Inference & Usage
+    - generic [ref=f3e25]:
+      - generic [ref=f3e26]: —
+      - generic [ref=f3e27]: Active Resources
+  - generic [ref=f3e28]:
+    - generic [ref=f3e29]:
+      - generic [ref=f3e30] [cursor=pointer]: By Organization
+      - generic [ref=f3e31] [cursor=pointer]: By Resource Type
+      - generic [ref=f3e32] [cursor=pointer]: Quota Status
+    - generic [ref=f3e34]:
+      - generic [ref=f3e35]:
+        - text: Cost by Organization
+        - generic [ref=f3e36]: 2026-07
+      - table [ref=f3e37]:
+        - rowgroup [ref=f3e38]:
+          - row [ref=f3e39]:
+            - columnheader "Organization" [ref=f3e40]
+            - columnheader "Total Cost" [ref=f3e41]
+            - columnheader "Infrastructure" [ref=f3e42]
+            - columnheader "AI Inference & Usage" [ref=f3e43]
+            - columnheader "Breakdown" [ref=f3e44]
+        - rowgroup [ref=f3e45]:
+          - row [ref=f3e46]:
+            - cell [ref=f3e47]:
+              - strong [ref=f3e48]: bob
+            - cell [ref=f3e49]:
+              - strong [ref=f3e50]: $0.0143
+            - cell "$0.00" [ref=f3e51]
+            - cell "$0.0143" [ref=f3e52]
+            - cell "0% infra" [ref=f3e53]
+          - row [ref=f3e57]:
+            - cell [ref=f3e58]:
+              - strong [ref=f3e59]: carol
+            - cell [ref=f3e60]:
+              - strong [ref=f3e61]: $0.005376
+            - cell "$0.00" [ref=f3e62]
+            - cell "$0.005376" [ref=f3e63]
+            - cell "0% infra" [ref=f3e64]
+          - row [ref=f3e68]:
+            - cell [ref=f3e69]:
+              - strong [ref=f3e70]: platform-eng
+            - cell [ref=f3e71]:
+              - strong [ref=f3e72]: $0.003584
+            - cell "$0.00" [ref=f3e73]
+            - cell "$0.003584" [ref=f3e74]
+            - cell "0% infra" [ref=f3e75]
+          - row [ref=f3e79]:
+            - cell [ref=f3e80]:
+              - strong [ref=f3e81]: alice
+            - cell [ref=f3e82]:
+              - strong [ref=f3e83]: $0.002938
+            - cell "$0.00" [ref=f3e84]
+            - cell "$0.002938" [ref=f3e85]
+            - cell "0% infra" [ref=f3e86]
+          - row [ref=f3e90]:
+            - cell [ref=f3e91]:
+              - strong [ref=f3e92]: acme-corp
+            - cell [ref=f3e93]:
+              - strong [ref=f3e94]: $0.002813
+            - cell "$0.00" [ref=f3e95]
+            - cell "$0.002813" [ref=f3e96]
+            - cell "0% infra" [ref=f3e97]
+          - row [ref=f3e101]:
+            - cell [ref=f3e102]:
+              - strong [ref=f3e103]: org-demo
+            - cell [ref=f3e104]:
+              - strong [ref=f3e105]: $0.000026
+            - cell "$0.00" [ref=f3e106]
+            - cell "$0.000026" [ref=f3e107]
+            - cell "0% infra" [ref=f3e108]
+          - row [ref=f3e112]:
+            - cell [ref=f3e113]:
+              - strong [ref=f3e114]: org-1
+            - cell [ref=f3e115]:
+              - strong [ref=f3e116]: $0.000014
+            - cell "$0.00" [ref=f3e117]
+            - cell "$0.000014" [ref=f3e118]
+            - cell "0% infra" [ref=f3e119]
+  - generic [ref=f3e124]:
+    - generic [ref=f3e125]:
+      - generic [ref=f3e126]: Cost Split
+      - img [ref=f3e127]:
+        - generic [ref=f3e131]: infra
+        - generic [ref=f3e132]: 0%
+      - generic [ref=f3e133]:
+        - generic [ref=f3e134]: Infra
+        - generic [ref=f3e136]: Usage
+    - generic [ref=f3e138]:
+      - generic [ref=f3e139]: Cost by Organization
+      - generic [ref=f3e140]:
+        - generic [ref=f3e141]:
+          - generic "bob" [ref=f3e142]
+          - generic [ref=f3e145]: $0.0143
+        - generic [ref=f3e146]:
+          - generic "carol" [ref=f3e147]
+          - generic [ref=f3e150]: $0.005376
+        - generic [ref=f3e151]:
+          - generic "platform-eng" [ref=f3e152]
+          - generic [ref=f3e155]: $0.003584
+        - generic [ref=f3e156]:
+          - generic "alice" [ref=f3e157]
+          - generic [ref=f3e160]: $0.002938
+        - generic [ref=f3e161]:
+          - generic "acme-corp" [ref=f3e162]
+          - generic [ref=f3e165]: $0.002813
+        - generic [ref=f3e166]:
+          - generic "org-demo" [ref=f3e167]
+          - generic [ref=f3e170]: $0.000026
+        - generic [ref=f3e171]:
+          - generic "org-1" [ref=f3e172]
+          - generic [ref=f3e175]: $0.000014

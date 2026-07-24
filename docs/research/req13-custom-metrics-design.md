@@ -176,7 +176,7 @@ CustomMetricsConfigPath string
 ```
 Load from `CUSTOM_METRICS_CONFIG` env var. Add to `DiagnosticInfo`.
 
-### Modified: `internal/ingest/handler.go`
+### Modified: `internal/api/handler.go`
 
 A) Add `customMetrics *custommetrics.Registry` field to `Handler` struct.
 

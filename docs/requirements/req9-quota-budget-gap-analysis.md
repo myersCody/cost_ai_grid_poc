@@ -96,7 +96,7 @@ cost (or a dedicated meter); that path is not wired yet.
 ### Status API
 
 `GET /api/v1/quotas/{tenant_id}` (`handleQuotaStatus` in
-`internal/ingest/handler.go`):
+`internal/api/handler.go`):
 
 ```json
 {
@@ -344,6 +344,6 @@ in that list is deferred for the PoC deadline.
 - Threshold push (parked): [req10-threshold-notifications-analysis.md](req10-threshold-notifications-analysis.md)
 - Pricing tiers: [req11-cost-tiers-gap-analysis.md](req11-cost-tiers-gap-analysis.md)
 - Cody design: [boundary_monitoring/](../poc_architecture/boundary_monitoring/)
-- Code: `internal/ingest/handler.go` (`handleQuotaStatus`, `handleBalanceCheck`),
+- Code: `internal/api/handler.go` (`handleQuotaStatus`, `handleBalanceCheck`),
   `internal/rating/rating.go` (`evaluateThresholds`, `SeedDefaultQuotas`),
   `internal/inventory/store.go` (`quotas`, `alerts`, `MeteringSum`, `CostSum`, `UpsertQuota`)

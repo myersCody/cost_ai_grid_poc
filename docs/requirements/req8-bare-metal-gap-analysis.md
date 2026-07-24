@@ -99,7 +99,7 @@ All follow the same pattern as ComputeInstance — copy and adapt:
 | OSAC client | `internal/osac/client.go` | `ListBareMetalInstances()` method |
 | Billable states | `internal/metering/billable.go` | `BARE_METAL_INSTANCE_STATE_RUNNING` |
 | Metering | `internal/metering/metering.go` | Sweep for bare metal + meters |
-| Ingest handler | `internal/ingest/handler.go` | `osac.bare_metal.lifecycle` event type |
+| Ingest handler | `internal/api/handler.go` | `osac.bare_metal.lifecycle` event type |
 | Default rates | `internal/rating/rating.go` | `bm_uptime_seconds`, `bm_cpu_core_seconds` rates |
 
 ### Meters

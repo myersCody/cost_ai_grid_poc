@@ -158,7 +158,7 @@ The ingest endpoint already handles `osac.model.lifecycle` (MaaS). BMaaS heartbe
 
 ## What Cost Management Has Done (Phase 4 — ingestion side complete)
 
-The `POST /api/v1/events` ingest endpoint, implemented in `inventory-watcher/internal/ingest/handler.go`, already performs all five steps:
+The `POST /api/v1/events` ingest endpoint, implemented in `inventory-watcher/internal/api/handler.go`, already performs all five steps:
 
 1. ✅ Receives the event via HTTP (`POST /api/v1/events`, CloudEvents 1.0 JSON)
 2. ✅ Deduplicates on `ce_id` (stored in `raw_events`)
