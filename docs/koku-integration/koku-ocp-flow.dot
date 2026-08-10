@@ -1,0 +1,156 @@
+digraph koku_ocp_flow {
+    rankdir=TB;
+    node [shape=box, style=filled, fontname="Helvetica", fontsize=11];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // Title
+    labelloc="t";
+    label="Koku OCP Data Flow — Normal Pipeline + OSAC Integration\n(On-Prem / Self-Hosted)";
+    fontsize=14;
+    fontname="Helvetica-Bold";
+
+    // ===== DATA SOURCES =====
+    subgraph cluster_sources {
+        label="Data Sources";
+        style=dashed;
+        color=gray;
+
+        cmmo [label="CMMO\n(Cost Management\nMetrics Operator)", fillcolor="#E8F5E9"];
+        osac_consumer [label="cost-event-consumer\n(our Go service)", fillcolor="#FFF3E0", style="filled,bold"];
+        koku_sync [label="koku-sync\n(new Go binary)", fillcolor="#FFF3E0", style="filled,bold"];
+    }
+
+    // ===== RAW LINE ITEM TABLES =====
+    subgraph cluster_raw {
+        label="Raw Line Item Tables (per-tenant schema)";
+        style=filled;
+        color="#E3F2FD";
+
+        pod_raw [label="openshift_pod_usage\n_line_items", fillcolor="#BBDEFB"];
+        storage_raw [label="openshift_storage_usage\n_line_items", fillcolor="#BBDEFB"];
+        node_labels [label="openshift_node_labels\n_line_items", fillcolor="#BBDEFB"];
+        ns_labels [label="openshift_namespace_labels\n_line_items", fillcolor="#BBDEFB"];
+        vm_raw [label="openshift_vm_usage\n_line_items", fillcolor="#BBDEFB"];
+        gpu_raw [label="openshift_gpu_usage\n_line_items", fillcolor="#BBDEFB"];
+    }
+
+    // ===== DAILY TABLES =====
+    subgraph cluster_daily {
+        label="Daily Aggregated Tables (pandas or koku-sync)";
+        style=filled;
+        color="#F3E5F5";
+
+        pod_daily [label="openshift_pod_usage\n_line_items_daily", fillcolor="#CE93D8"];
+        storage_daily [label="openshift_storage_usage\n_line_items_daily", fillcolor="#CE93D8"];
+        node_labels_daily [label="openshift_node_labels\n_line_items_daily", fillcolor="#CE93D8"];
+        ns_labels_daily [label="openshift_namespace_labels\n_line_items_daily", fillcolor="#CE93D8"];
+        vm_daily [label="openshift_vm_usage\n_line_items_daily", fillcolor="#CE93D8"];
+        gpu_daily [label="openshift_gpu_usage\n_line_items_daily", fillcolor="#CE93D8"];
+        osac_daily [label="openshift_osac_usage\n_line_items_daily\n(NEW — OSAC data)", fillcolor="#FFE0B2", style="filled,bold"];
+    }
+
+    // ===== SUMMARIZATION =====
+    subgraph cluster_summary {
+        label="Summarization Pipeline";
+        style=filled;
+        color="#FFF9C4";
+
+        staging [label="reporting_ocpusagelineitem\n_daily_summary_staging", fillcolor="#FFF59D"];
+        daily_summary [label="reporting_ocpusagelineitem\n_daily_summary\n(main fact table)", fillcolor="#FFD54F", style="filled,bold"];
+        vm_tmp [label="tmp_virt_{uuid}\n(VM temp table)", fillcolor="#FFF59D"];
+    }
+
+    // ===== COST MODEL =====
+    subgraph cluster_cost {
+        label="Cost Model Application";
+        style=filled;
+        color="#FFEBEE";
+
+        cost_model [label="cost_model +\ncost_model_rate +\nprice_list", fillcolor="#EF9A9A"];
+        rates_to_usage [label="rates_to_usage\n(per-rate cost rows)", fillcolor="#EF9A9A"];
+    }
+
+    // ===== UI SUMMARY TABLES =====
+    subgraph cluster_ui {
+        label="UI Summary Tables (12+)";
+        style=filled;
+        color="#E8EAF6";
+
+        cost_summary [label="reporting_ocp\n_cost_summary_p", fillcolor="#9FA8DA"];
+        cost_by_project [label="reporting_ocp\n_cost_summary\n_by_project_p", fillcolor="#9FA8DA"];
+        cost_by_node [label="reporting_ocp\n_cost_summary\n_by_node_p", fillcolor="#9FA8DA"];
+        pod_summary [label="reporting_ocp\n_pod_summary_p", fillcolor="#9FA8DA"];
+        vm_summary [label="reporting_ocp\n_vm_summary_p", fillcolor="#9FA8DA"];
+        volume_summary [label="reporting_ocp\n_volume_summary_p", fillcolor="#9FA8DA"];
+        gpu_summary [label="reporting_ocp\n_gpu_summary_p", fillcolor="#9FA8DA"];
+        other_ui [label="... network, by_node,\nby_project variants", fillcolor="#C5CAE9"];
+    }
+
+    // ===== API =====
+    koku_api [label="Koku Report API\nGET /reports/openshift/costs/\nGET /reports/openshift/compute/\netc.", fillcolor="#C8E6C9", style="filled,bold"];
+
+    // ===== NORMAL FLOW (CMMO → Koku) =====
+    cmmo -> pod_raw [label="CSV upload\n(Kafka/Ingress)"];
+    cmmo -> storage_raw;
+    cmmo -> node_labels;
+    cmmo -> ns_labels;
+    cmmo -> vm_raw [label="VM report"];
+    cmmo -> gpu_raw [label="GPU report"];
+
+    // Raw → Daily (pandas aggregation)
+    pod_raw -> pod_daily [label="daily agg"];
+    storage_raw -> storage_daily;
+    node_labels -> node_labels_daily;
+    ns_labels -> ns_labels_daily;
+    vm_raw -> vm_daily;
+    gpu_raw -> gpu_daily;
+
+    // Daily → Staging → Summary (SQL templates)
+    pod_daily -> staging [label="Pod UNION\n(SQL template)"];
+    storage_daily -> staging [label="Storage UNION"];
+    node_labels_daily -> staging [label="label merge\n(LEFT JOIN)"];
+    ns_labels_daily -> staging [label="label merge"];
+    pod_raw -> staging [label="node capacity\nCTE", style=dashed];
+
+    staging -> daily_summary [label="copy + uuid\ngeneration"];
+
+    // VM path (separate from Pod/Storage)
+    vm_raw -> vm_tmp [label="populate_vm_tmp\n_table.sql"];
+    vm_daily -> vm_tmp [style=dashed, label="fallback"];
+    daily_summary -> vm_summary [label="JOIN with\nvm_kubevirt_io_name\nlabel"];
+    vm_tmp -> vm_summary;
+
+    // GPU path
+    gpu_daily -> gpu_summary [label="separate\nSQL"];
+
+    // Cost model application
+    daily_summary -> rates_to_usage [label="usage_rates\nSQL"];
+    cost_model -> rates_to_usage [label="rate lookup"];
+    rates_to_usage -> daily_summary [label="aggregate back\nto cost columns"];
+
+    // VM cost (reads from both)
+    vm_raw -> daily_summary [label="vm_cost_per_hour\nvm_core_cost_per_hour\n(JOIN)", style=dashed, color=red];
+
+    // Distribution + UI summary
+    daily_summary -> cost_summary [label="populate_ui\n_summary_tables()"];
+    daily_summary -> cost_by_project;
+    daily_summary -> cost_by_node;
+    daily_summary -> pod_summary;
+    daily_summary -> volume_summary;
+    daily_summary -> other_ui;
+
+    // API reads from UI tables
+    cost_summary -> koku_api;
+    cost_by_project -> koku_api;
+    vm_summary -> koku_api;
+    pod_summary -> koku_api;
+    gpu_summary -> koku_api;
+
+    // ===== OSAC INTEGRATION (NEW) =====
+    osac_consumer -> koku_sync [label="reads\ncost_entries", color="#E65100", penwidth=2];
+    koku_sync -> osac_daily [label="writes pre-aggregated\ndaily OSAC data", color="#E65100", penwidth=2];
+    osac_daily -> staging [label="OSAC UNION\n(new SQL block)", color="#E65100", penwidth=2, style=bold];
+
+    // Alternative: VMs directly to existing VM table
+    koku_sync -> vm_raw [label="VM data\n(future: use\nexisting table)", color="#E65100", style=dashed];
+}
