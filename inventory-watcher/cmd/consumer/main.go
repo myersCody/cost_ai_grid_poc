@@ -23,13 +23,13 @@ import (
 	"github.com/osac-project/cost-event-consumer/internal/config"
 	"github.com/osac-project/cost-event-consumer/internal/custommetrics"
 	"github.com/osac-project/cost-event-consumer/internal/inventory"
-	"github.com/osac-project/cost-event-consumer/internal/metrics"
+	"github.com/osac-project/cost-event-consumer/internal/kafka"
 	"github.com/osac-project/cost-event-consumer/internal/metering"
+	"github.com/osac-project/cost-event-consumer/internal/metrics"
 	"github.com/osac-project/cost-event-consumer/internal/osac"
 	"github.com/osac-project/cost-event-consumer/internal/rating"
-	"github.com/osac-project/cost-event-consumer/internal/ruleengine"
 	"github.com/osac-project/cost-event-consumer/internal/reconciler"
-	"github.com/osac-project/cost-event-consumer/internal/kafka"
+	"github.com/osac-project/cost-event-consumer/internal/ruleengine"
 	"github.com/osac-project/cost-event-consumer/internal/splunk"
 	"github.com/osac-project/cost-event-consumer/internal/watcher"
 )
@@ -188,6 +188,8 @@ func main() {
 			if err != nil {
 				logger.Error("failed to create Kafka producer", "error", err)
 			} else {
+				// Kafka is an optional producer for the retained OSAC watcher path.
+				// HTTP and batch ingestion process directly and never publish here.
 				if w != nil {
 					w.SetKafkaPublisher(kafkaProducer)
 				}
@@ -227,9 +229,6 @@ func main() {
 	h := api.NewAPIHandler(store, m, cfg, cmRegistry, logger)
 	if r != nil {
 		h.SetReconciler(r)
-	}
-	if kafkaProducer != nil {
-		h.SetKafkaPublisher(kafkaProducer)
 	}
 
 	// Start Kafka consumer if configured (uses handler as event processor).

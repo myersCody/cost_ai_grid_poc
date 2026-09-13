@@ -186,6 +186,6 @@ Inventory is auto-created (or upserted) from the event payload if no prior recor
 
 - [event-types.md §Overview](../poc_architecture/event-types.md) — full CloudEvent schemas and dual emission pattern explanation
 - [ADR-001: Metering sweep interval](001-metering-sweep-interval.md) — why 60 seconds
-- [ADR-002: Arguments against Kafka](002-arguments-against-kafka.md) — transport choice
+- [Ingestion modes](../ingestion-modes.md) — direct OSAC, Kafka experiment, and batch API
 - [metering-spec-draft.md §4](../poc_architecture/metering/metering-spec-draft.md) — PoC vs. target implementation detail
 - [osac-metering-discover-poc](https://github.com/masayag/osac-metering-discover-poc) — OSAC's existing collector reference implementation

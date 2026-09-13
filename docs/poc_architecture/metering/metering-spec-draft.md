@@ -180,10 +180,10 @@ This must be resolved as part of the Phase 4 OSAC handoff.
 
 | Option | Status | Notes |
 |---|---|---|
-| A — Watch stream + sweep | **PoC default** | [ADR-002](../../decisions/002-arguments-against-kafka.md) |
+| A — Watch stream + sweep | Retained direct mode | [Ingestion modes](../../ingestion-modes.md) |
 | B — HTTP push | Phase 4 candidate | Cost Management exposes an HTTP endpoint; collector POSTs CloudEvents to it. REQ-1b names this explicitly. Simplest path given OSAC POC collector already uses `curl`. |
 | C — gRPC server-streaming | Phase 4 candidate | OSAC's native protocol (`osac.public.v1`) is gRPC with a REST gateway on top. A productionised collector could stream CloudEvents via a gRPC push interface — architecturally coherent and consistent with how Cost Management already integrates with OSAC (port 8010). Requires Cost Management to expose a gRPC receiver service and OSAC POC collector to be rewritten beyond shell scripts. |
-| D — Kafka | Deferred | Only if multi-consumer fan-out is required. See [ADR-002](../../decisions/002-arguments-against-kafka.md). |
+| D — Kafka | Temporary experiment | See [Ingestion modes](../../ingestion-modes.md). |
 | E — REST polling | Fallback only | 60s snapshot granularity; misses inter-poll deletions. |
 
 > **On gRPC:** REQ-1b names HTTP or Kafka, but OSAC's primary API surface is gRPC — the Watch stream itself is `osac.public.v1.Events` gRPC streaming; the Cost Management `inventory-watcher` reaches it via the REST gateway as a convenience, not because gRPC is unavailable. gRPC is architecturally the most native fit for a production collector. The practical constraint for Phase 4 is that OSAC POC collector (`osac-metering-discover-poc`) is currently shell scripts, not a gRPC client.
@@ -365,7 +365,7 @@ All metering entries carry `tenant_id`. Project attribution comes from the inven
 
 - [POC-ARCH requirements](../../requirements/poc_requirements_overview.md#poc-arch-capacity-based-charging-model)
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
-- [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
+- [Ingestion modes](../../ingestion-modes.md) — direct OSAC, Kafka experiment, and batch API
 - [Cost calculation and billing spec](../pricing/cost-calculation-spec-draft.md)
 - [Cost model metric feasibility](cost_model_metric_feasibility.md)
 - [Cost reports feasibility](../reporting/cost-reports-feasibility.md)

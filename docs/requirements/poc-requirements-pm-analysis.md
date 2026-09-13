@@ -135,7 +135,7 @@ Connect to the OSAC Region Management Cluster (gRPC/REST) to read inventory, res
 - All inventory records carry tenant, project, and resource IDs
 
 **Gap Summary**
-No functional gaps for PoC scope. The only deferred item (CloudEvents-standard envelope parsing, vs. our current native Watch-stream protobuf parsing) is intentionally low priority — see [req1 gap analysis](req1-osac-integration-gap-analysis.md) — because it only matters if Kafka is introduced later, which we've argued against ([ADR-002](../decisions/002-arguments-against-kafka.md)).
+No functional gaps for PoC scope. CloudEvents-standard envelope parsing is now used by the batch API and Kafka experiment; the native Watch-stream protobuf path remains available for direct OSAC operation. See [Ingestion modes](../ingestion-modes.md) and the [req1 gap analysis](req1-osac-integration-gap-analysis.md).
 
 **Action Items / Open Questions**
 - CloudEvent types: CaaS and VMaaS schemas are available; BMaaS and MaaS still open

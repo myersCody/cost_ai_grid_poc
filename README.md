@@ -10,6 +10,8 @@ Standalone Go service that consumes OSAC CloudEvents, meters infrastructure and 
 
 **Docs:** [Technical guide](docs/index.md)
 
+**Ingestion modes:** [Direct OSAC, Kafka experiment, and batch API](docs/ingestion-modes.md)
+
 ## Deployment
 
 | Environment | Guide |

@@ -66,21 +66,15 @@ type Reconciler interface {
 	ReconcileAll(ctx context.Context)
 }
 
-// KafkaPublisher publishes events to Kafka topics. Optional — nil means no Kafka.
-type KafkaPublisher interface {
-	PublishEvent(ctx context.Context, eventType, resourceID, tenantID string, payload []byte)
-}
-
 // Handler implements the generated ServerInterface with all API business logic.
 type APIHandler struct {
-	store          *inventory.Store
-	meter          *metering.Meter
-	cfg            *config.Config
-	customMetrics  *custommetrics.Registry
-	reconciler     Reconciler
-	kafkaPublisher KafkaPublisher
-	reconciling    atomic.Bool
-	logger         *slog.Logger
+	store         *inventory.Store
+	meter         *metering.Meter
+	cfg           *config.Config
+	customMetrics *custommetrics.Registry
+	reconciler    Reconciler
+	reconciling   atomic.Bool
+	logger        *slog.Logger
 }
 
 // NewHandler constructs a Handler with all required dependencies.
@@ -94,9 +88,6 @@ func NewAPIHandler(store *inventory.Store, meter *metering.Meter, cfg *config.Co
 	}
 }
 
-// SetKafkaPublisher sets an optional Kafka producer for publishing events.
-func (h *APIHandler) SetKafkaPublisher(p KafkaPublisher) { h.kafkaPublisher = p }
-
 // ProcessKafkaEvent implements kafka.EventProcessor. It decodes a CloudEvent
 // from Kafka and runs the same processing pipeline as the HTTP ingest handler.
 func (h *APIHandler) ProcessKafkaEvent(ctx context.Context, topic string, payload []byte) error {
@@ -104,7 +95,7 @@ func (h *APIHandler) ProcessKafkaEvent(ctx context.Context, topic string, payloa
 	if err := json.Unmarshal(payload, &ce); err != nil {
 		return fmt.Errorf("kafka: invalid CloudEvent JSON: %w", err)
 	}
-	if err := h.processEventsWithPublish(ctx, []cloudEventInternal{ce}, false); err != nil {
+	if err := h.processEvents(ctx, []cloudEventInternal{ce}); err != nil {
 		return fmt.Errorf("kafka: process CloudEvent: %w", err)
 	}
 	return nil
@@ -316,7 +307,7 @@ func (h *APIHandler) IngestEvent(w http.ResponseWriter, r *http.Request) {
 		writeEventError(w, err)
 		return
 	}
-	if err := h.processEventsWithPublish(r.Context(), []cloudEventInternal{ce}, true); err != nil {
+	if err := h.processEvents(r.Context(), []cloudEventInternal{ce}); err != nil {
 		writeEventError(w, err)
 		return
 	}
@@ -338,7 +329,7 @@ func (h *APIHandler) IngestEventBatch(w http.ResponseWriter, r *http.Request) {
 		writeEventError(w, &eventValidationError{message: fmt.Sprintf("events must contain between 1 and %d items", maxBatchEvents)})
 		return
 	}
-	if err := h.processEventsWithPublish(r.Context(), batch.Events, false); err != nil {
+	if err := h.processEvents(r.Context(), batch.Events); err != nil {
 		writeEventError(w, err)
 		return
 	}
@@ -374,14 +365,13 @@ func writeEventError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (h *APIHandler) processEventsWithPublish(ctx context.Context, events []cloudEventInternal, publish bool) error {
+func (h *APIHandler) processEvents(ctx context.Context, events []cloudEventInternal) error {
 	for _, ce := range events {
 		if err := h.validateCloudEvent(ce); err != nil {
 			return err
 		}
 	}
 
-	claimedEvents := make([]cloudEventInternal, 0, len(events))
 	if err := h.store.InTransaction(ctx, func(txStore *inventory.Store) error {
 		txHandler := &APIHandler{
 			store:         txStore,
@@ -408,35 +398,12 @@ func (h *APIHandler) processEventsWithPublish(ctx context.Context, events []clou
 			if err := txHandler.processEvent(ctx, ce); err != nil {
 				return fmt.Errorf("process event %s: %w", ce.ID, err)
 			}
-			claimedEvents = append(claimedEvents, ce)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-
-	if publish && h.kafkaPublisher != nil {
-		for _, ce := range claimedEvents {
-			h.publishEvent(ctx, ce)
-		}
-	}
 	return nil
-}
-
-func (h *APIHandler) publishEvent(ctx context.Context, ce cloudEventInternal) {
-	_, resourceID, tenantID := classifyEvent(ce)
-	if (resourceID == "" || tenantID == "") && h.customMetrics != nil && h.customMetrics.HasEventType(ce.Type) {
-		var dataMap map[string]interface{}
-		if err := json.Unmarshal(ce.Data, &dataMap); err == nil {
-			_, resourceID, tenantID = h.customMetrics.ClassifyEvent(ce.Type, dataMap)
-		}
-	}
-	payload, err := json.Marshal(ce)
-	if err != nil {
-		h.logger.Error("failed to marshal event for Kafka", "event_id", ce.ID, "error", err)
-		return
-	}
-	h.kafkaPublisher.PublishEvent(ctx, ce.Type, resourceID, tenantID, payload)
 }
 
 func cloudEventDigest(ce cloudEventInternal) (string, error) {
