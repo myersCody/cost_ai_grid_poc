@@ -109,7 +109,7 @@ func (r *Reconciler) reconcileComputeInstances(ctx context.Context) {
 				InstanceID:   ci.ID,
 				Name:         ci.Metadata.Name,
 				Tenant:       ci.Metadata.Tenant,
-				InstanceType: ci.Spec.InstanceType,
+				InstanceType: ci.Spec.InstanceType.ID,
 				Cores:        cores,
 				MemoryGiB:    memGiB,
 				State:        ci.Status.State,

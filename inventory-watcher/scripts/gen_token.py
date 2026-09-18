@@ -22,6 +22,7 @@ if not os.path.exists(key_path):
 
 ISSUER = os.environ.get("OIDC_ISSUER", "https://localhost:8013")
 TOKEN_HOURS = int(os.environ.get("TOKEN_HOURS", "24"))
+ORGANIZATION = os.environ.get("OIDC_ORGANIZATION", "test")
 
 with open(key_path, "rb") as f:
     private_key = serialization.load_pem_private_key(f.read(), password=None)
@@ -47,6 +48,7 @@ token = jwt.encode(
         "sub": "admin",
         "preferred_username": "admin",
         "groups": ["admins"],
+        "organization": [ORGANIZATION],
         "iat": now,
         "exp": now + datetime.timedelta(hours=TOKEN_HOURS),
     },
