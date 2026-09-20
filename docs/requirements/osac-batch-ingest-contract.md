@@ -2,10 +2,10 @@
 
 ## Status
 
-Approved implementation contract for the Cost Management adapter proof of
-concept. The adapter is the sole Kafka consumer and delivers canonical OSAC
-CloudEvents to this HTTP receiver; the direct PoC Kafka consumer is not part
-of this ownership path.
+Approved implementation contract for the primary Cost Management adapter proof
+of concept. The adapter delivers canonical OSAC CloudEvents to this HTTP
+receiver. The separate direct Kafka consumer is a temporary experiment and is
+not part of this batch ownership path; see [Ingestion modes](../ingestion-modes.md).
 
 ## Endpoint
 

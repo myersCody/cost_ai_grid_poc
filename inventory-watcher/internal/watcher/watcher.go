@@ -72,14 +72,18 @@ func (w *Watcher) handleEvent(ctx context.Context, event osac.Event) error {
 	resourceType := eventResourceType(event)
 	w.logger.Info("received event", "id", event.ID, "type", event.Type, "resource", resourceType)
 
-	if err := w.storeRawEvent(ctx, event, resourceType); err != nil {
-		w.logger.Error("failed to store raw event", "error", err, "id", event.ID)
-	}
-
+	// Kafka is an exclusive handoff. The Kafka consumer owns raw-event
+	// persistence and metering when a producer is configured; processing the
+	// event here as well would create a parallel delivery path.
 	if w.kafkaPublisher != nil {
 		resourceID, tenantID, _ := extractEventMeta(event)
 		dataJSON, _ := json.Marshal(event)
 		w.kafkaPublisher.PublishEvent(ctx, event.Type, resourceID, tenantID, dataJSON)
+		return nil
+	}
+
+	if err := w.storeRawEvent(ctx, event, resourceType); err != nil {
+		w.logger.Error("failed to store raw event", "error", err, "id", event.ID)
 	}
 
 	switch event.Type {

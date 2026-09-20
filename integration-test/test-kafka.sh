@@ -2,9 +2,8 @@
 set -uo pipefail
 
 # Integration test for the Kafka metering bus.
-# Tests both modes independently:
-#   1. Producer mode: OSAC events → Kafka topics
-#   2. Consumer mode: Kafka topics → metering pipeline
+# Tests the Kafka consumer path. The OSAC → Kafka producer path is covered by
+# test-osac-kafka.sh; HTTP ingestion is intentionally not a Kafka producer.
 #
 # Prerequisites:
 #   - Redpanda running on $BROKER (default localhost:19092)
@@ -93,10 +92,10 @@ done
 echo "  Topics created"
 
 # ──────────────────────────────────────────────────────────────────────
-# Test 1: Producer mode — HTTP ingest → Kafka
+# Test 1: HTTP ingest does not publish to Kafka
 # ──────────────────────────────────────────────────────────────────────
 echo ""
-echo "--- Test 1: Producer mode (HTTP ingest → Kafka) ---"
+echo "--- Test 1: HTTP ingest is not a Kafka producer ---"
 
 KAFKA_BROKERS="$BROKER" \
 KAFKA_MODE="producer" \
@@ -126,23 +125,11 @@ HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
     -H "Content-Type: application/json" \
     -d "{\"specversion\":\"1.0\",\"type\":\"inference.tokens.used\",\"source\":\"kafka-test\",\"id\":\"$EVENT_ID\",\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"data\":{\"tenant_id\":\"kafka-test-tenant\",\"model_id\":\"test-model\",\"model\":\"test-model\",\"prompt_tokens\":1000,\"completion_tokens\":500,\"total_tokens\":1500,\"duration_ms\":200}}")
 check "HTTP ingest accepted" "204" "$HTTP_STATUS"
-sleep 5
+sleep 2
 
-timeout 15 $RPK topic consume osac.metering.inference -o start -n 1 -f '%v\n' > /tmp/kafka-inference-out.txt 2>/dev/null
-KAFKA_COUNT=$(grep -c "$EVENT_ID" /tmp/kafka-inference-out.txt 2>/dev/null || echo "0")
-check_ge "Event on Kafka inference topic" 1 "$KAFKA_COUNT"
-
-# Send VM heartbeat event
-VM_EVENT_ID="kafka-test-vm-$(date +%s)"
-curl -s -o /dev/null \
-    -X POST "http://localhost:18023/api/v1/events" \
-    -H "Content-Type: application/json" \
-    -d "{\"specversion\":\"1.0\",\"type\":\"osac.compute_instance.lifecycle\",\"source\":\"kafka-test\",\"id\":\"$VM_EVENT_ID\",\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"data\":{\"duration_seconds\":60,\"tenant_id\":\"kafka-test-tenant\",\"instance_id\":\"vm-kafka-test\",\"state\":\"COMPUTE_INSTANCE_STATE_RUNNING\",\"cores\":4,\"memory_gib\":8}}"
-sleep 5
-
-timeout 15 $RPK topic consume osac.metering.heartbeat -o start -n 1 -f '%v\n' > /tmp/kafka-heartbeat-out.txt 2>/dev/null
-VM_KAFKA_COUNT=$(grep -c "$VM_EVENT_ID" /tmp/kafka-heartbeat-out.txt 2>/dev/null || echo "0")
-check_ge "VM event on Kafka heartbeat topic" 1 "$VM_KAFKA_COUNT"
+timeout 5 $RPK topic consume osac.metering.inference -o start -n 1 -f '%v\n' > /tmp/kafka-inference-out.txt 2>/dev/null || true
+KAFKA_COUNT=$(grep -c "$EVENT_ID" /tmp/kafka-inference-out.txt 2>/dev/null || true)
+check "HTTP event absent from Kafka inference topic" "0" "$KAFKA_COUNT"
 
 kill $PRODUCER_PID 2>/dev/null; wait $PRODUCER_PID 2>/dev/null || true
 echo "  Producer stopped"
@@ -199,7 +186,7 @@ TOTAL=$((PASS + FAIL))
 echo "  Results: $PASS/$TOTAL passed"
 if [ "$FAIL" -gt 0 ]; then
     echo -e "  ${RED}$FAIL FAILED${NC}"
-    echo "  Producer log: /tmp/kafka-producer-test.log"
+    echo "  API producer-path log: /tmp/kafka-producer-test.log"
     echo "  Consumer log: /tmp/kafka-consumer-test.log"
     exit 1
 else

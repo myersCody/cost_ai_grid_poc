@@ -480,7 +480,6 @@ See also: [`snippets/query-costs.sh`](../snippets/query-costs.sh) for demo queri
 | ADR | Title | Link |
 |---|---|---|
 | ADR-001 | Metering sweep interval (60s) | [001-metering-sweep-interval.md](decisions/001-metering-sweep-interval.md) |
-| ADR-002 | Arguments against Kafka | [002-arguments-against-kafka.md](decisions/002-arguments-against-kafka.md) |
 | ADR-003 | Heartbeat events vs local sweep | [003-heartbeat-emitter-vs-sweep.md](decisions/003-heartbeat-emitter-vs-sweep.md) |
 
 ## Related Documentation

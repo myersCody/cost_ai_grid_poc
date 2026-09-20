@@ -319,6 +319,6 @@ docker exec cost-db psql -U user -d costdb -c \
 4. **Automatic rating** — metering entries converted to dollars every 30s
 5. **Quota API** — real-time consumption vs limits with threshold checks
 6. **OpenMeter-compatible** — same CloudEvents format, just a URL change
-7. **No Kafka** — Watch stream + reconciler, same as Kubernetes controllers
+7. **Direct OSAC mode** — Watch stream + reconciler, with Kafka and batch modes documented separately
 8. **No data loss** — final metering on DELETE, immutable raw event log
 9. **Billable state filtering** — only RUNNING VMs produce cost

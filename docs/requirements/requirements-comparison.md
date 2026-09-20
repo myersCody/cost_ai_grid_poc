@@ -40,11 +40,10 @@ The updated spec **refines and reprioritizes** the original requirements:
 7. **REQ-3a RBAC scope decided** — tenant + project level only for the PoC;
    fine-grained InsightsRBAC deferred post-PoC.
 
-8. **No Kafka needed for PoC** (transport question raised in REQ-1b, REQ-2a,
-   REQ-10) — gRPC Watch stream + 60s reconciler is the transport for
-   VM/cluster events; Kafka is deferred and only warranted if multiple
-   independent consumers need the same event stream. Aligns with our
-   [ADR-002](../decisions/002-arguments-against-kafka.md). MaaS event
+8. **Three ingestion modes are documented** (direct Watch/reconciliation,
+   temporary Kafka experiment, and batch API). Batch ingestion is the primary
+   delivery path; direct Watch/reconciliation remains available for local and
+   fallback operation. See [Ingestion modes](../ingestion-modes.md). MaaS event
    transport (HTTP vs Kafka vs OSAC-as-intermediary) is still an [open
    question](osac-open-questions.md#event-transport) for the Jul 7 OSAC
    sync. Separately, MaaS **tenant attribution** is now resolved: the
@@ -140,4 +139,3 @@ remaining open items are LOW priority:
    tiers work; capacity meters (GiB-month, core-hours) need
    period-accumulating logic. Blocked on PM spec from Pau. See
    [design proposal](req11-cumulative-tiers-design-proposal.md).
-

@@ -142,7 +142,7 @@ The OSAC fulfillment service exposes these via gRPC (`osac.public.v1`) with a RE
 
 ## Event Ingestion — Options
 
-The OSAC fulfillment service exposes a gRPC streaming `Events` service (with a REST gateway watch endpoint) and REST List APIs for inventory. Three ingestion options are viable for the POC. **Option A is the current implementation** — see [ADR-002](../decisions/002-arguments-against-kafka.md) for why Kafka is deferred.
+The OSAC fulfillment service exposes a gRPC streaming `Events` service (with a REST gateway watch endpoint) and REST List APIs for inventory. The repository documents three runtime modes — direct OSAC Watch/reconciliation, the temporary Kafka experiment, and the primary batch ingestion API — in [Ingestion modes](../ingestion-modes.md).
 
 ## Watch Stream
 
@@ -175,9 +175,9 @@ flowchart LR
 **Pros:** Simple; matches the existing CaaS/VMaaS collector scripts.
 **Cons:** Snapshot-based; misses events between polls; 60s granularity.
 
-### Option C — Kafka (optional future)
+### Option C — Kafka experiment
 
-See [ADR-002](../decisions/002-arguments-against-kafka.md) for why Kafka is deferred.
+See [Ingestion modes](../ingestion-modes.md) for the temporary Kafka experiment and its runtime controls.
 
 ```mermaid
 flowchart LR
@@ -191,11 +191,11 @@ flowchart LR
 ```
 
 **Pros:** Decoupled fan-out; supports multiple independent consumers; event replay over long windows.
-**Cons:** Requires OSAC to publish to Kafka (not implemented on OSAC side yet); adds operational overhead with no current multi-consumer requirement.
+**Cons:** Temporary experiment with additional operational overhead; the current reconciler remains a direct inventory writer and is not Kafka-published.
 
 ### Recommendation
 
-Use **Option A** (Watch stream + reconciler) for the PoC and likely for production v1 — see [ADR-002](../decisions/002-arguments-against-kafka.md). The 60-second metering sweep interval is fixed by [ADR-001](../decisions/001-metering-sweep-interval.md).
+Use the mode appropriate to the deployment. Batch ingestion is the primary delivery path; direct Watch/reconciliation is retained for local development and fallback; Kafka remains an opt-in experiment. The 60-second metering sweep interval is fixed by [ADR-001](../decisions/001-metering-sweep-interval.md).
 
 Adopt **Option C** only if multiple independent consumers emerge or OSAC standardizes on Kafka as a first-class transport. Keep event ingestion behind an interface (`inventory-watcher/internal/osac/client.go` today) so the transport layer is swappable without changing the metering pipeline.
 
@@ -364,7 +364,7 @@ Blocked on OSAC MaaS CloudEvent schema.
 
 | # | Question | Owner | Status |
 |---|---|---|---|
-| 1 | What transport will OSAC use to send CloudEvents to Cost? | OSAC + Cost | **PoC decided:** Watch stream (Option A). Production Kafka only if multi-consumer fan-out is needed — see ADR-002 |
+| 1 | What transport will OSAC use to send CloudEvents to Cost? | OSAC + Cost | **Three documented modes:** direct Watch/reconciliation, temporary Kafka experiment, and primary batch ingestion — see [Ingestion modes](../ingestion-modes.md) |
 | 2 | What Kafka topic names will OSAC use? | OSAC | Open — relevant only if Option C is adopted |
 | 3 | Will OSAC define CloudEvents for MaaS and BMaaS? | OSAC | Open |
 | 4 | Where do quotas/budgets live — OSAC, Cost, or both? | OSAC + Cost | **Decided:** OSAC owns limits; Cost caches via List API — see [boundary_monitoring/alerting-osac-integration.md](boundary_monitoring/alerting-osac-integration.md) |
@@ -388,7 +388,7 @@ Blocked on OSAC MaaS CloudEvent schema.
 - [snippets/test-inventory-watcher.sh](../../snippets/test-inventory-watcher.sh) — E2E test suite
 - [metering/metering-spec-draft.md](metering/metering-spec-draft.md) — capacity-based metering specification
 - [ADR-001: Metering sweep interval](../decisions/001-metering-sweep-interval.md)
-- [ADR-002: Watch stream instead of Kafka](../decisions/002-arguments-against-kafka.md)
+- [Ingestion modes](../ingestion-modes.md) — direct OSAC, Kafka experiment, and batch API
 - [boundary_monitoring/alerting-osac-integration.md](boundary_monitoring/alerting-osac-integration.md) — quota integration options & ownership (REQ-9, REQ-10)
 - [boundary_monitoring/alerting-spec-draft.md](boundary_monitoring/alerting-spec-draft.md) — API/schema draft (after route chosen)
 - [boundary_monitoring/wallet-spec-draft.md](boundary_monitoring/wallet-spec-draft.md) — prepaid wallets ledger, deduction, status API (REQ-14)

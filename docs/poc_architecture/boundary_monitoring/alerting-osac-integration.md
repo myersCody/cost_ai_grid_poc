@@ -147,7 +147,7 @@ Cost seeds limits locally; OSAC stub webhook; prove pull API end-to-end without 
 | Approach | Why rejected |
 |---|---|
 | **OSAC evaluates thresholds** | Duplicates Cost aggregation; two systems can disagree on `consumed_value` |
-| **Kafka event bus** | Operational overhead; no OSAC Kafka consumer today — see [ADR-002](../../decisions/002-arguments-against-kafka.md) |
+| **Kafka event bus** | Temporary experiment, not part of the alerting path; see [Ingestion modes](../../ingestion-modes.md) |
 
 **Suggested rollout:**
 
@@ -259,5 +259,5 @@ sequenceDiagram
 - [data-model.md](../../data-model.md) — planned `quotas`, `alerts` tables
 - [event-types.md](../event-types.md) — CloudEvent taxonomy
 - [ADR-001: Metering sweep interval](../../decisions/001-metering-sweep-interval.md)
-- [ADR-002: Watch stream instead of Kafka](../../decisions/002-arguments-against-kafka.md)
+- [Ingestion modes](../../ingestion-modes.md) — direct OSAC, Kafka experiment, and batch API
 - [Requirements overview — REQ-9, REQ-10](../../requirements/poc_requirements_overview.md#req-9-quotabudget-status-api)

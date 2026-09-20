@@ -14,23 +14,21 @@ platform. Built as a standalone Go service outside of
 
 ## How It Works
 
+Events can enter through one of three runtime modes; they converge on the
+same metering and rating pipeline:
+
 ```
-OSAC fulfillment-service
-    │
-    ├── gRPC Watch stream ──► Watcher ──► raw_events ──► inventory tables
-    │                                                         │
-    │                                            metering sweep (60s)
-    │                                                         │
-    │                                                  metering_entries
-    │                                                         │
-    │                                             rating sweep (30s)
-    │                                                         │
-    └── REST List endpoints ──► Reconciler              cost_entries
-                                                              │
-HTTP ingest endpoint ──► MaaS / custom events ──►   quota status API
-         │                                           report API (JSON/CSV)
-         └── custom metrics config (JSON) ──► arbitrary dimensions
+Direct OSAC:  Watch ────────────────┐
+                                    ├─► raw_events/inventory
+             List ─► Reconciler ────┘          │
+                                               ▼
+Kafka:       Watch/reconcile ─► Kafka ─► Consumer ────────────────┘
+
+Batch:       Adapter ─► POST /api/v1/events/batch ────────────────┘
 ```
+
+The batch API is the primary delivery path. See [Ingestion modes](ingestion-modes.md)
+for configuration and the exact responsibilities of each mode.
 
 ## Quick Start
 
@@ -49,6 +47,10 @@ HTTP ingest endpoint ──► MaaS / custom events ──►   quota status API
 3. [Troubleshooting](dev/troubleshooting.md) — common issues (cert SAN, token refresh, migrations)
 
 ## Architecture & Design
+
+See [Ingestion modes](ingestion-modes.md) for the three supported operating
+flows: direct OSAC Watch/reconciliation, the temporary Kafka experiment, and
+the primary batch ingestion API.
 
 | Document | What you'll learn |
 |---|---|
@@ -77,7 +79,6 @@ HTTP ingest endpoint ──► MaaS / custom events ──►   quota status API
 | ADR | Decision |
 |---|---|
 | [ADR-001](decisions/001-metering-sweep-interval.md) | 60-second metering sweep |
-| [ADR-002](decisions/002-arguments-against-kafka.md) | No Kafka — gRPC Watch + List reconciliation |
 | [ADR-003](decisions/003-heartbeat-emitter-vs-sweep.md) | Local sweep replaces heartbeat collector |
 | [ADR-004](decisions/004-raw-events-no-unique-index.md) | Drop unique index on raw_events for throughput |
 
@@ -166,6 +167,7 @@ snippets/
 | `OSAC_CA_CERT` | — | CA certificate path (if HTTPS) |
 | `INVENTORY_DB_URL` | `postgres://user:pass@localhost:5434/costdb` | PostgreSQL connection |
 | `INGEST_LISTEN_ADDR` | — | HTTP API (e.g., `localhost:8020`). Disabled if empty |
+| `DISABLE_COMPONENTS` | — | Comma-separated components to disable, e.g. `watcher,reconciler` |
 | `METRICS_PORT` | `9000` | Prometheus metrics (separate port, no auth) |
 | `CUSTOM_METRICS_CONFIG` | — | Path to custom metrics JSON config (REQ-13) |
 | `RECONCILE_INTERVAL` | `1h` | How often to reconcile against OSAC |
@@ -174,6 +176,10 @@ snippets/
 | `LOG_LEVEL` | `info` | Log verbosity: debug, info, warn, error |
 | `LOG_FORMAT` | `text` | Log format: `text` or `json` |
 | `AUTH_ISSUER_URL` | — | OIDC issuer URL. Auth disabled if empty |
+| `KAFKA_BROKERS` | — | Enables the temporary Kafka experiment |
+| `KAFKA_MODE` | `both` | Kafka mode: `producer`, `consumer`, or `both` |
+| `KAFKA_CONSUMER_GROUP` | `osac-metering-cost-management` | Kafka consumer group |
+| `KAFKA_TOPIC_PREFIX` | `osac.metering` | Kafka topic prefix |
 
 ## Port Map (Local Development)
 

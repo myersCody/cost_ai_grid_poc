@@ -12,7 +12,7 @@ This document is the consolidated requirements reference for the Cost Management
 
 - Sovereign cloud built on OCP, OCP Virtualization, OpenShift AI, ACM, Ansible
 - **OSAC** (Open Sovereign AI Cloud) is the orchestrator — provisions clusters (HCP), VMs (OpenShift Virtualization), models (MaaS), and bare metal
-- OSAC emits **CloudEvents** for resource lifecycle and metrics; transport for VM/cluster is gRPC Watch stream + 60s reconciler (Kafka deferred — see [ADR-002](../decisions/002-arguments-against-kafka.md)); MaaS transport pending verification (Martin/Noy)
+- OSAC emits **CloudEvents** for resource lifecycle and metrics. The repository supports direct Watch/reconciliation, a temporary Kafka experiment, and a primary batch-ingestion API; see [Ingestion modes](../ingestion-modes.md). MaaS transport pending verification (Martin/Noy)
 - Billing model: **capacity-based** for clusters/VMs; **consumption-based** (token/request) for MaaS
 - No Cost Management Metrics Operator (CMMO) — OSAC is the sole metric source
 - Data freshness SLA: OSAC emits within 30 sec of event; **Cost must process within 60 sec of receipt**
@@ -703,7 +703,7 @@ MFA, granular RBAC for billing admins, and short-lived auth tokens.
 
 | Decision | Resolution | Reference |
 |----------|------------|-----------|
-| **CloudEvents transport** | Watch stream (gRPC NDJSON) + periodic reconciler against OSAC List endpoints for PoC and likely v1. Kafka deferred — only warranted if multiple independent consumers need the same event stream. | [ADR-002](../decisions/002-arguments-against-kafka.md) |
+| **CloudEvents transport** | Three documented modes: direct Watch/reconciliation, temporary Kafka experiment, and primary batch ingestion. | [Ingestion modes](../ingestion-modes.md) |
 | **Quota/Budget source of truth** | OSAC owns and defines limits (source of truth). Cost caches limits via the OSAC List API (read-only). Cost owns metering, consumption aggregation, and threshold evaluation. | [alerting-osac-integration.md](../poc_architecture/boundary_monitoring/alerting-osac-integration.md) |
 | **Tenant/Project hierarchy** | OSAC `Tenant → Project` model is tracked in Cost (`inventory_project`). All metering entries carry `tenant_id`; costs drill down to project level. No pre-provisioning required — first event auto-registers the tenant. | REQ-3a; [architecture.md](../poc_architecture/architecture.md) |
 | **Metering sweep interval** | 60-second sweep satisfies the processing SLA and matches the planned OSAC metering collector cadence. On DELETE, a final metering entry closes the gap to the deletion timestamp. | [ADR-001](../decisions/001-metering-sweep-interval.md) |
