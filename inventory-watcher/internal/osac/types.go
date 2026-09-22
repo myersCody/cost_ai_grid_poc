@@ -5,19 +5,19 @@ import "time"
 // Event represents an OSAC event from the Watch stream.
 // JSON field names use proto JSON format (snake_case).
 type Event struct {
-	ID                      string           `json:"id"`
-	Type                    string           `json:"type"`
-	Cluster                 *Cluster         `json:"cluster,omitempty"`
-	ClusterTemplate         *ClusterTemplate `json:"cluster_template,omitempty"`
-	ComputeInstance         *ComputeInstance `json:"compute_instance,omitempty"`
+	ID                      string                   `json:"id"`
+	Type                    string                   `json:"type"`
+	Cluster                 *Cluster                 `json:"cluster,omitempty"`
+	ClusterTemplate         *ClusterTemplate         `json:"cluster_template,omitempty"`
+	ComputeInstance         *ComputeInstance         `json:"compute_instance,omitempty"`
 	ComputeInstanceTemplate *ComputeInstanceTemplate `json:"compute_instance_template,omitempty"`
-	HostType                *HostType        `json:"host_type,omitempty"`
-	InstanceType            *InstanceType    `json:"instance_type,omitempty"`
-	Project                 *Project         `json:"project,omitempty"`
-	Tenant                  *Tenant          `json:"tenant,omitempty"`
-	Role                    *Role            `json:"role,omitempty"`
-	RoleBinding             *RoleBinding     `json:"role_binding,omitempty"`
-	BareMetalInstance       *BareMetalInstance `json:"bare_metal_instance,omitempty"`
+	HostType                *HostType                `json:"host_type,omitempty"`
+	InstanceType            *InstanceType            `json:"instance_type,omitempty"`
+	Project                 *Project                 `json:"project,omitempty"`
+	Tenant                  *Tenant                  `json:"tenant,omitempty"`
+	Role                    *Role                    `json:"role,omitempty"`
+	RoleBinding             *RoleBinding             `json:"role_binding,omitempty"`
+	BareMetalInstance       *BareMetalInstance       `json:"bare_metal_instance,omitempty"`
 }
 
 type EventsWatchResponse struct {
@@ -31,12 +31,12 @@ type EventResult struct {
 type Metadata struct {
 	CreationTimestamp *time.Time        `json:"creation_timestamp,omitempty"`
 	DeletionTimestamp *time.Time        `json:"deletion_timestamp,omitempty"`
-	Creator          string            `json:"creator,omitempty"`
-	Name             string            `json:"name,omitempty"`
-	Tenant           string            `json:"tenant,omitempty"`
-	Labels           map[string]string `json:"labels,omitempty"`
-	Annotations      map[string]string `json:"annotations,omitempty"`
-	Version          int32             `json:"version,omitempty"`
+	Creator           string            `json:"creator,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	Tenant            string            `json:"tenant,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	Version           int32             `json:"version,omitempty"`
 }
 
 type Cluster struct {
@@ -69,12 +69,32 @@ type ComputeInstance struct {
 	Status   ComputeInstanceStatus `json:"status"`
 }
 
+type ResourceReference struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Project string `json:"project,omitempty"`
+	Shared  bool   `json:"shared,omitempty"`
+}
+
+type ComputeNetworkAttachment struct {
+	Subnet ResourceReference `json:"subnet"`
+}
+
+type ComputeInstanceDisk struct {
+	SizeGiB     *int32            `json:"size_gib,omitempty"`
+	StorageTier ResourceReference `json:"storage_tier,omitempty"`
+}
+
 type ComputeInstanceSpec struct {
-	Template     string `json:"template,omitempty"`
-	CatalogItem  string `json:"catalog_item,omitempty"`
-	Cores        *int32 `json:"cores,omitempty"`
-	MemoryGib    *int32 `json:"memory_gib,omitempty"`
-	InstanceType string `json:"instance_type,omitempty"`
+	Template           ResourceReference          `json:"template,omitempty"`
+	CatalogItem        ResourceReference          `json:"catalog_item,omitempty"`
+	Cores              *int32                     `json:"cores,omitempty"`
+	MemoryGib          *int32                     `json:"memory_gib,omitempty"`
+	InstanceType       ResourceReference          `json:"instance_type,omitempty"`
+	NetworkAttachments []ComputeNetworkAttachment `json:"network_attachments,omitempty"`
+	BootDisk           *ComputeInstanceDisk       `json:"boot_disk,omitempty"`
+	RunStrategy        string                     `json:"run_strategy,omitempty"`
+	DiskImage          ResourceReference          `json:"disk_image,omitempty"`
 }
 
 type ComputeInstanceStatus struct {

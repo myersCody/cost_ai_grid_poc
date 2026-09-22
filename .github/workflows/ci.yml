@@ -36,10 +36,10 @@ jobs:
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          # GO-2026-6061 (grpc-go HTTP/2 transport) suppressed:
+          # GO-2026-6061 and GO-2026-6348 (grpc-go HTTP/2 transport) suppressed:
           # Upgrading grpc-go ≥1.67 breaks ALPN negotiation with OSAC
           # fulfillment-service (does not advertise h2 in TLS ALPN).
-          # PR #112 pinned v1.66.0 as workaround. Fix path: OSAC adds
+          # PR #112 pinned v1.66.0 as workaround. Keep the pin until OSAC adds
           # h2 ALPN support, or we use grpc-go experimental
           # credentials.NewTLSWithALPNDisabled (temporary upstream API).
           set +e
@@ -50,9 +50,9 @@ jobs:
             exit 0
           fi
           # Check if the only finding is the suppressed vuln
-          unsuppressed=$(echo "$output" | grep "^Vulnerability #" | grep -v "GO-2026-6061" || true)
+          unsuppressed=$(echo "$output" | grep "^Vulnerability #" | grep -v -E "GO-2026-6061|GO-2026-6348" || true)
           if [ -z "$unsuppressed" ]; then
-            echo "::notice::GO-2026-6061 suppressed (grpc-go ALPN incompatibility with OSAC)"
+            echo "::notice::GO-2026-6061 and GO-2026-6348 suppressed (grpc-go ALPN incompatibility with OSAC)"
             exit 0
           fi
           echo "::error::Unsuppressed vulnerabilities found"
