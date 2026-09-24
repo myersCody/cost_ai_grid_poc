@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -22,7 +21,8 @@ import (
 // ─── HTTP helper ─────────────────────────────────────────────────────────────
 
 type apiResp struct {
-	ID string `json:"id"`
+	ID     string   `json:"id"`
+	Object *apiResp `json:"object,omitempty"`
 }
 
 // doRequest executes an HTTP request with optional JSON body and Bearer auth.
@@ -59,6 +59,9 @@ func doRequest(client *http.Client, method, url, token string, body interface{})
 
 	var r apiResp
 	_ = json.Unmarshal(data, &r) // best-effort; DELETE/PATCH may return no body
+	if r.ID == "" && r.Object != nil {
+		r.ID = r.Object.ID
+	}
 	return r.ID, nil
 }
 
@@ -74,16 +77,75 @@ type ncPayload struct {
 	Metadata      metadata `json:"metadata"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description"`
-	IsDefault     bool     `json:"is_default"`
 	FabricManager string   `json:"fabric_manager"`
+	IsDefault     bool     `json:"is_default"`
+}
+
+type storageBackendCredentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type storageBackendSpec struct {
+	Provider    string                    `json:"provider"`
+	Description string                    `json:"description"`
+	Endpoint    string                    `json:"endpoint"`
+	Credentials storageBackendCredentials `json:"credentials"`
+}
+
+type storageBackendPayload struct {
+	Metadata metadata           `json:"metadata"`
+	Spec     storageBackendSpec `json:"spec"`
+}
+
+type backendAssociation struct {
+	BackendID            string `json:"backend_id"`
+	MaxReadBandwidthMBs  int    `json:"max_read_bandwidth_mbs,omitempty"`
+	MaxWriteBandwidthMBs int    `json:"max_write_bandwidth_mbs,omitempty"`
+	EncryptionEnabled    bool   `json:"encryption_enabled,omitempty"`
+}
+
+type storageTierSpec struct {
+	Description string               `json:"description"`
+	Protocol    string               `json:"protocol"`
+	Backends    []backendAssociation `json:"backends"`
+}
+
+type storageTierPayload struct {
+	Metadata metadata        `json:"metadata"`
+	Spec     storageTierSpec `json:"spec"`
+}
+
+type instanceTypeSpec struct {
+	VCPUs     int `json:"vcpus"`
+	MemoryGiB int `json:"memory_gib"`
+}
+
+type instanceTypePayload struct {
+	Metadata metadata         `json:"metadata"`
+	Spec     instanceTypeSpec `json:"spec"`
+}
+
+type diskImageSpec struct {
+	SourceType    string   `json:"source_type"`
+	SourceRef     string   `json:"source_ref"`
+	GuestOSFamily string   `json:"guest_os_family"`
+	Architecture  []string `json:"architecture"`
+}
+
+type diskImagePayload struct {
+	Metadata metadata      `json:"metadata"`
+	Spec     diskImageSpec `json:"spec"`
+}
+
+type networkClassRef struct {
+	ID string `json:"id"`
 }
 
 type vnSpec struct {
-	IPv4CIDR string `json:"ipv4_cidr"`
-}
-
-type resourceRef struct {
-	ID string `json:"id"`
+	IPv4CIDR     string          `json:"ipv4_cidr"`
+	Region       string          `json:"region"`
+	NetworkClass networkClassRef `json:"network_class"`
 }
 
 type vnPayload struct {
@@ -92,9 +154,9 @@ type vnPayload struct {
 }
 
 type vnPatchSpec struct {
-	IPv4CIDR     string      `json:"ipv4_cidr"`
-	Region       string      `json:"region"`
-	NetworkClass resourceRef `json:"network_class"`
+	IPv4CIDR     string          `json:"ipv4_cidr"`
+	Region       string          `json:"region"`
+	NetworkClass networkClassRef `json:"network_class"`
 }
 
 type vnPatchStatus struct {
@@ -108,18 +170,19 @@ type vnPatchPayload struct {
 }
 
 type subnetSpec struct {
-	VirtualNetwork resourceRef `json:"virtual_network"`
-	IPv4CIDR       string      `json:"ipv4_cidr"`
-}
-
-type subnetStatus struct {
-	State string `json:"state"`
+	VirtualNetwork networkClassRef `json:"virtual_network"`
+	IPv4CIDR       string          `json:"ipv4_cidr"`
 }
 
 type subnetPayload struct {
-	Metadata metadata     `json:"metadata"`
-	Spec     subnetSpec   `json:"spec"`
-	Status   subnetStatus `json:"status"`
+	Metadata metadata   `json:"metadata"`
+	Spec     subnetSpec `json:"spec"`
+}
+
+type subnetPatchPayload struct {
+	ID     string        `json:"id"`
+	Spec   subnetSpec    `json:"spec"`
+	Status vnPatchStatus `json:"status"`
 }
 
 type tplPayload struct {
@@ -128,95 +191,43 @@ type tplPayload struct {
 	Description string   `json:"description"`
 }
 
+type templateRef struct {
+	ID string `json:"id"`
+}
+
 type netAttachment struct {
-	Subnet resourceRef `json:"subnet"`
+	Subnet networkClassRef `json:"subnet"`
+}
+
+type storageTierRef struct {
+	ID string `json:"id"`
 }
 
 type bootDisk struct {
-	SizeGiB     int         `json:"size_gib"`
-	StorageTier resourceRef `json:"storage_tier"`
+	SizeGiB     int            `json:"size_gib"`
+	StorageTier storageTierRef `json:"storage_tier"`
+}
+
+type instanceTypeRef struct {
+	ID string `json:"id"`
+}
+
+type diskImageRef struct {
+	ID string `json:"id"`
 }
 
 type vmSpec struct {
-	Template           resourceRef     `json:"template"`
+	Template           templateRef     `json:"template"`
 	NetworkAttachments []netAttachment `json:"network_attachments"`
 	BootDisk           bootDisk        `json:"boot_disk"`
 	RunStrategy        string          `json:"run_strategy"`
-	InstanceType       resourceRef     `json:"instance_type"`
-	DiskImage          resourceRef     `json:"disk_image"`
-}
-
-type vmStatus struct {
-	State string `json:"state"`
+	InstanceType       instanceTypeRef `json:"instance_type"`
+	DiskImage          diskImageRef    `json:"disk_image"`
 }
 
 type vmPayload struct {
 	Metadata metadata `json:"metadata"`
 	Spec     vmSpec   `json:"spec"`
-	Status   vmStatus `json:"status"`
-}
-
-type instanceTypePayload struct {
-	Metadata metadata         `json:"metadata"`
-	Spec     instanceTypeSpec `json:"spec"`
-}
-
-type instanceTypeSpec struct {
-	Cores       int    `json:"cores"`
-	MemoryGiB   int    `json:"memory_gib"`
-	Description string `json:"description"`
-	State       string `json:"state"`
-}
-
-type diskImagePayload struct {
-	Metadata metadata      `json:"metadata"`
-	Spec     diskImageSpec `json:"spec"`
-}
-
-type diskImageSpec struct {
-	SourceType    string   `json:"source_type"`
-	SourceRef     string   `json:"source_ref"`
-	GuestOSFamily string   `json:"guest_os_family"`
-	Architecture  []string `json:"architecture"`
-	Lifecycle     string   `json:"lifecycle"`
-}
-
-type storageTierPayload struct {
-	Metadata metadata        `json:"metadata"`
-	Spec     storageTierSpec `json:"spec"`
-}
-
-type storageTierSpec struct {
-	Description          string               `json:"description"`
-	Protocol             string               `json:"protocol"`
-	MaxReadBandwidthMbs  int                  `json:"max_read_bandwidth_mbs"`
-	MaxWriteBandwidthMbs int                  `json:"max_write_bandwidth_mbs"`
-	EncryptionEnabled    bool                 `json:"encryption_enabled"`
-	Backends             []backendAssociation `json:"backends"`
-}
-
-type backendAssociation struct {
-	BackendID            string `json:"backend_id"`
-	MaxReadBandwidthMbs  int    `json:"max_read_bandwidth_mbs"`
-	MaxWriteBandwidthMbs int    `json:"max_write_bandwidth_mbs"`
-	EncryptionEnabled    bool   `json:"encryption_enabled"`
-}
-
-type storageBackendPayload struct {
-	Metadata metadata           `json:"metadata"`
-	Spec     storageBackendSpec `json:"spec"`
-}
-
-type storageBackendSpec struct {
-	Provider    string                    `json:"provider"`
-	Description string                    `json:"description"`
-	Endpoint    string                    `json:"endpoint"`
-	Credentials storageBackendCredentials `json:"credentials"`
-}
-
-type storageBackendCredentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
 }
 
 // ─── VM pool ─────────────────────────────────────────────────────────────────
@@ -257,179 +268,160 @@ func (p *vmPool) size() int {
 // ─── Prerequisites ────────────────────────────────────────────────────────────
 
 type prereqs struct {
-	ncID             string
-	vnID             string
-	subnetID         string
-	tplID            string
-	instanceTypeID   string
-	diskImageID      string
-	storageBackendID string
-	storageTierID    string
-	tenant           string
+	ncID           string
+	vnID           string
+	subnetID       string
+	tplID          string
+	instanceTypeID string
+	storageTierID  string
+	diskImageID    string
+	tenant         string
 }
 
-func existingNetworkClassID(err error) string {
-	const marker = "existing NetworkClass id '"
-	message := err.Error()
-	start := strings.Index(message, marker)
-	if start < 0 {
-		return ""
-	}
-	start += len(marker)
-	end := strings.IndexByte(message[start:], '\'')
-	if end < 0 {
-		return ""
-	}
-	return message[start : start+end]
-}
+// provision creates the infrastructure prerequisites needed before VMs can be
+// created. The payloads intentionally use the current OSAC API shape so the
+// simulator can run against a current checkout without an out-of-band event
+// generator or hand-written resource manifest.
+func provision(client *http.Client, base, token, tenant, fabricManager string) (*prereqs, error) {
+	runID := fmt.Sprintf("%x", time.Now().UnixNano())
+	resourceName := func(kind string) string { return "sim-" + kind + "-" + runID }
 
-// provision creates the one-time infrastructure prerequisites needed before
-// VMs can be created: network class, virtual network (patched to READY),
-// subnet, and compute instance template.
-func provision(client *http.Client, base, token, tenant string) (*prereqs, error) {
-	// 1. Network class (private API)
-	ncID, err := doRequest(client, "POST", base+"/api/private/v1/network_classes", token, ncPayload{
-		Metadata:      metadata{Name: "sim-nc", Tenant: tenant},
-		Title:         "Simulator",
-		Description:   "load test",
-		IsDefault:     true,
-		FabricManager: "test",
-	})
-	if err != nil {
-		ncID = existingNetworkClassID(err)
-		if ncID == "" {
-			return nil, fmt.Errorf("create network class: %w", err)
-		}
-		fmt.Printf("  network class:   %s (reused)\n", ncID)
-	} else {
-		fmt.Printf("  network class:   %s\n", ncID)
-	}
-
-	// 2. Virtual network (fulfillment API)
-	vnID, err := doRequest(client, "POST", base+"/api/fulfillment/v1/virtual_networks", token, vnPayload{
-		Metadata: metadata{Name: "sim-vnet", Tenant: tenant},
-		Spec:     vnSpec{IPv4CIDR: "10.99.0.0/16"},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create virtual network: %w", err)
-	}
-	fmt.Printf("  virtual network: %s\n", vnID)
-
-	// 3. PATCH VN to READY (private API)
-	if _, err := doRequest(client, "PATCH", base+"/api/private/v1/virtual_networks/"+vnID, token, vnPatchPayload{
-		ID: vnID,
-		Spec: vnPatchSpec{
-			IPv4CIDR:     "10.99.0.0/16",
-			Region:       "default",
-			NetworkClass: resourceRef{ID: ncID},
-		},
-		Status: vnPatchStatus{State: "VIRTUAL_NETWORK_STATE_READY"},
-	}); err != nil {
-		return nil, fmt.Errorf("patch virtual network to READY: %w", err)
-	}
-	fmt.Printf("  virtual network set to READY\n")
-
-	// 4. Subnet (private API, pre-set to READY)
-	subnetID, err := doRequest(client, "POST", base+"/api/private/v1/subnets", token, subnetPayload{
-		Metadata: metadata{Name: "sim-subnet", Tenant: tenant},
-		Spec: subnetSpec{
-			VirtualNetwork: resourceRef{ID: vnID},
-			IPv4CIDR:       "10.99.1.0/24",
-		},
-		Status: subnetStatus{State: "SUBNET_STATE_READY"},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create subnet: %w", err)
-	}
-	fmt.Printf("  subnet:          %s\n", subnetID)
-
-	// 5. Storage backend (private API, required by StorageTier)
+	// 1. Storage resources used by the ComputeInstance boot disk.
 	storageBackendID, err := doRequest(client, "POST", base+"/api/private/v1/storage_backends", token, storageBackendPayload{
-		Metadata: metadata{Name: "sim-storage-backend"},
+		Metadata: metadata{Name: resourceName("sb")},
 		Spec: storageBackendSpec{
 			Provider:    "test",
-			Description: "Load test storage backend",
-			Endpoint:    "http://storage.example",
-			Credentials: storageBackendCredentials{Username: "test", Password: "test"},
+			Description: "OSAC simulator storage backend",
+			Endpoint:    "https://test-backend.example.com",
+			Credentials: storageBackendCredentials{Username: "test-user", Password: "test-credential"},
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create storage backend: %w", err)
 	}
-	fmt.Printf("  storage backend: %s\n", storageBackendID)
+	fmt.Printf("  storage backend:  %s\n", storageBackendID)
 
-	// 6. Storage tier (private API, required by current ComputeInstance schema)
 	storageTierID, err := doRequest(client, "POST", base+"/api/private/v1/storage_tiers", token, storageTierPayload{
-		Metadata: metadata{Name: "sim-storage-tier"},
+		Metadata: metadata{Name: resourceName("tier")},
 		Spec: storageTierSpec{
-			Description:          "Load test block storage",
-			Protocol:             "STORAGE_PROTOCOL_BLOCK",
-			MaxReadBandwidthMbs:  100,
-			MaxWriteBandwidthMbs: 100,
-			Backends: []backendAssociation{{
-				BackendID:            storageBackendID,
-				MaxReadBandwidthMbs:  100,
-				MaxWriteBandwidthMbs: 100,
-			}},
+			Description: "OSAC simulator block storage",
+			Protocol:    "STORAGE_PROTOCOL_BLOCK",
+			Backends:    []backendAssociation{{BackendID: storageBackendID}},
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create storage tier: %w", err)
 	}
-	fmt.Printf("  storage tier:    %s\n", storageTierID)
+	fmt.Printf("  storage tier:     %s\n", storageTierID)
 
-	// 7. Instance type (private API, required by current ComputeInstance schema)
 	instanceTypeID, err := doRequest(client, "POST", base+"/api/private/v1/instance_types", token, instanceTypePayload{
-		Metadata: metadata{Name: "sim-instance-type"},
-		Spec: instanceTypeSpec{
-			Cores:       4,
-			MemoryGiB:   16,
-			Description: "Load test VM instance type",
-			State:       "INSTANCE_TYPE_STATE_ACTIVE",
-		},
+		Metadata: metadata{Name: resourceName("type")},
+		Spec:     instanceTypeSpec{VCPUs: 2, MemoryGiB: 4},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create instance type: %w", err)
 	}
-	fmt.Printf("  instance type:   %s\n", instanceTypeID)
+	fmt.Printf("  instance type:    %s\n", instanceTypeID)
 
-	// 8. Disk image (private API, required by current ComputeInstance schema)
 	diskImageID, err := doRequest(client, "POST", base+"/api/private/v1/disk_images", token, diskImagePayload{
-		Metadata: metadata{Name: "sim-disk-image"},
+		Metadata: metadata{Name: resourceName("image")},
 		Spec: diskImageSpec{
 			SourceType:    "SOURCE_TYPE_REGISTRY",
-			SourceRef:     "quay.io/fedora/fedora:latest",
+			SourceRef:     "quay.io/containerdisks/fedora:41",
 			GuestOSFamily: "GUEST_OS_FAMILY_LINUX",
-			Architecture:  []string{"ARCHITECTURE_ARM64"},
-			Lifecycle:     "DISK_IMAGE_LIFECYCLE_AVAILABLE",
+			Architecture:  []string{"ARCHITECTURE_AMD64"},
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create disk image: %w", err)
 	}
-	fmt.Printf("  disk image:      %s\n", diskImageID)
+	fmt.Printf("  disk image:       %s\n", diskImageID)
 
-	// 9. Compute instance template (private API)
+	// 2. Compute instance template.
 	tplID, err := doRequest(client, "POST", base+"/api/private/v1/compute_instance_templates", token, tplPayload{
-		Metadata:    metadata{Name: "sim-tpl", Tenant: tenant},
-		Title:       "Load Test VM",
-		Description: "load test",
+		Metadata:    metadata{Name: resourceName("tpl")},
+		Title:       "OSAC Simulator VM",
+		Description: "OSAC simulator compute instance template",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
 	}
-	fmt.Printf("  template:        %s\n", tplID)
+	fmt.Printf("  template:         %s\n", tplID)
+
+	// 3. Network class, virtual network, and subnet.
+	ncID, err := doRequest(client, "POST", base+"/api/private/v1/network_classes", token, ncPayload{
+		Metadata:      metadata{Name: resourceName("nc")},
+		Title:         "OSAC Simulator",
+		Description:   "OSAC simulator network class",
+		FabricManager: fabricManager,
+		IsDefault:     false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create network class: %w", err)
+	}
+	fmt.Printf("  network class:    %s\n", ncID)
+
+	const region = "default"
+	const vnetCIDR = "10.99.0.0/16"
+	vnID, err := doRequest(client, "POST", base+"/api/private/v1/virtual_networks", token, vnPayload{
+		Metadata: metadata{Name: resourceName("vnet"), Tenant: tenant},
+		Spec: vnSpec{
+			IPv4CIDR:     vnetCIDR,
+			Region:       region,
+			NetworkClass: networkClassRef{ID: ncID},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create virtual network: %w", err)
+	}
+	fmt.Printf("  virtual network:  %s\n", vnID)
+
+	if _, err := doRequest(client, "PATCH", base+"/api/private/v1/virtual_networks/"+vnID, token, vnPatchPayload{
+		ID: vnID,
+		Spec: vnPatchSpec{
+			IPv4CIDR:     vnetCIDR,
+			Region:       region,
+			NetworkClass: networkClassRef{ID: ncID},
+		},
+		Status: vnPatchStatus{State: "VIRTUAL_NETWORK_STATE_READY"},
+	}); err != nil {
+		return nil, fmt.Errorf("patch virtual network to READY: %w", err)
+	}
+	fmt.Printf("  virtual network:  READY\n")
+
+	subnetID, err := doRequest(client, "POST", base+"/api/private/v1/subnets", token, subnetPayload{
+		Metadata: metadata{Name: resourceName("subnet"), Tenant: tenant},
+		Spec: subnetSpec{
+			VirtualNetwork: networkClassRef{ID: vnID},
+			IPv4CIDR:       "10.99.1.0/24",
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create subnet: %w", err)
+	}
+	fmt.Printf("  subnet:            %s\n", subnetID)
+
+	if _, err := doRequest(client, "PATCH", base+"/api/private/v1/subnets/"+subnetID, token, subnetPatchPayload{
+		ID: subnetID,
+		Spec: subnetSpec{
+			VirtualNetwork: networkClassRef{ID: vnID},
+			IPv4CIDR:       "10.99.1.0/24",
+		},
+		Status: vnPatchStatus{State: "SUBNET_STATE_READY"},
+	}); err != nil {
+		return nil, fmt.Errorf("patch subnet to READY: %w", err)
+	}
+	fmt.Printf("  subnet:            READY\n")
 
 	return &prereqs{
-		ncID:             ncID,
-		vnID:             vnID,
-		subnetID:         subnetID,
-		tplID:            tplID,
-		instanceTypeID:   instanceTypeID,
-		diskImageID:      diskImageID,
-		storageBackendID: storageBackendID,
-		storageTierID:    storageTierID,
-		tenant:           tenant,
+		ncID:           ncID,
+		vnID:           vnID,
+		subnetID:       subnetID,
+		tplID:          tplID,
+		instanceTypeID: instanceTypeID,
+		storageTierID:  storageTierID,
+		diskImageID:    diskImageID,
+		tenant:         tenant,
 	}, nil
 }
 
@@ -444,16 +436,15 @@ func createVM(client *http.Client, base, token string, p *prereqs) (string, erro
 			Labels: map[string]string{"env": "loadtest"},
 		},
 		Spec: vmSpec{
-			Template: resourceRef{ID: p.tplID},
+			Template: templateRef{ID: p.tplID},
 			NetworkAttachments: []netAttachment{
-				{Subnet: resourceRef{ID: p.subnetID}},
+				{Subnet: networkClassRef{ID: p.subnetID}},
 			},
-			BootDisk:     bootDisk{SizeGiB: 100, StorageTier: resourceRef{ID: p.storageTierID}},
-			RunStrategy:  "Always",
-			InstanceType: resourceRef{ID: p.instanceTypeID},
-			DiskImage:    resourceRef{ID: p.diskImageID},
+			BootDisk:     bootDisk{SizeGiB: 20, StorageTier: storageTierRef{ID: p.storageTierID}},
+			RunStrategy:  "COMPUTE_INSTANCE_RUN_STRATEGY_ALWAYS",
+			InstanceType: instanceTypeRef{ID: p.instanceTypeID},
+			DiskImage:    diskImageRef{ID: p.diskImageID},
 		},
-		Status: vmStatus{State: "COMPUTE_INSTANCE_STATE_RUNNING"},
 	})
 }
 
@@ -467,7 +458,8 @@ func deleteVM(client *http.Client, base, token, id string) error {
 func main() {
 	target := flag.String("target", "http://localhost:8011", "OSAC REST URL")
 	tokenFlag := flag.String("token", os.Getenv("OSAC_TOKEN"), "bearer token (default: $OSAC_TOKEN)")
-	tenant := flag.String("tenant", "test", "OSAC tenant for created resources")
+	tenant := flag.String("tenant", "test", "OSAC tenant for tenant-scoped resources")
+	fabricManager := flag.String("fabric-manager", "test", "OSAC network class fabric manager")
 	rate := flag.Float64("rate", 1.0, "target VM lifecycle operations/sec (creates + deletes each count as 1)")
 	workers := flag.Int("workers", 4, "concurrent goroutines")
 	vmCount := flag.Int("vm-count", 10, "target live VM pool size to maintain")
@@ -496,7 +488,7 @@ func main() {
 
 	// ── Provision prerequisites ───────────────────────────────────────────────
 	fmt.Println("Provisioning prerequisites...")
-	p, err := provision(client, *target, token, *tenant)
+	p, err := provision(client, *target, token, *tenant, *fabricManager)
 	if err != nil {
 		log.Fatalf("provision failed: %v", err)
 	}
