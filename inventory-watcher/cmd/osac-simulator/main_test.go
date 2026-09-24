@@ -24,6 +24,46 @@ func TestDoRequestReadsWrappedObjectID(t *testing.T) {
 	}
 }
 
+func TestCreateInstanceTypeFallsBackForLegacyCRC(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body map[string]map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if requests == 1 {
+			if _, ok := body["spec"]["vcpus"]; !ok {
+				t.Fatalf("first request did not use current vcpus field: %v", body)
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"proto: unknown field \"vcpus\""}`))
+			return
+		}
+
+		if _, ok := body["spec"]["cores"]; !ok {
+			t.Fatalf("fallback request did not use legacy cores field: %v", body)
+		}
+		if _, ok := body["spec"]["vcpus"]; ok {
+			t.Fatalf("fallback request still contains vcpus field: %v", body)
+		}
+		_, _ = w.Write([]byte(`{"id":"legacy-instance-type"}`))
+	}))
+	defer server.Close()
+
+	id, err := createInstanceType(server.Client(), server.URL, "token", "sim-type")
+	if err != nil {
+		t.Fatalf("create instance type failed: %v", err)
+	}
+	if id != "legacy-instance-type" {
+		t.Fatalf("got id %q, want legacy-instance-type", id)
+	}
+	if requests != 2 {
+		t.Fatalf("got %d requests, want current request plus one fallback", requests)
+	}
+}
+
 func TestNetworkClassPayloadUsesCurrentSchema(t *testing.T) {
 	payload, err := json.Marshal(ncPayload{
 		Metadata:      metadata{Name: "sim-nc"},

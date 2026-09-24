@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -124,6 +125,21 @@ type instanceTypeSpec struct {
 type instanceTypePayload struct {
 	Metadata metadata         `json:"metadata"`
 	Spec     instanceTypeSpec `json:"spec"`
+}
+
+// legacyInstanceTypePayload supports the schema used by the older OSAC image
+// commonly deployed in local CRC. Current OSAC uses vcpus; the older image
+// uses cores for the same resource.
+type legacyInstanceTypeSpec struct {
+	Cores       int    `json:"cores"`
+	MemoryGiB   int    `json:"memory_gib"`
+	Description string `json:"description"`
+	State       string `json:"state"`
+}
+
+type legacyInstanceTypePayload struct {
+	Metadata metadata               `json:"metadata"`
+	Spec     legacyInstanceTypeSpec `json:"spec"`
 }
 
 type diskImageSpec struct {
@@ -278,6 +294,45 @@ type prereqs struct {
 	tenant         string
 }
 
+func existingNetworkClassID(err error) string {
+	const marker = "existing NetworkClass id '"
+	message := err.Error()
+	start := strings.Index(message, marker)
+	if start < 0 {
+		return ""
+	}
+	start += len(marker)
+	end := strings.IndexByte(message[start:], '\'')
+	if end < 0 {
+		return ""
+	}
+	return message[start : start+end]
+}
+
+func createInstanceType(client *http.Client, base, token, name string) (string, error) {
+	id, err := doRequest(client, "POST", base+"/api/private/v1/instance_types", token, instanceTypePayload{
+		Metadata: metadata{Name: name},
+		Spec:     instanceTypeSpec{VCPUs: 2, MemoryGiB: 4},
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") || !strings.Contains(err.Error(), "vcpus") {
+		return id, err
+	}
+
+	legacyID, legacyErr := doRequest(client, "POST", base+"/api/private/v1/instance_types", token, legacyInstanceTypePayload{
+		Metadata: metadata{Name: name},
+		Spec: legacyInstanceTypeSpec{
+			Cores:       2,
+			MemoryGiB:   4,
+			Description: "OSAC simulator instance type",
+			State:       "INSTANCE_TYPE_STATE_ACTIVE",
+		},
+	})
+	if legacyErr != nil {
+		return "", fmt.Errorf("current vcpus schema rejected; legacy cores schema also failed: %w", legacyErr)
+	}
+	return legacyID, nil
+}
+
 // provision creates the infrastructure prerequisites needed before VMs can be
 // created. The payloads intentionally use the current OSAC API shape so the
 // simulator can run against a current checkout without an out-of-band event
@@ -314,10 +369,7 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 	}
 	fmt.Printf("  storage tier:     %s\n", storageTierID)
 
-	instanceTypeID, err := doRequest(client, "POST", base+"/api/private/v1/instance_types", token, instanceTypePayload{
-		Metadata: metadata{Name: resourceName("type")},
-		Spec:     instanceTypeSpec{VCPUs: 2, MemoryGiB: 4},
-	})
+	instanceTypeID, err := createInstanceType(client, base, token, resourceName("type"))
 	if err != nil {
 		return nil, fmt.Errorf("create instance type: %w", err)
 	}
@@ -357,9 +409,14 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 		IsDefault:     false,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create network class: %w", err)
+		ncID = existingNetworkClassID(err)
+		if ncID == "" {
+			return nil, fmt.Errorf("create network class: %w", err)
+		}
+		fmt.Printf("  network class:    %s (reused)\n", ncID)
+	} else {
+		fmt.Printf("  network class:    %s\n", ncID)
 	}
-	fmt.Printf("  network class:    %s\n", ncID)
 
 	const region = "default"
 	const vnetCIDR = "10.99.0.0/16"
