@@ -67,7 +67,7 @@ func TestCreateInstanceTypeFallsBackForLegacyCRC(t *testing.T) {
 func TestNetworkClassPayloadUsesCurrentSchema(t *testing.T) {
 	payload, err := json.Marshal(ncPayload{
 		Metadata:      metadata{Name: "sim-nc"},
-		Title:         "OSAC Simulator",
+		Title:         "OSAC Request Generator",
 		Description:   "test",
 		FabricManager: "test",
 	})

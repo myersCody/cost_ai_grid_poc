@@ -22,7 +22,7 @@ spec:
           image: quay.io/martin_povolny/cost-event-consumer:latest
           imagePullPolicy: Always
           command:
-            - osac-simulator
+            - osac-request-generator
             - -target
             - http://osac-rest.osac.svc:8000
             - -rate

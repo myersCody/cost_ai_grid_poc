@@ -6,14 +6,14 @@ RUN GOTOOLCHAIN=auto go mod download
 COPY . .
 RUN GOTOOLCHAIN=auto go build -o cost-event-consumer ./cmd/consumer/
 RUN CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o maas-simulator ./cmd/maas-simulator/
-RUN CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o osac-simulator ./cmd/osac-simulator/
+RUN CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o osac-request-generator ./cmd/osac-request-generator/
 RUN CGO_ENABLED=0 GOTOOLCHAIN=auto go build -o event-replayer ./cmd/event-replayer/
 
 # Runtime stage
 FROM registry.access.redhat.com/ubi10-minimal:latest
 COPY --from=builder /build/cost-event-consumer /usr/local/bin/
 COPY --from=builder /build/maas-simulator /usr/local/bin/
-COPY --from=builder /build/osac-simulator /usr/local/bin/
+COPY --from=builder /build/osac-request-generator /usr/local/bin/
 COPY --from=builder /build/event-replayer /usr/local/bin/
 USER 1001
 EXPOSE 8020 9000

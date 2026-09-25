@@ -323,7 +323,7 @@ func createInstanceType(client *http.Client, base, token, name string) (string, 
 		Spec: legacyInstanceTypeSpec{
 			Cores:       2,
 			MemoryGiB:   4,
-			Description: "OSAC simulator instance type",
+			Description: "OSAC request-generator instance type",
 			State:       "INSTANCE_TYPE_STATE_ACTIVE",
 		},
 	})
@@ -335,7 +335,7 @@ func createInstanceType(client *http.Client, base, token, name string) (string, 
 
 // provision creates the infrastructure prerequisites needed before VMs can be
 // created. The payloads intentionally use the current OSAC API shape so the
-// simulator can run against a current checkout without an out-of-band event
+// request generator can run against a current checkout without an out-of-band event
 // generator or hand-written resource manifest.
 func provision(client *http.Client, base, token, tenant, fabricManager string) (*prereqs, error) {
 	runID := fmt.Sprintf("%x", time.Now().UnixNano())
@@ -346,7 +346,7 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 		Metadata: metadata{Name: resourceName("sb")},
 		Spec: storageBackendSpec{
 			Provider:    "test",
-			Description: "OSAC simulator storage backend",
+			Description: "OSAC request-generator storage backend",
 			Endpoint:    "https://test-backend.example.com",
 			Credentials: storageBackendCredentials{Username: "test-user", Password: "test-credential"},
 		},
@@ -359,7 +359,7 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 	storageTierID, err := doRequest(client, "POST", base+"/api/private/v1/storage_tiers", token, storageTierPayload{
 		Metadata: metadata{Name: resourceName("tier")},
 		Spec: storageTierSpec{
-			Description: "OSAC simulator block storage",
+			Description: "OSAC request-generator block storage",
 			Protocol:    "STORAGE_PROTOCOL_BLOCK",
 			Backends:    []backendAssociation{{BackendID: storageBackendID}},
 		},
@@ -392,8 +392,8 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 	// 2. Compute instance template.
 	tplID, err := doRequest(client, "POST", base+"/api/private/v1/compute_instance_templates", token, tplPayload{
 		Metadata:    metadata{Name: resourceName("tpl")},
-		Title:       "OSAC Simulator VM",
-		Description: "OSAC simulator compute instance template",
+		Title:       "OSAC Request Generator VM",
+		Description: "OSAC request-generator compute instance template",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create template: %w", err)
@@ -403,8 +403,8 @@ func provision(client *http.Client, base, token, tenant, fabricManager string) (
 	// 3. Network class, virtual network, and subnet.
 	ncID, err := doRequest(client, "POST", base+"/api/private/v1/network_classes", token, ncPayload{
 		Metadata:      metadata{Name: resourceName("nc")},
-		Title:         "OSAC Simulator",
-		Description:   "OSAC simulator network class",
+		Title:         "OSAC Request Generator",
+		Description:   "OSAC request-generator network class",
 		FabricManager: fabricManager,
 		IsDefault:     false,
 	})
@@ -528,7 +528,7 @@ func main() {
 		log.Fatal("OSAC token required: pass -token flag or set OSAC_TOKEN env var")
 	}
 
-	fmt.Println("OSAC Simulator")
+	fmt.Println("OSAC Request Generator")
 	fmt.Printf("  target:   %s\n", *target)
 	fmt.Printf("  tenant:   %s\n", *tenant)
 	fmt.Printf("  rate:     %.1f ops/s\n", *rate)

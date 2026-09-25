@@ -1,5 +1,9 @@
 # Load Test Procedure — Cost Event Consumer
 
+The `osac-request-generator` sends resource requests to an OSAC API and then
+exercises the resulting event path. It is a request generator, not an OSAC
+emulator.
+
 How to run a reproducible performance experiment on CRC or any k8s cluster.
 
 ## Prerequisites
@@ -140,7 +144,7 @@ kubectl delete crd clusters.postgresql.cnpg.io poolers.postgresql.cnpg.io \
 
 ## Key findings from July 2026 experiment
 
-**Setup:** 1 MaaS generator pod (50 events/s) + 1 OSAC simulator (10 VMs)
+**Setup:** 1 MaaS generator pod (50 events/s) + 1 OSAC request-generator pod (10 VMs)
 
 **Bottleneck found:** Rating sweep was capped at 25 entries/s (500 batch / 20s tick).
 Built a 264k-entry backlog (45-minute lag) within minutes. Fixed by loop-until-empty.
